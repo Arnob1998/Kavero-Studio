@@ -17,3 +17,8 @@ yarn-debug.log*
 .env.*
 !.env.example
 !.env.docker.local.example
+
+AGENTS.md
+IMPLEMENTATION.md
+Roadmap.md
+docs
