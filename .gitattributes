@@ -1,0 +1,2 @@
+*.sh text eol=lf
+docker/supabase/init/*.sh text eol=lf

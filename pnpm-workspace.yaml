@@ -1,0 +1,11 @@
+packages:
+  - "."
+
+overrides:
+  postcss: 8.5.10
+
+allowBuilds:
+  canvas: true
+  esbuild: true
+  protobufjs: true
+  sharp: true

@@ -1,0 +1,274 @@
+import path from "node:path";
+import {
+  getEnabledAuthModes,
+  getEnabledStorageChoices,
+  getSetupProfile,
+  getSetupStorageChoice,
+  setupProfiles,
+} from "./config.mjs";
+import { createDockerSecrets } from "./jwt.mjs";
+import { writeEnvFileSafely } from "./env-file.mjs";
+import { runLocalDockerStack } from "./run.mjs";
+
+export function buildSetupValues({
+  profileId,
+  authMode,
+  storageChoiceId,
+  inputs = {},
+  dockerSecrets,
+}) {
+  const profile = getSetupProfile(profileId);
+  if (!profile) throw new Error(`Unknown setup profile: ${profileId}`);
+
+  const storageChoice = getSetupStorageChoice(storageChoiceId);
+  if (!storageChoice || !storageChoice.enabled || !storageChoice.profileIds.includes(profileId)) {
+    throw new Error(`Storage choice is not enabled for ${profileId}: ${storageChoiceId}`);
+  }
+
+  if (profileId === "local-docker") {
+    if (authMode !== "password") {
+      throw new Error("Local Docker setup supports password auth only.");
+    }
+
+    const secrets = dockerSecrets ?? createDockerSecrets();
+    return {
+      KAVERO_APP_PORT: inputs.KAVERO_APP_PORT ?? "3000",
+      SUPABASE_KONG_PORT: inputs.SUPABASE_KONG_PORT ?? "54321",
+      POSTGRES_DB: "postgres",
+      POSTGRES_USER: "postgres",
+      ...secrets,
+      NEXT_PUBLIC_SUPABASE_URL: `http://127.0.0.1:${inputs.SUPABASE_KONG_PORT ?? "54321"}`,
+      SUPABASE_INTERNAL_URL: "http://supabase-kong:8000",
+      NEXT_PUBLIC_SITE_URL: `http://127.0.0.1:${inputs.KAVERO_APP_PORT ?? "3000"}`,
+      KAVERO_API_ORIGIN: `http://127.0.0.1:${inputs.KAVERO_APP_PORT ?? "3000"}`,
+      KAVERO_DEPLOYMENT_PROFILE: "local-first",
+      KAVERO_AUTH_MODE: authMode,
+      KAVERO_STORAGE_PROVIDER: "kavero-managed",
+      KAVERO_MANAGED_STORAGE_BACKEND: "local-filesystem",
+      KAVERO_LOCAL_STORAGE_ROOT: "/data/kavero-storage",
+    };
+  }
+
+  return {
+    NEXT_PUBLIC_SUPABASE_URL: inputs.NEXT_PUBLIC_SUPABASE_URL ?? "",
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: inputs.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
+    SUPABASE_SERVICE_ROLE_KEY: inputs.SUPABASE_SERVICE_ROLE_KEY ?? "",
+    NEXT_PUBLIC_SITE_URL: inputs.NEXT_PUBLIC_SITE_URL ?? "http://127.0.0.1:3000",
+    KAVERO_API_ORIGIN: inputs.KAVERO_API_ORIGIN ?? inputs.NEXT_PUBLIC_SITE_URL ?? "http://127.0.0.1:3000",
+    KAVERO_DEPLOYMENT_PROFILE: "cloud",
+    KAVERO_AUTH_MODE: authMode,
+    ...storageChoice.env,
+    ...(storageChoiceId === "kavero-managed-local-filesystem"
+      ? { KAVERO_LOCAL_STORAGE_ROOT: inputs.KAVERO_LOCAL_STORAGE_ROOT ?? "" }
+      : {}),
+    GOOGLE_DRIVE_CLIENT_ID: inputs.GOOGLE_DRIVE_CLIENT_ID ?? "",
+    GOOGLE_DRIVE_CLIENT_SECRET: inputs.GOOGLE_DRIVE_CLIENT_SECRET ?? "",
+  };
+}
+
+function assertNotCanceled(value, prompts) {
+  if (prompts.isCancel(value)) {
+    prompts.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+  return value;
+}
+
+export async function runSetupWizard({
+  prompts,
+  cwd = process.cwd(),
+  now = new Date(),
+  runLocalDocker = runLocalDockerStack,
+}) {
+  prompts.intro("Kavero setup");
+
+  const profileId = assertNotCanceled(
+    await prompts.select({
+      message: "Choose where Kavero runs",
+      options: setupProfiles.map((profile) => ({
+        value: profile.id,
+        label: profile.label,
+        hint: profile.hint,
+      })),
+    }),
+    prompts,
+  );
+
+  const profile = getSetupProfile(profileId);
+  const authMode =
+    profileId === "local-docker"
+      ? "password"
+      : assertNotCanceled(
+          await prompts.select({
+            message: "Choose sign-in",
+            initialValue: profile.defaultAuthMode,
+            options: getEnabledAuthModes(profileId).map((mode) => ({
+              value: mode.id,
+              label: mode.label,
+              hint: mode.hint,
+            })),
+          }),
+          prompts,
+        );
+
+  if (profileId === "local-docker") {
+    prompts.note("Local Docker uses email/password sign-in for now.", "Sign-in");
+  }
+
+  const storageChoices = getEnabledStorageChoices(profileId);
+  const storageChoiceId = assertNotCanceled(
+    await prompts.select({
+      message: "Choose storage",
+      initialValue: profile.defaultStorageChoice,
+      options: storageChoices.map((choice) => ({
+        value: choice.id,
+        label: choice.label,
+        hint: choice.hint,
+      })),
+    }),
+    prompts,
+  );
+
+  const inputs = {};
+  if (profileId === "local-docker") {
+    inputs.KAVERO_APP_PORT = assertNotCanceled(
+      await prompts.text({
+        message: "App port",
+        initialValue: "3000",
+        placeholder: "3000",
+      }),
+      prompts,
+    );
+    inputs.SUPABASE_KONG_PORT = assertNotCanceled(
+      await prompts.text({
+        message: "Supabase port",
+        initialValue: "54321",
+        placeholder: "54321",
+      }),
+      prompts,
+    );
+  } else {
+    inputs.NEXT_PUBLIC_SUPABASE_URL = assertNotCanceled(
+      await prompts.text({ message: "Supabase public URL", placeholder: "https://project.supabase.co" }),
+      prompts,
+    );
+    inputs.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = assertNotCanceled(
+      await prompts.password({ message: "Supabase publishable key" }),
+      prompts,
+    );
+    inputs.SUPABASE_SERVICE_ROLE_KEY = assertNotCanceled(
+      await prompts.password({ message: "Supabase service-role key" }),
+      prompts,
+    );
+    inputs.NEXT_PUBLIC_SITE_URL = assertNotCanceled(
+      await prompts.text({
+        message: "Kavero site URL",
+        initialValue: "http://127.0.0.1:3000",
+        placeholder: "https://app.example.com",
+      }),
+      prompts,
+    );
+
+    if (authMode === "google" || authMode === "google-password" || storageChoiceId === "google-drive") {
+      inputs.GOOGLE_DRIVE_CLIENT_ID = assertNotCanceled(
+        await prompts.text({
+          message: "Google Drive client ID",
+          placeholder: "Optional for now",
+          defaultValue: "",
+        }),
+        prompts,
+      );
+      inputs.GOOGLE_DRIVE_CLIENT_SECRET = assertNotCanceled(
+        await prompts.password({
+          message: "Google Drive client secret",
+          placeholder: "Optional for now",
+        }),
+        prompts,
+      );
+    }
+
+    if (storageChoiceId === "kavero-managed-local-filesystem") {
+      inputs.KAVERO_LOCAL_STORAGE_ROOT = assertNotCanceled(
+        await prompts.text({
+          message: "Local storage root",
+          placeholder: process.platform === "win32" ? "C:\\kavero-storage" : "/var/lib/kavero/storage",
+        }),
+        prompts,
+      );
+    }
+  }
+
+  const overwriteNonSensitive = assertNotCanceled(
+    await prompts.confirm({
+      message: "Update existing non-secret values if they differ?",
+      initialValue: false,
+    }),
+    prompts,
+  );
+
+  const values = buildSetupValues({
+    profileId,
+    authMode,
+    storageChoiceId,
+    inputs,
+  });
+
+  const envPath = path.join(cwd, profile.envFile);
+  const spinner = prompts.spinner();
+  spinner.start("Save local secrets");
+
+  const result = await writeEnvFileSafely({
+    filePath: envPath,
+    values,
+    overwriteNonSensitive,
+    now,
+    confirmOverwrite: async (key) => {
+      spinner.stop("Existing secret found.");
+      const confirmed = assertNotCanceled(
+        await prompts.confirm({
+          message: `Overwrite existing ${key}?`,
+          initialValue: false,
+        }),
+        prompts,
+      );
+      spinner.start("Save local secrets");
+      return confirmed;
+    },
+  });
+
+  spinner.stop(result.wrote ? `Wrote ${profile.envFile}` : `${profile.envFile} already up to date`);
+
+  if (profileId === "local-docker") {
+    prompts.note(
+      [
+        "pnpm setup:run",
+        "",
+        "Manual Docker command:",
+        "docker compose --env-file .env.docker.local up --build",
+      ].join("\n"),
+      "Run Docker",
+    );
+
+    const runNow = assertNotCanceled(
+      await prompts.confirm({
+        message: "Run Kavero now?",
+        initialValue: false,
+      }),
+      prompts,
+    );
+
+    if (runNow) {
+      prompts.outro(`Starting Kavero. Open http://127.0.0.1:${inputs.KAVERO_APP_PORT} when it is ready.`);
+      const runResult = runLocalDocker({ cwd });
+      if (runResult.status !== 0) {
+        process.exitCode = runResult.status ?? 1;
+      }
+      return result;
+    }
+  } else {
+    prompts.note("Run pnpm setup:doctor, then pnpm build.", "Next");
+  }
+
+  prompts.outro("Kavero setup complete.");
+  return result;
+}
