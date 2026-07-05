@@ -3,6 +3,8 @@ import {
   getEnabledAuthModes,
   getEnabledStorageChoices,
   getSetupProfile,
+  requiredEnvKeysForProfile,
+  sensitiveEnvKeys,
   setupStorageChoices,
 } from "./config.mjs";
 
@@ -36,5 +38,24 @@ describe("setup config", () => {
     expect(getEnabledStorageChoices("local-docker").map((choice) => choice.id)).toEqual([
       "kavero-managed-local-filesystem",
     ]);
+  });
+
+  it("treats gateway secrets and upstream provider keys as sensitive", () => {
+    expect(sensitiveEnvKeys.has("KAVERO_LITELLM_API_KEY")).toBe(true);
+    expect(sensitiveEnvKeys.has("LITELLM_MASTER_KEY")).toBe(true);
+    expect(sensitiveEnvKeys.has("OPENAI_API_KEY")).toBe(true);
+    expect(sensitiveEnvKeys.has("GEMINI_API_KEY")).toBe(true);
+    expect(sensitiveEnvKeys.has("GROQ_API_KEY")).toBe(true);
+  });
+
+  it("requires the local Docker LiteLLM gateway shape", () => {
+    expect(requiredEnvKeysForProfile("local-docker")).toEqual(
+      expect.arrayContaining([
+        "KAVERO_MODEL_GATEWAY",
+        "KAVERO_LITELLM_BASE_URL",
+        "KAVERO_LITELLM_API_KEY",
+        "LITELLM_MASTER_KEY",
+      ]),
+    );
   });
 });

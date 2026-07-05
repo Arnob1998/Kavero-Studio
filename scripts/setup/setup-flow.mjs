@@ -10,6 +10,18 @@ import { createDockerSecrets } from "./jwt.mjs";
 import { writeEnvFileSafely } from "./env-file.mjs";
 import { runLocalDockerStack } from "./run.mjs";
 
+const localLiteLlmBaseUrl = "http://litellm:4000";
+const localOllamaBaseUrl = "http://host.docker.internal:11434";
+
+function gatewayProviderEnv(inputs = {}, { defaultOllamaBaseUrl = "" } = {}) {
+  return {
+    OPENAI_API_KEY: inputs.OPENAI_API_KEY ?? "",
+    GEMINI_API_KEY: inputs.GEMINI_API_KEY ?? "",
+    GROQ_API_KEY: inputs.GROQ_API_KEY ?? "",
+    OLLAMA_BASE_URL: inputs.OLLAMA_BASE_URL ?? defaultOllamaBaseUrl,
+  };
+}
+
 export function buildSetupValues({
   profileId,
   authMode,
@@ -46,6 +58,11 @@ export function buildSetupValues({
       KAVERO_STORAGE_PROVIDER: "kavero-managed",
       KAVERO_MANAGED_STORAGE_BACKEND: "local-filesystem",
       KAVERO_LOCAL_STORAGE_ROOT: "/data/kavero-storage",
+      KAVERO_MODEL_GATEWAY: "litellm",
+      KAVERO_LITELLM_BASE_URL: localLiteLlmBaseUrl,
+      KAVERO_LITELLM_API_KEY: secrets.KAVERO_LITELLM_API_KEY,
+      LITELLM_MASTER_KEY: secrets.LITELLM_MASTER_KEY,
+      ...gatewayProviderEnv(inputs, { defaultOllamaBaseUrl: localOllamaBaseUrl }),
     };
   }
 
@@ -61,6 +78,11 @@ export function buildSetupValues({
     ...(storageChoiceId === "kavero-managed-local-filesystem"
       ? { KAVERO_LOCAL_STORAGE_ROOT: inputs.KAVERO_LOCAL_STORAGE_ROOT ?? "" }
       : {}),
+    KAVERO_MODEL_GATEWAY: inputs.KAVERO_MODEL_GATEWAY ?? "",
+    KAVERO_LITELLM_BASE_URL: inputs.KAVERO_LITELLM_BASE_URL ?? "",
+    KAVERO_LITELLM_API_KEY: inputs.KAVERO_LITELLM_API_KEY ?? "",
+    LITELLM_MASTER_KEY: inputs.LITELLM_MASTER_KEY ?? "",
+    ...gatewayProviderEnv(inputs),
     GOOGLE_DRIVE_CLIENT_ID: inputs.GOOGLE_DRIVE_CLIENT_ID ?? "",
     GOOGLE_DRIVE_CLIENT_SECRET: inputs.GOOGLE_DRIVE_CLIENT_SECRET ?? "",
   };
@@ -147,6 +169,30 @@ export async function runSetupWizard({
       }),
       prompts,
     );
+    prompts.note(
+      "These server envs configure the bundled model gateway. The in-app API key screen remains unchanged.",
+      "Model gateway",
+    );
+    inputs.GEMINI_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Gemini API key for the gateway", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.OPENAI_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "OpenAI API key for the gateway", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.GROQ_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Groq API key for the gateway", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.OLLAMA_BASE_URL = assertNotCanceled(
+      await prompts.text({
+        message: "Ollama base URL for the gateway",
+        initialValue: localOllamaBaseUrl,
+        placeholder: localOllamaBaseUrl,
+      }),
+      prompts,
+    );
   } else {
     inputs.NEXT_PUBLIC_SUPABASE_URL = assertNotCanceled(
       await prompts.text({ message: "Supabase public URL", placeholder: "https://project.supabase.co" }),
@@ -192,6 +238,49 @@ export async function runSetupWizard({
         await prompts.text({
           message: "Local storage root",
           placeholder: process.platform === "win32" ? "C:\\kavero-storage" : "/var/lib/kavero/storage",
+        }),
+        prompts,
+      );
+    }
+
+    const configureLiteLlm = assertNotCanceled(
+      await prompts.confirm({
+        message: "Configure a server-side LiteLLM gateway?",
+        initialValue: false,
+      }),
+      prompts,
+    );
+
+    if (configureLiteLlm) {
+      inputs.KAVERO_MODEL_GATEWAY = "litellm";
+      inputs.KAVERO_LITELLM_BASE_URL = assertNotCanceled(
+        await prompts.text({
+          message: "LiteLLM base URL",
+          placeholder: "https://litellm.example.com",
+        }),
+        prompts,
+      );
+      inputs.KAVERO_LITELLM_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "Kavero-to-LiteLLM API key" }),
+        prompts,
+      );
+      inputs.GEMINI_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "Gemini API key for this server", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.OPENAI_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "OpenAI API key for this server", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.GROQ_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "Groq API key for this server", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.OLLAMA_BASE_URL = assertNotCanceled(
+        await prompts.text({
+          message: "Ollama base URL for this server",
+          placeholder: "http://127.0.0.1:11434",
+          defaultValue: "",
         }),
         prompts,
       );

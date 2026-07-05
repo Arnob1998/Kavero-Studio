@@ -77,6 +77,10 @@ import {
   readFileAsDataUrl,
 } from "../utils/client-helpers";
 import { ensureGenerateStorageReady } from "../utils/generate-storage-policy";
+import {
+  shouldBlockImageGenerationForMissingGeminiKey,
+  shouldOpenPromptRefinerGeminiKeyGate,
+} from "../utils/prompt-refiner-policy";
 
 // TEMP: Hide the prompt chatbox/hover only on the generation workspace. Set this to false to restore it there.
 const hidePromptComposerDuringGeneration = true;
@@ -987,7 +991,7 @@ export function GeneratePage() {
   }
 
   async function requireGeminiKey(status = workspaceStatus) {
-    if (status?.hasGeminiKey) return true;
+    if (!shouldBlockImageGenerationForMissingGeminiKey(status)) return true;
 
     await openGateDialog({
       title: "Connect image model",
@@ -1458,7 +1462,7 @@ export function GeneratePage() {
         throw new Error("Sign in to refine prompts.");
       }
 
-      if (response.status === 403) {
+      if (shouldOpenPromptRefinerGeminiKeyGate(response.status, payload.error)) {
         await requireGeminiKey();
         throw new Error("Add your Gemini API key before refining prompts.");
       }

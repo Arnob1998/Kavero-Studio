@@ -35,6 +35,17 @@ describe("env file helpers", () => {
     expect(accepted.content).toBe("SUPABASE_SERVICE_ROLE_KEY=new\n");
   });
 
+  it("protects existing LiteLLM and provider secrets", async () => {
+    const result = await buildUpdatedEnvEntries({
+      existingContent: "KAVERO_LITELLM_API_KEY=sk-old\nOPENAI_API_KEY=old\n",
+      values: { KAVERO_LITELLM_API_KEY: "sk-new", OPENAI_API_KEY: "new" },
+      confirmOverwrite: async () => false,
+    });
+
+    expect(result.content).toBe("KAVERO_LITELLM_API_KEY=sk-old\nOPENAI_API_KEY=old\n");
+    expect(result.preserved).toEqual(["KAVERO_LITELLM_API_KEY", "OPENAI_API_KEY"]);
+  });
+
   it("updates placeholder values without confirmation", async () => {
     const result = await buildUpdatedEnvEntries({
       existingContent: "SUPABASE_SERVICE_ROLE_KEY=replace-with-local-service-role-key\n",
