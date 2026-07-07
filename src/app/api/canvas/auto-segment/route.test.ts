@@ -1,5 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredObjectRef } from "@/modules/storage/storage-provider";
+import {
+  DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
+  DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+} from "@/modules/model-providers";
 
 const mocks = vi.hoisted(() => ({
   getCanvasUser: vi.fn(),
@@ -46,13 +50,19 @@ vi.mock("@google/genai", () => ({
 
 import { POST } from "./route";
 
-function adminForAsset(asset: Record<string, unknown> | null) {
+function adminForAsset(asset: Record<string, unknown> | null, preferences: unknown = {}) {
   const select = vi.fn().mockReturnThis();
   const eq = vi.fn().mockReturnThis();
   const maybeSingle = vi.fn(async () => ({ data: asset, error: null }));
 
   return {
-    from: vi.fn(() => ({ select, eq, maybeSingle })),
+    from: vi.fn((table: string) => ({
+      select,
+      eq,
+      maybeSingle: table === "user_metadata"
+        ? vi.fn(async () => ({ data: { preferences }, error: null }))
+        : maybeSingle,
+    })),
     __mocks: { select, eq, maybeSingle },
   };
 }
@@ -95,8 +105,12 @@ function request(body: Record<string, unknown>) {
 }
 
 describe("canvas auto segment API", () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
     mocks.requireCanvasAccess.mockResolvedValue({ response: null });
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
@@ -117,6 +131,7 @@ describe("canvas auto segment API", () => {
       response: null,
     });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("source", { headers: { "Content-Type": "image/png" } })));
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.generateContent
       .mockResolvedValueOnce({
         text: JSON.stringify({
@@ -141,6 +156,12 @@ describe("canvas auto segment API", () => {
       .mockResolvedValueOnce({
         candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: "AAAA" } }] } }],
       });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    consoleErrorSpy.mockRestore();
   });
 
   it("rejects unauthenticated users", async () => {
@@ -209,6 +230,119 @@ describe("canvas auto segment API", () => {
     });
   });
 
+  it("uses the selected chat alias for gateway planning and image alias for isolation", async () => {
+    configureGateway();
+    const admin = adminForAsset(
+      asset({ storage_ref: googleDriveRef() }),
+      {
+        modelProviders: {
+          chatOrchestrationModelAlias: "kavero-chat-openai-example",
+          imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+        },
+      },
+    );
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("MASK"));
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const body = await response.json();
+    const planningBody = JSON.parse(String(vi.mocked(fetch).mock.calls[1]![1]!.body));
+    const isolationBody = JSON.parse(String(vi.mocked(fetch).mock.calls[2]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(planningBody).toMatchObject({
+      model: "kavero-chat-openai-example",
+      response_format: { type: "json_object" },
+    });
+    expect(JSON.stringify(planningBody.messages)).toContain("data:image/png;base64");
+    expect(isolationBody).toMatchObject({
+      model: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      modalities: ["image", "text"],
+    });
+    expect(JSON.stringify(isolationBody.messages)).toContain("auto-segment-isolation");
+    expect(JSON.stringify(isolationBody.messages)).toContain("White target mask on black background only.");
+    expect(JSON.stringify(isolationBody.messages)).toContain("data:image/png;base64");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(body.categories[0].segments[0]).toMatchObject({
+      status: "ready",
+      image: { dataUrl: "data:image/png;base64,MASK" },
+    });
+  });
+
+  it("falls back to the default chat alias when gateway planning stores a wrong-slot alias", async () => {
+    configureGateway();
+    const admin = adminForAsset(
+      asset({ storage_ref: googleDriveRef() }),
+      {
+        modelProviders: { chatOrchestrationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS },
+      },
+    );
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("MASK"));
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[1]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outboundBody.model).toBe(DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS);
+  });
+
+  it.each([
+    ["missing", {}],
+    ["unknown", { modelProviders: { imageGenerationModelAlias: "unknown-image-alias" } }],
+    ["wrong-slot", { modelProviders: { imageGenerationModelAlias: DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS } }],
+  ])("falls back to the default image alias when the stored image preference is %s", async (_label, preferences) => {
+    configureGateway();
+    const admin = adminForAsset(asset({ storage_ref: googleDriveRef() }), preferences);
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("MASK"));
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const isolationBody = JSON.parse(String(vi.mocked(fetch).mock.calls[2]![1]!.body));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(isolationBody.model).toBe(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
+    expect(body.categories[0].segments[0]).toMatchObject({
+      status: "ready",
+      image: { dataUrl: "data:image/png;base64,MASK" },
+    });
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe gateway configuration error without model fallback", async () => {
+    vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+    vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      error: "Auto Segment model gateway is not configured correctly.",
+      details: { code: "model-gateway-configuration" },
+    });
+    expect(JSON.stringify(body)).not.toContain("KAVERO_LITELLM");
+    expect(JSON.stringify(body)).not.toContain("sk-secret");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
   it("keeps successful segments when another isolation fails", async () => {
     mocks.generateContent
       .mockReset()
@@ -249,6 +383,62 @@ describe("canvas auto segment API", () => {
     expect(response.status).toBe(200);
     expect(body.categories.flatMap((category: any) => category.segments).map((segment: any) => segment.status)).toEqual(["ready", "failed"]);
     expect(body.warnings[0]).toContain("Unable to isolate");
+  });
+
+  it("keeps successful gateway segments when another gateway isolation fails with safe warnings", async () => {
+    configureGateway();
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(twoSegmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("READY"))
+      .mockRejectedValueOnce(new Error("raw provider failure with SECRETPAYLOAD"));
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const body = await response.json();
+    const segments = body.categories.flatMap((category: any) => category.segments);
+    const serializedLogsAndBody = JSON.stringify([consoleErrorSpy.mock.calls, body]);
+
+    expect(response.status).toBe(200);
+    expect(segments.map((segment: any) => segment.status)).toEqual(["ready", "failed"]);
+    expect(segments[0]).toMatchObject({
+      label: "Main product",
+      image: { dataUrl: "data:image/png;base64,READY" },
+    });
+    expect(segments[1]).toMatchObject({
+      label: "Logo text",
+      error: "Isolation failed.",
+    });
+    expect(body.warnings).toEqual(["Unable to isolate Logo text."]);
+    expect(serializedLogsAndBody).not.toContain("raw provider failure");
+    expect(serializedLogsAndBody).not.toContain("SECRETPAYLOAD");
+    expect(serializedLogsAndBody).not.toContain("sk-secret");
+    expect(serializedLogsAndBody).not.toContain("litellm:4000");
+  });
+
+  it("turns invalid gateway image responses into safe failed segments", async () => {
+    configureGateway();
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponseWithoutImages());
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const body = await response.json();
+    const segment = body.categories[0].segments[0];
+    const serializedLogsAndBody = JSON.stringify([consoleErrorSpy.mock.calls, body]);
+
+    expect(response.status).toBe(200);
+    expect(segment).toMatchObject({
+      label: "Main product",
+      status: "failed",
+      error: "Isolation failed.",
+    });
+    expect(body.warnings).toEqual(["Unable to isolate Main product."]);
+    expect(serializedLogsAndBody).not.toContain("No image");
+    expect(serializedLogsAndBody).not.toContain("sk-secret");
+    expect(serializedLogsAndBody).not.toContain("litellm:4000");
   });
 
   it("uses legacy Drive fallback when storage_ref is missing", async () => {
@@ -392,3 +582,110 @@ describe("canvas auto segment API", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+function configureGateway() {
+  vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+  vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
+  vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+}
+
+function litellmResponse(payload: unknown) {
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(payload) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-1",
+        "x-litellm-call-id": "call-1",
+      },
+    },
+  );
+}
+
+function litellmImageResponse(data: string) {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: "Mask image",
+            images: [{ image_url: { url: `data:image/png;base64,${data}` } }],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-image-1",
+        "x-litellm-call-id": "call-image-1",
+      },
+    },
+  );
+}
+
+function litellmImageResponseWithoutImages() {
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: "No image", images: [] } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-image-empty",
+        "x-litellm-call-id": "call-image-empty",
+      },
+    },
+  );
+}
+
+function segmentPlanPayload() {
+  return {
+    segments: [
+      {
+        id: "product",
+        label: "Main product",
+        category: "products",
+        elementType: "product object",
+        location: "center",
+        visualIdentity: "central green product object",
+        nearbyAnchors: ["below heading"],
+        bounds: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
+        description: "the central item",
+        exclude: ["heading", "background"],
+        isolationPrompt: "Keep only the central product object. Remove the heading and background. Put it on white or black.",
+        confidence: 0.92,
+      },
+    ],
+  };
+}
+
+function twoSegmentPlanPayload() {
+  return {
+    segments: [
+      ...segmentPlanPayload().segments,
+      {
+        id: "logo",
+        label: "Logo text",
+        category: "text_graphics",
+        elementType: "logo",
+        location: "upper right",
+        visualIdentity: "upper-right logo text",
+        nearbyAnchors: ["above heading"],
+        bounds: { x: 0.7, y: 0.05, width: 0.2, height: 0.1 },
+        description: "the logo",
+        exclude: ["heading", "background"],
+        isolationPrompt: "Keep only the upper-right logo text. Remove everything else. Put it on white or black.",
+        confidence: 0.9,
+      },
+    ],
+  };
+}

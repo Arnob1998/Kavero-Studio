@@ -136,6 +136,24 @@ describe("canvas assistant orchestrator", () => {
     expect("errors" in result.body && result.body.errors[0]).toContain("preset");
   });
 
+  it("rejects provider tool arguments that are not valid input objects", async () => {
+    const result = await orchestrateCanvasAssistant(
+      basePayload,
+      deps({
+        provider: providerReturning([{ id: "bad-args", name: "transform_object", input: "{not-json" }]),
+      }),
+    );
+
+    expect(result.status).toBe(200);
+    expect("ok" in result.body && result.body.ok).toBe(false);
+    expect("toolCalls" in result.body && result.body.toolCalls[0]).toMatchObject({
+      id: "bad-args",
+      name: "transform_object",
+      status: "rejected",
+    });
+    expect("errors" in result.body && result.body.errors[0]).toContain("Expected object");
+  });
+
   it("gates destructive tool calls until confirmed", async () => {
     const result = await orchestrateCanvasAssistant(
       { ...basePayload, messages: [{ role: "user", content: "delete selected" }] },

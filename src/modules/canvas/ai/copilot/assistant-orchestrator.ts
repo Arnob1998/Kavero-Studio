@@ -4,6 +4,7 @@ import {
   type CanvasToolName,
   type CanvasToolRisk,
 } from "@/modules/canvas/actions/canvas-tool-registry";
+import { isModelGatewayError } from "@/modules/model-providers";
 
 export const DEFAULT_CANVAS_ASSISTANT_MODEL = "gemini-3.1-pro-preview";
 
@@ -592,6 +593,26 @@ function isBulkMutation(name: CanvasToolName, input: unknown) {
 const PAGE_LEVEL_TOOLS = new Set<CanvasToolName>(["set_background", "set_canvas_size", "save"]);
 
 function getProviderFailure(error: unknown) {
+  if (isModelGatewayError(error)) {
+    const { errorCode, retryable, status } = error.details;
+    if (errorCode === "authentication_error") {
+      return { status: 403, message: "The assistant model gateway was rejected. Check provider setup and try again." };
+    }
+    if (status === 404) {
+      return { status: 502, message: "The configured assistant model was not found. Check your model provider settings and try again." };
+    }
+    if (status === 413) {
+      return { status: 413, message: "The canvas assistant context is too large for the provider." };
+    }
+    if (errorCode === "rate_limited" || retryable) {
+      return { status: 503, message: "The assistant provider is temporarily busy. Please wait a moment and try again." };
+    }
+    if (errorCode === "invalid_response") {
+      return { status: 502, message: "Assistant provider failed." };
+    }
+    return { status: 502, message: "Assistant provider failed." };
+  }
+
   const status = getErrorStatus(error);
   if (status === 401 || status === 403) {
     return { status: 403, message: "Your assistant provider key was rejected. Check the key in Settings and try again." };

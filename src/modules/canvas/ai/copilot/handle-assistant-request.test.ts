@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleAssistantRequest } from "./handle-assistant-request";
 import type { StoredObjectRef } from "@/modules/storage/storage-provider";
+import {
+  DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
+  DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+} from "@/modules/model-providers";
 
 const mocks = vi.hoisted(() => ({
   getCanvasUser: vi.fn(),
   requireCanvasAccess: vi.fn(),
   getCanvasAdmin: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  generateContent: vi.fn(),
 }));
 
 vi.mock("@/lib/canvas/api", () => ({
@@ -17,6 +22,13 @@ vi.mock("@/lib/canvas/api", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+}));
+
+vi.mock("@google/genai", () => ({
+  FunctionCallingConfigMode: { AUTO: "AUTO" },
+  GoogleGenAI: vi.fn(function () {
+    return { models: { generateContent: mocks.generateContent } };
+  }),
 }));
 
 type AssetRow = {
@@ -69,7 +81,7 @@ function asset(overrides: Partial<AssetRow> = {}): AssetRow {
   };
 }
 
-function createAdmin(assetRows: Record<string, AssetRow | null>) {
+function createAdmin(assetRows: Record<string, AssetRow | null>, preferences: unknown = {}) {
   const selects: string[] = [];
 
   return {
@@ -91,6 +103,10 @@ function createAdmin(assetRows: Record<string, AssetRow | null>) {
           return query;
         },
         async maybeSingle() {
+          if (state.table === "user_metadata") {
+            return { data: { preferences }, error: null };
+          }
+
           if (state.table === "canvas_pages") {
             return { data: { id: "page-1", design_id: "design-1" }, error: null };
           }
@@ -139,6 +155,10 @@ describe("handleAssistantRequest asset inspection", () => {
     mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
     mocks.requireCanvasAccess.mockResolvedValue({ response: null });
     mocks.getUserProviderApiKey.mockResolvedValue(null);
+    mocks.generateContent.mockResolvedValue({
+      candidates: [{ content: { parts: [{ text: "Gemini response." }] } }],
+      functionCalls: [],
+    });
   });
 
   afterEach(() => {
@@ -208,3 +228,179 @@ describe("handleAssistantRequest asset inspection", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("handleAssistantRequest provider selection", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn());
+    mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
+    mocks.requireCanvasAccess.mockResolvedValue({ response: null });
+    mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getCanvasAdmin.mockReturnValue(createAdmin({ "asset-1": asset() }));
+    mocks.generateContent.mockResolvedValue({
+      candidates: [{ content: { parts: [{ text: "Gemini response." }] } }],
+      functionCalls: [],
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("preserves the mock provider path when CANVAS_ASSISTANT_PROVIDER is mock", async () => {
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "mock");
+    vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+    vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
+    vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+
+    const response = await handleAssistantRequest(request([]));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ provider: "mock", model: "gemini-3.1-pro-preview" });
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses the selected chat orchestration alias when the gateway is configured", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    mocks.getCanvasAdmin.mockReturnValue(
+      createAdmin(
+        { "asset-1": asset() },
+        {
+          modelProviders: {
+            chatOrchestrationModelAlias: "kavero-chat-openai-example",
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse(litellmAssistantPayload())));
+
+    const response = await handleAssistantRequest(request([]));
+    const body = await response.json();
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      provider: "litellm",
+      model: "kavero-chat-openai-example",
+    });
+    expect(outboundBody.model).toBe("kavero-chat-openai-example");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("normalizes wrong-slot stored aliases to the default chat orchestration alias", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    mocks.getCanvasAdmin.mockReturnValue(
+      createAdmin(
+        { "asset-1": asset() },
+        {
+          modelProviders: {
+            chatOrchestrationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+          },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse(litellmAssistantPayload())));
+
+    const response = await handleAssistantRequest(request([]));
+    const body = await response.json();
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(body.model).toBe(DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS);
+    expect(outboundBody.model).toBe(DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS);
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe gateway configuration error without direct Gemini fallback", async () => {
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+    vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+
+    const response = await handleAssistantRequest(request([]));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      error: "Canvas Copilot model gateway is not configured correctly.",
+      details: { code: "model-gateway-configuration" },
+    });
+    expect(JSON.stringify(body)).not.toContain("KAVERO_LITELLM");
+    expect(JSON.stringify(body)).not.toContain("sk-secret");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("preserves direct Gemini missing-key behavior when the gateway is disabled", async () => {
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    mocks.getUserProviderApiKey.mockResolvedValueOnce(null);
+
+    const response = await handleAssistantRequest(request([]));
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ error: "Add your Gemini API key in Settings before using Copilot." });
+    expect(mocks.getUserProviderApiKey).toHaveBeenCalledWith("user-1", "google-gemini");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("preserves direct Gemini success when the gateway is disabled", async () => {
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    vi.stubEnv("CANVAS_ASSISTANT_MODEL", "gemini-direct-test");
+
+    const response = await handleAssistantRequest(request([]));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      provider: "google-gemini",
+      model: "gemini-direct-test",
+      message: { role: "assistant", content: "Gemini response." },
+    });
+    expect(mocks.getUserProviderApiKey).toHaveBeenCalledWith("user-1", "google-gemini");
+    expect(mocks.generateContent).toHaveBeenCalledWith(expect.objectContaining({ model: "gemini-direct-test" }));
+  });
+});
+
+function configureGateway() {
+  vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+  vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
+  vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+}
+
+function litellmResponse(payload: unknown) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "x-request-id": "req-1",
+      "x-litellm-call-id": "call-1",
+    },
+  });
+}
+
+function litellmAssistantPayload() {
+  return {
+    choices: [
+      {
+        message: {
+          content: "Added a heading.",
+          tool_calls: [],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  };
+}

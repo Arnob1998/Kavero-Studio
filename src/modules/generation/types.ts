@@ -57,7 +57,7 @@ export type SettingKey = "model" | "count" | "thinking" | "aspect" | "quality";
 export interface GenerationRun {
   id: string;
   prompt: string;
-  model: ModelId;
+  model: string;
   modelLabel: string;
   kind: "image";
   images: GeneratedImage[];
@@ -69,7 +69,7 @@ export interface GenerationRun {
 }
 
 export interface GenerateApiResponse {
-  model: ModelId;
+  model: string;
   modelLabel: string;
   kind: "image";
   images: GeneratedImage[];

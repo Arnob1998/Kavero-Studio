@@ -12,8 +12,16 @@ function check(status, label, message) {
   return { status, label, message };
 }
 
+function resolveCommandName(command) {
+  return process.platform === "win32" && command === "pnpm" ? "pnpm.cmd" : command;
+}
+
 function commandResult(spawnSyncImpl, command, args) {
-  const result = spawnSyncImpl(command, args, { encoding: "utf8", shell: false });
+  const resolvedCommand = resolveCommandName(command);
+  const result = spawnSyncImpl(resolvedCommand, args, {
+    encoding: "utf8",
+    shell: process.platform === "win32" && resolvedCommand.endsWith(".cmd"),
+  });
   if (result.error) return { ok: false, message: result.error.message };
   if (result.status !== 0) {
     const message = result.stderr?.trim() || result.stdout?.trim() || `exit ${result.status}`;

@@ -243,7 +243,105 @@ describe("canvas AI Local-first access", () => {
 
     expect(mocks.generateContent).not.toHaveBeenCalled();
   });
+
+  it("does not require the in-app Gemini key for Local-first Image Judge when the gateway is configured", async () => {
+    vi.stubEnv("KAVERO_DEPLOYMENT_PROFILE", "local-first");
+    configureGateway();
+    mocks.getUserProviderApiKey.mockResolvedValue(null);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({ winnerId: "candidate-1", reason: "best fit" })));
+
+    const response = await imageJudgePost(imageJudgeRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ winnerId: "candidate-1", reason: "best fit" });
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("does not require the in-app Gemini key for Local-first canvas image generation when the gateway is configured", async () => {
+    vi.stubEnv("KAVERO_DEPLOYMENT_PROFILE", "local-first");
+    configureGateway();
+    mocks.getUserProviderApiKey.mockResolvedValue(null);
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmImageResponse("canvas-gateway-image")));
+
+    const response = await imageGeneratePost(imageGenerateRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.images).toHaveLength(4);
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("does not require the in-app Gemini key for Local-first Auto Segment when the gateway is configured", async () => {
+    vi.stubEnv("KAVERO_DEPLOYMENT_PROFILE", "local-first");
+    configureGateway();
+    mocks.getUserProviderApiKey.mockResolvedValue(null);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(litellmResponse(autoSegmentPlanPayload()))
+        .mockResolvedValueOnce(litellmImageResponse("auto-segment-gateway-mask")),
+    );
+
+    const response = await autoSegmentPost(autoSegmentRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.categories[0].segments[0]).toMatchObject({ status: "ready" });
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
 });
+
+function configureGateway() {
+  vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+  vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
+  vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+}
+
+function litellmResponse(payload: unknown) {
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(payload) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-1",
+        "x-litellm-call-id": "call-1",
+      },
+    },
+  );
+}
+
+function litellmImageResponse(data: string) {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: "Canvas gateway image",
+            images: [{ image_url: { url: `data:image/png;base64,${data}` } }],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-1",
+        "x-litellm-call-id": "call-1",
+      },
+    },
+  );
+}
 
 function assistantRequest() {
   return jsonRequest("http://localhost/api/canvas/assistant", {
@@ -306,24 +404,28 @@ function okImageResponse(data = "AAAA") {
 function mockAutoSegmentModelResponses() {
   mocks.generateContent
     .mockResolvedValueOnce({
-      text: JSON.stringify({
-        segments: [
-          {
-            id: "product",
-            label: "Main product",
-            category: "products",
-            elementType: "product object",
-            location: "center",
-            visualIdentity: "central product object",
-            bounds: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
-            description: "the central item",
-            isolationPrompt: "Keep only the central product object. Remove everything else. Put it on white.",
-            confidence: 0.92,
-          },
-        ],
-      }),
+      text: JSON.stringify(autoSegmentPlanPayload()),
     })
     .mockResolvedValueOnce(okImageResponse("AAAA"));
+}
+
+function autoSegmentPlanPayload() {
+  return {
+    segments: [
+      {
+        id: "product",
+        label: "Main product",
+        category: "products",
+        elementType: "product object",
+        location: "center",
+        visualIdentity: "central product object",
+        bounds: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
+        description: "the central item",
+        isolationPrompt: "Keep only the central product object. Remove everything else. Put it on white.",
+        confidence: 0.92,
+      },
+    ],
+  };
 }
 
 function managedStorageRef(): StoredObjectRef {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   shouldBlockImageGenerationForMissingGeminiKey,
+  shouldOpenImageGenerationGeminiKeyGate,
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "./prompt-refiner-policy";
 import type { WorkspaceStatusResponse } from "../types";
@@ -27,9 +28,25 @@ describe("prompt refiner policy", () => {
     ).toBe(false);
   });
 
-  it("keeps actual image generation blocked on the existing Gemini key readiness", () => {
-    expect(shouldBlockImageGenerationForMissingGeminiKey(workspaceStatus({ hasGeminiKey: false }))).toBe(true);
+  it("lets the server decide whether image generation needs the in-app Gemini key", () => {
+    expect(shouldBlockImageGenerationForMissingGeminiKey(workspaceStatus({ hasGeminiKey: false }))).toBe(false);
     expect(shouldBlockImageGenerationForMissingGeminiKey(workspaceStatus({ hasGeminiKey: true }))).toBe(false);
+  });
+
+  it("opens the Gemini key gate only for direct Gemini image-generation key errors", () => {
+    expect(
+      shouldOpenImageGenerationGeminiKeyGate(
+        403,
+        "Add your Gemini API key in Settings before generating.",
+      ),
+    ).toBe(true);
+    expect(
+      shouldOpenImageGenerationGeminiKeyGate(
+        403,
+        "Image generation gateway was rejected. Check provider setup and try again.",
+      ),
+    ).toBe(false);
+    expect(shouldOpenImageGenerationGeminiKeyGate(502, "Add your Gemini API key in Settings before generating.")).toBe(false);
   });
 });
 

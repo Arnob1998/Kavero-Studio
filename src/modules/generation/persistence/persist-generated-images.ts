@@ -1,7 +1,6 @@
 import { getGenerationLimit, normalizeUserPlan } from "@/lib/plans";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { GenerateImageModelId } from "@/modules/generation/services/generate-models";
 import { parseBase64DataUrl } from "@/modules/generation/utils/data-url";
 import type { ManagedStorageEnv } from "@/modules/storage/managed/config";
 import type { ManagedStorageBackend } from "@/modules/storage/managed/kavero-managed-storage";
@@ -26,7 +25,7 @@ export type PersistGeneratedReferenceImage = {
 export type PersistGeneratedImagesInput = {
   userId: string;
   prompt: string;
-  model: GenerateImageModelId;
+  model: string;
   modelLabel: string;
   images: PersistGeneratedImage[];
   text: string;

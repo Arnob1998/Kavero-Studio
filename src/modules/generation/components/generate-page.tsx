@@ -79,6 +79,7 @@ import {
 import { ensureGenerateStorageReady } from "../utils/generate-storage-policy";
 import {
   shouldBlockImageGenerationForMissingGeminiKey,
+  shouldOpenImageGenerationGeminiKeyGate,
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "../utils/prompt-refiner-policy";
 
@@ -993,7 +994,13 @@ export function GeneratePage() {
   async function requireGeminiKey(status = workspaceStatus) {
     if (!shouldBlockImageGenerationForMissingGeminiKey(status)) return true;
 
-    await openGateDialog({
+    await openImageModelKeyDialog();
+
+    return false;
+  }
+
+  function openImageModelKeyDialog() {
+    return openGateDialog({
       title: "Connect image model",
       description: "Add your image generation model API key before generating images.",
       confirmLabel: "Add API key",
@@ -1001,8 +1008,6 @@ export function GeneratePage() {
       cancelLabel: "Cancel",
       icon: "model",
     });
-
-    return false;
   }
 
   const handlePromptTextChange = (value: string) => {
@@ -1591,6 +1596,14 @@ export function GeneratePage() {
       const payload = (await response.json()) as Partial<GenerateApiResponse> & GenerateApiError;
 
       if (!response.ok) {
+        if (shouldOpenImageGenerationGeminiKeyGate(response.status, payload.error)) {
+          setActiveRun(null);
+          setPromptText(prompt);
+          setReferenceImages(submittedReferenceImages);
+          await openImageModelKeyDialog();
+          return;
+        }
+
         const fieldErrors = payload.details?.fieldErrors
           ? Object.entries(payload.details.fieldErrors)
               .filter(([, messages]) => messages.length > 0)
