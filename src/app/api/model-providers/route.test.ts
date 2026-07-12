@@ -18,6 +18,7 @@ const envKeys = [
   "KAVERO_MODEL_GATEWAY",
   "KAVERO_LITELLM_BASE_URL",
   "KAVERO_LITELLM_API_KEY",
+  "KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE",
 ] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 
@@ -59,6 +60,7 @@ describe("/api/model-providers", () => {
         configured: true,
         issues: [],
       },
+      credentialMode: "env-or-user",
       selected: {
         chatOrchestrationModelAlias: DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
         imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
@@ -73,6 +75,20 @@ describe("/api/model-providers", () => {
     expect(JSON.stringify(body)).not.toContain("http://litellm:4000");
     expect(JSON.stringify(body)).not.toContain("sk-secret");
   });
+
+  it.each(["env-or-user", "user-required", "env-only"] as const)(
+    "returns the safe %s credential mode without environment details",
+    async (mode) => {
+      process.env.KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE = mode;
+      mocks.createClient.mockResolvedValue(createSupabaseClient({ preferences: null }));
+
+      const response = (await GET())!;
+      const body = await response.json();
+
+      expect(body.credentialMode).toBe(mode);
+      expect(JSON.stringify(body)).not.toContain("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE");
+    },
+  );
 
   it("saves valid aliases and preserves existing preferences", async () => {
     const upsert = vi.fn(async () => ({ error: null }));

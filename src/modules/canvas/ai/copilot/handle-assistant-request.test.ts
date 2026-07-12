@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   requireCanvasAccess: vi.fn(),
   getCanvasAdmin: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   generateContent: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("@/lib/canvas/api", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@google/genai", () => ({
@@ -238,6 +240,7 @@ describe("handleAssistantRequest provider selection", () => {
     mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
     mocks.requireCanvasAccess.mockResolvedValue({ response: null });
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.getCanvasAdmin.mockReturnValue(createAdmin({ "asset-1": asset() }));
     mocks.generateContent.mockResolvedValue({
       candidates: [{ content: { parts: [{ text: "Gemini response." }] } }],
@@ -295,6 +298,68 @@ describe("handleAssistantRequest provider selection", () => {
     expect(outboundBody.model).toBe("kavero-chat-openai-example");
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("injects BYOK credentials without changing Copilot tool-call behavior", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "sk-user-openai-1234567890" });
+    mocks.getCanvasAdmin.mockReturnValue(
+      createAdmin(
+        { "asset-1": asset() },
+        { modelProviders: { chatOrchestrationModelAlias: "kavero-chat-openai-example" } },
+      ),
+    );
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({
+      choices: [{
+        message: {
+          content: "Moved the title.",
+          tool_calls: [{
+            id: "tool-1",
+            type: "function",
+            function: { name: "transform_object", arguments: JSON.stringify({ objectId: "title-1", top: 120 }) },
+          }],
+        },
+      }],
+    })));
+
+    const response = await handleAssistantRequest(request([]));
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outboundBody.api_key).toBe("sk-user-openai-1234567890");
+    expect(outboundBody.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "function" }),
+    ]));
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "openai");
+  });
+
+  it("rejects missing Copilot credentials in user-required mode", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+
+    const response = await handleAssistantRequest(request([]));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      details: { code: "provider-credentials-required" },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("ignores saved Copilot credentials in env-only mode", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse(litellmAssistantPayload())));
+
+    const response = await handleAssistantRequest(request([]));
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outboundBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
   });
 
   it("normalizes wrong-slot stored aliases to the default chat orchestration alias", async () => {
@@ -378,6 +443,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-or-user");
 }
 
 function litellmResponse(payload: unknown) {

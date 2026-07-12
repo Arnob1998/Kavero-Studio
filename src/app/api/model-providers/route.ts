@@ -10,6 +10,7 @@ import {
   mergeModelProviderPreferences,
 } from "@/modules/model-providers";
 import { createClient } from "@/lib/supabase/server";
+import { getModelGatewayCredentialMode } from "@/modules/model-providers/server/credential-mode";
 
 const modelProviderSettingsSchema = z
   .object({
@@ -30,6 +31,7 @@ function settingsPayload(preferences: unknown) {
 
   return {
     gateway: getSafeGatewayStatus(getModelGatewayConfig()),
+    credentialMode: getModelGatewayCredentialMode(),
     catalog: getBrowserModelCatalog(),
     defaults: {
       chatOrchestrationModelAlias: DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,

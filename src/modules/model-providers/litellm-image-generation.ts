@@ -45,6 +45,7 @@ type GenerateLiteLlmImageInput = {
   settings: LiteLlmImageGenerationSettings;
   referenceImages: LiteLlmImageReference[];
   taskLabel?: string;
+  transformRequestBody?: (body: Record<string, unknown>) => Record<string, unknown>;
 };
 
 function parseBase64DataUrl(value: string) {
@@ -135,12 +136,13 @@ export async function generateLiteLlmImage(
     });
   }
 
-  const response = await client.chatCompletions(
-    {
+  const body = {
       model: input.modelAlias,
       modalities: ["image", "text"],
       messages: [{ role: "user", content }],
-    },
+    };
+  const response = await client.chatCompletions(
+    input.transformRequestBody ? input.transformRequestBody(body) : body,
     context,
   );
 

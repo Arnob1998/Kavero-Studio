@@ -1,0 +1,4 @@
+services:
+  litellm:
+    ports:
+      - "${KAVERO_LITELLM_DEV_PORT:-4000}:4000"

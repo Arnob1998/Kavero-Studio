@@ -16,6 +16,11 @@ import {
   type ModelGatewayUsage,
   type ModelProviderId,
 } from "@/modules/model-providers";
+import {
+  createSafeRuntimeCredentialFailureResponse,
+  prepareLiteLlmImageRuntimeRequest,
+  resolveImageGenerationRuntimeCredentials,
+} from "@/modules/model-providers/server";
 
 const imageModelIds = [
   "gemini-3.1-flash-image-preview",
@@ -302,6 +307,7 @@ function logCanvasImageGatewayEvent(input: {
   usage?: Partial<ModelGatewayUsage> | null;
   imageCount?: number | null;
   errorCode?: string | null;
+  credentialSource: "user-byok" | "gateway-env";
 }) {
   logModelGatewayEvent(
     createModelGatewayEvent({
@@ -319,6 +325,7 @@ function logCanvasImageGatewayEvent(input: {
         imageCount: input.imageCount ?? input.usage?.imageCount ?? null,
       },
       errorCode: input.errorCode ?? null,
+      credentialSource: input.credentialSource,
     }),
   );
 }
@@ -453,6 +460,18 @@ async function handleGatewayCanvasGeneration({
   if (!selectionResult.ok) return selectionResult.response;
 
   const selection = selectionResult.selection;
+  const credentials = await resolveImageGenerationRuntimeCredentials({
+    userId,
+    modelAlias: selection.modelAlias,
+  });
+  if (!credentials.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Canvas image generation", credentials);
+  }
+  const prepared = prepareLiteLlmImageRuntimeRequest(credentials);
+  if (!("transformRequestBody" in prepared)) {
+    return createSafeRuntimeCredentialFailureResponse("Canvas image generation", prepared);
+  }
+  const { transformRequestBody, credentialSource } = prepared;
   const warnings = createWarnings(input);
   const prompt = promptForCanvasGeneration(input.prompt, input.transparentBackground, input.backgroundPreference);
 
@@ -479,6 +498,7 @@ async function handleGatewayCanvasGeneration({
           name: image.name,
         })),
         taskLabel: "canvas-image-generation",
+        transformRequestBody,
       });
 
       logCanvasImageGatewayEvent({
@@ -490,6 +510,7 @@ async function handleGatewayCanvasGeneration({
         callId: result.callId,
         usage: result.usage,
         imageCount: result.images.length,
+        credentialSource,
       });
 
       return {
@@ -512,6 +533,7 @@ async function handleGatewayCanvasGeneration({
         requestId: details?.requestId ?? null,
         callId: details?.callId ?? null,
         errorCode: details?.errorCode ?? "provider_error",
+        credentialSource,
       });
       throw error;
     }

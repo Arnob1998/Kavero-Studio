@@ -17,6 +17,10 @@ import {
   logModelGatewayEvent,
   type ModelGatewayConfig,
 } from "@/modules/model-providers";
+import {
+  prepareLiteLlmRuntimeRequest,
+  type ResolvedModelCredentials,
+} from "@/modules/model-providers/server";
 
 type ConfiguredGatewayConfig = Extract<ModelGatewayConfig, { status: "configured" }>;
 
@@ -41,10 +45,12 @@ export function createLiteLlmCanvasAssistantProvider({
   config,
   modelAlias,
   userId = null,
+  credentials,
 }: {
   config: ConfiguredGatewayConfig;
   modelAlias: string;
   userId?: string | null;
+  credentials: ResolvedModelCredentials;
 }): CanvasAssistantProvider {
   const client = createLiteLlmClient({ config });
   const catalogEntry = getModelCatalogEntry(modelAlias);
@@ -54,19 +60,34 @@ export function createLiteLlmCanvasAssistantProvider({
     model: modelAlias,
     async generate(input) {
       const startedAt = Date.now();
+      const prepared = prepareLiteLlmRuntimeRequest(
+        {
+          model: modelAlias,
+          temperature: input.temperature ?? 0.2,
+          messages: [
+            { role: "system", content: CANVAS_ASSISTANT_SYSTEM_PROMPT },
+            { role: "user", content: buildLiteLlmUserContent(input) },
+          ],
+          tools: buildLiteLlmTools(input),
+          tool_choice: "auto",
+        },
+        credentials,
+      );
+      if (!prepared.ok) {
+        throw createModelGatewayError(
+          "Canvas Copilot provider credentials are invalid.",
+          {
+            provider: catalogEntry?.provider ?? null,
+            model: catalogEntry?.model ?? null,
+            modelAlias,
+          },
+          "authentication_error",
+        );
+      }
 
       try {
         const response = await client.chatCompletions<OpenAiChatCompletionResponse>(
-          {
-            model: modelAlias,
-            temperature: input.temperature ?? 0.2,
-            messages: [
-              { role: "system", content: CANVAS_ASSISTANT_SYSTEM_PROMPT },
-              { role: "user", content: buildLiteLlmUserContent(input) },
-            ],
-            tools: buildLiteLlmTools(input),
-            tool_choice: "auto",
-          },
+          prepared.body,
           {
             provider: catalogEntry?.provider ?? null,
             model: catalogEntry?.model ?? null,
@@ -94,6 +115,7 @@ export function createLiteLlmCanvasAssistantProvider({
             status: "success",
             latencyMs: Date.now() - startedAt,
             usage: response.usage,
+            credentialSource: prepared.credentialSource,
           }),
         );
 
@@ -112,6 +134,7 @@ export function createLiteLlmCanvasAssistantProvider({
             status: "error",
             latencyMs: Date.now() - startedAt,
             errorCode: details?.errorCode ?? "provider_error",
+            credentialSource: prepared.credentialSource,
           }),
         );
         throw error;

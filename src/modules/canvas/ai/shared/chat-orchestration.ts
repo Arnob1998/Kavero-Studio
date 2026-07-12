@@ -6,6 +6,7 @@ import {
   isModelGatewayError,
   logModelGatewayEvent,
   type ModelGatewayConfig,
+  type ModelGatewayCredentialSource,
   type ModelGatewayUsage,
   type ModelProviderId,
 } from "@/modules/model-providers";
@@ -142,6 +143,7 @@ export function logCanvasAiGatewayEvent(input: {
   callId?: string | null;
   usage?: Partial<ModelGatewayUsage> | null;
   errorCode?: string | null;
+  credentialSource: ModelGatewayCredentialSource;
 }) {
   logModelGatewayEvent(
     createModelGatewayEvent({
@@ -156,6 +158,7 @@ export function logCanvasAiGatewayEvent(input: {
       latencyMs: Date.now() - input.startedAt,
       usage: input.usage,
       errorCode: input.errorCode ?? null,
+      credentialSource: input.credentialSource,
     }),
   );
 }

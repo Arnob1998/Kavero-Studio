@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
-  Eye,
-  EyeOff,
   KeyRound,
   LockKeyhole,
   RefreshCw,
@@ -15,6 +13,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  ProviderKeyManager,
+  type BrowserProviderKeyCatalogEntry,
+  type ProviderKeyMetadata,
+} from "./provider-key-manager";
 
 type CapabilitySlot = "chatOrchestration" | "imageGeneration";
 
@@ -22,6 +25,7 @@ type BrowserModelCatalogEntry = {
   provider: string;
   providerLabel: string;
   providerLogoPath: string;
+  providerKeyId: string | null;
   modelAlias: string;
   displayLabel: string;
   capabilities: {
@@ -44,6 +48,7 @@ type GatewayStatus = {
 
 type ModelProviderSettings = {
   gateway: GatewayStatus;
+  credentialMode: "env-or-user" | "user-required" | "env-only";
   catalog: BrowserModelCatalogEntry[];
   selected: {
     chatOrchestrationModelAlias: string;
@@ -58,23 +63,9 @@ type ConnectivityResult = GatewayStatus & {
 
 type StatusTone = "idle" | "checking" | "passed" | "failed";
 
-const providerRows = [
-  { id: "google-gemini", label: "Google Gemini", logoPath: "/llm-providers/google-gemini-icon.png" },
-  { id: "openai", label: "OpenAI", logoPath: "/llm-providers/openai.png" },
-  { id: "groq", label: "Groq", logoPath: "/llm-providers/grok-icon.png" },
-  { id: "ollama", label: "Ollama", logoPath: "/llm-providers/ollama-icon.svg" },
-  { id: "huggingface", label: "Hugging Face", logoPath: "/llm-providers/huggingface-icon.png" },
-];
-
-const minimumGeminiKeyLength = 30;
-
 export function ProviderSettingsPanel() {
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [savedKeyHint, setSavedKeyHint] = useState<string | null>(null);
-  const [checkStatus, setCheckStatus] = useState<StatusTone>("idle");
-  const [checkMessage, setCheckMessage] = useState("Paste a complete Gemini API key to test it.");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [providerCatalog, setProviderCatalog] = useState<BrowserProviderKeyCatalogEntry[]>([]);
+  const [savedProviderKeys, setSavedProviderKeys] = useState<ProviderKeyMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [settings, setSettings] = useState<ModelProviderSettings | null>(null);
@@ -83,8 +74,6 @@ export function ProviderSettingsPanel() {
   const [modelSaveStatus, setModelSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [connectivity, setConnectivity] = useState<ConnectivityResult | null>(null);
   const [connectivityStatus, setConnectivityStatus] = useState<"idle" | "checking" | "checked" | "failed">("idle");
-  const lastCheckedKeyRef = useRef<string | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
   const chatModels = useMemo(
     () => settings?.catalog.filter((entry) => entry.capabilities.slots.includes("chatOrchestration")) ?? [],
@@ -107,22 +96,15 @@ export function ProviderSettingsPanel() {
 
         if (providerKeyResponse.ok) {
           const payload = (await providerKeyResponse.json()) as {
-            providerKeys?: Array<{
-              provider_id: string;
-              key_hint: string | null;
-              status: "active" | "disabled";
-            }>;
+            providerKeys?: ProviderKeyMetadata[];
+            providers?: BrowserProviderKeyCatalogEntry[];
           };
-          const geminiKey = payload.providerKeys?.find(
-            (providerKey) => providerKey.provider_id === "google-gemini",
-          );
-
-          if (isMounted && geminiKey?.status === "active") {
-            const keyHint = geminiKey.key_hint ?? "saved";
-            setSavedKeyHint(keyHint);
-            setCheckStatus("passed");
-            setCheckMessage(`Saved key ${keyHint} is connected.`);
+          if (isMounted) {
+            setSavedProviderKeys(payload.providerKeys ?? []);
+            setProviderCatalog(payload.providers ?? []);
           }
+        } else if (isMounted) {
+          setLoadFailed(true);
         }
 
         if (modelResponse.ok) {
@@ -146,104 +128,8 @@ export function ProviderSettingsPanel() {
 
     return () => {
       isMounted = false;
-      abortControllerRef.current?.abort();
     };
   }, []);
-
-  useEffect(() => {
-    if (isLoading) return;
-
-    const key = apiKey.trim();
-    abortControllerRef.current?.abort();
-
-    if (!key) {
-      setCheckStatus(savedKeyHint ? "passed" : "idle");
-      setCheckMessage(
-        savedKeyHint
-          ? `Saved key ${savedKeyHint} is connected. Paste a new key to replace it.`
-          : "Paste a complete Gemini API key to test it.",
-      );
-      return;
-    }
-
-    if (key.length < minimumGeminiKeyLength) {
-      setCheckStatus("idle");
-      setCheckMessage("Waiting for the full key.");
-      return;
-    }
-
-    if (lastCheckedKeyRef.current === key) return;
-
-    const timeout = window.setTimeout(async () => {
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      setCheckStatus("checking");
-      setCheckMessage("Checking key...");
-
-      try {
-        const response = await fetch("/api/provider-keys/check", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ providerId: "google-gemini", apiKey: key }),
-          signal: controller.signal,
-        });
-
-        if (controller.signal.aborted) return;
-
-        lastCheckedKeyRef.current = key;
-        const payload = (await response.json().catch(() => null)) as { status?: string } | null;
-
-        if (response.ok && payload?.status === "passed") {
-          setCheckStatus("passed");
-          setCheckMessage("Check passed. This key is ready to save.");
-          return;
-        }
-
-        setCheckStatus("failed");
-        setCheckMessage("Check failed. Confirm the key is active and try again.");
-      } catch {
-        if (controller.signal.aborted) return;
-        setCheckStatus("failed");
-        setCheckMessage("Check failed. Confirm the key is active and try again.");
-      }
-    }, 700);
-
-    return () => {
-      window.clearTimeout(timeout);
-      abortControllerRef.current?.abort();
-    };
-  }, [apiKey, isLoading, savedKeyHint]);
-
-  async function saveProvider() {
-    if (checkStatus !== "passed" || !apiKey.trim()) return;
-
-    setSaveStatus("saving");
-
-    const response = await fetch("/api/provider-keys", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        providerId: "google-gemini",
-        apiKey,
-      }),
-    });
-
-    if (!response.ok) {
-      setSaveStatus("failed");
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      providerKey?: { keyHint?: string };
-    };
-    const keyHint = payload.providerKey?.keyHint ?? null;
-
-    setSavedKeyHint(keyHint);
-    setApiKey("");
-    setSaveStatus("saved");
-    setCheckStatus("passed");
-    setCheckMessage(keyHint ? `Saved key ${keyHint} is connected.` : "Provider saved.");
-  }
 
   async function saveModelSettings() {
     if (!chatAlias || !imageAlias) return;
@@ -323,55 +209,17 @@ export function ProviderSettingsPanel() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="grid gap-4">
-          <PanelBlock icon={KeyRound} title="Gemini API key">
-            <div className="grid gap-3">
-              <div className="relative">
-                <input
-                  className="h-11 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 pr-11 text-[14px] font-medium text-white outline-none transition placeholder:text-white/28 focus:border-accent/70"
-                  value={apiKey}
-                  onChange={(event) => {
-                    setApiKey(event.target.value);
-                    setSaveStatus("idle");
-                  }}
-                  type={showKey ? "text" : "password"}
-                  disabled={isLoading}
-                  placeholder={
-                    savedKeyHint ? `Saved ${savedKeyHint}. Paste a new key to replace it.` : "Paste Gemini API key"
-                  }
-                />
-                <button
-                  className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-white/42 transition hover:bg-white/[0.08] hover:text-white"
-                  type="button"
-                  onClick={() => setShowKey((value) => !value)}
-                  aria-label={showKey ? "Hide API key" : "Show API key"}
-                  disabled={isLoading}
-                >
-                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-
-              <StatusLine status={checkStatus} message={checkMessage} />
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <p className="m-0 inline-flex min-h-8 items-center gap-2 text-[12px] font-medium text-white/42">
-                  <LockKeyhole size={14} />
-                  {saveStatus === "failed"
-                    ? "Could not save. Try again."
-                    : savedKeyHint
-                      ? `Gemini key saved ${savedKeyHint}`
-                      : "Keys are hidden after saving."}
-                </p>
-                <Button
-                  className="h-10 rounded-lg bg-accent px-4 text-white hover:bg-accent-hover"
-                  disabled={isLoading || checkStatus !== "passed" || !apiKey.trim() || saveStatus === "saving"}
-                  onClick={() => void saveProvider()}
-                >
-                  <Save size={15} />
-                  {saveStatus === "saving" ? "Saving" : savedKeyHint ? "Update key" : "Save key"}
-                </Button>
-              </div>
-            </div>
-          </PanelBlock>
+          <ProviderKeyManager
+            providers={providerCatalog}
+            savedKeys={savedProviderKeys}
+            loading={isLoading}
+            onSaved={(providerKey) => {
+              setSavedProviderKeys((current) => [
+                providerKey,
+                ...current.filter((key) => key.provider_id !== providerKey.provider_id),
+              ]);
+            }}
+          />
 
           <PanelBlock icon={Server} title="Gateway status">
             <div className="grid gap-3">
@@ -403,6 +251,11 @@ export function ProviderSettingsPanel() {
                 setModelSaveStatus("idle");
               }}
             />
+            <ModelCredentialAdvisory
+              model={chatModels.find((model) => model.modelAlias === chatAlias)}
+              credentialMode={settings?.credentialMode ?? "env-or-user"}
+              savedProviderKeys={savedProviderKeys}
+            />
             <ModelSelector
               label="Image-generation model"
               value={imageAlias}
@@ -413,17 +266,13 @@ export function ProviderSettingsPanel() {
                 setModelSaveStatus("idle");
               }}
             />
+            <ModelCredentialAdvisory
+              model={imageModels.find((model) => model.modelAlias === imageAlias)}
+              credentialMode={settings?.credentialMode ?? "env-or-user"}
+              savedProviderKeys={savedProviderKeys}
+            />
 
             <div className="grid gap-2">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {providerRows.map((provider) => (
-                  <ProviderStatusRow
-                    key={provider.id}
-                    provider={provider}
-                    active={settings?.catalog.some((entry) => entry.provider === provider.id) ?? false}
-                  />
-                ))}
-              </div>
               <div className="flex flex-col gap-2 border-t border-white/[0.08] pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <StatusText status={modelSaveStatus} hasChanges={Boolean(hasModelChanges)} />
                 <Button
@@ -514,26 +363,41 @@ function ModelSelector({
   );
 }
 
-function ProviderStatusRow({
-  provider,
-  active,
+function ModelCredentialAdvisory({
+  model,
+  credentialMode,
+  savedProviderKeys,
 }: {
-  provider: { id: string; label: string; logoPath: string };
-  active: boolean;
+  model?: BrowserModelCatalogEntry;
+  credentialMode: "env-or-user" | "user-required" | "env-only";
+  savedProviderKeys: ProviderKeyMetadata[];
 }) {
+  if (!model) return null;
+
+  const savedKey = model.providerKeyId
+    ? savedProviderKeys.find(
+        (key) => key.provider_id === model.providerKeyId && key.status === "active",
+      )
+    : null;
+  const keyState = model.providerKeyId
+    ? savedKey ? `Saved ${savedKey.key_hint ?? "Configured"}` : "No saved provider key"
+    : "Settings BYOK is not supported for this provider";
+  const message =
+    credentialMode === "env-only"
+      ? "Settings keys remain saved, but gateway runtime uses administrator/environment credentials."
+      : credentialMode === "user-required"
+        ? model.providerKeyId
+          ? savedKey
+            ? "A saved provider key is available for required-key mode when runtime enforcement is enabled."
+            : `This selected model needs a saved ${model.providerLabel} key before runtime enforcement is enabled.`
+          : "This provider cannot satisfy required-key mode through Settings."
+        : model.providerKeyId
+          ? "A saved user key will be used when available after runtime enforcement; otherwise gateway environment credentials may be used."
+          : "This model uses gateway environment configuration because it has no Settings provider-key mapping.";
+
   return (
-    <div className="flex min-h-10 items-center gap-3 rounded-lg border border-white/[0.07] bg-white/[0.035] px-3">
-      <span className="grid h-7 w-7 place-items-center rounded-md bg-white">
-        <img src={provider.logoPath} alt="" className="h-[21px] w-[21px] object-contain" />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/72">{provider.label}</span>
-      <span
-        className={cn(
-          "h-2 w-2 rounded-full",
-          active ? "bg-accent" : "border border-white/22 bg-transparent",
-        )}
-        aria-label={active ? "Available in catalog" : "Not in catalog"}
-      />
+    <div className="-mt-2 rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[11px] font-medium text-white/44">
+      <span className="text-white/68">{model.providerLabel}: {keyState}.</span>{" "}{message}
     </div>
   );
 }

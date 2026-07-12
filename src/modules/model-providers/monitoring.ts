@@ -1,4 +1,9 @@
-import type { ModelGatewayEvent, ModelGatewayUsage, ModelProviderId } from "./types";
+import type {
+  ModelGatewayCredentialSource,
+  ModelGatewayEvent,
+  ModelGatewayUsage,
+  ModelProviderId,
+} from "./types";
 import { emptyModelGatewayUsage } from "./usage";
 
 export type ModelGatewayEventInput = {
@@ -14,10 +19,12 @@ export type ModelGatewayEventInput = {
   usage?: Partial<ModelGatewayUsage> | null;
   errorCode?: string | null;
   gateway?: ModelGatewayEvent["gateway"];
+  credentialSource?: ModelGatewayCredentialSource;
 };
 
 export function createModelGatewayEvent(input: ModelGatewayEventInput): ModelGatewayEvent {
   const usage = { ...emptyModelGatewayUsage, ...(input.usage ?? {}) };
+  const gateway = input.gateway ?? "litellm";
 
   return {
     userId: input.userId ?? null,
@@ -35,7 +42,8 @@ export function createModelGatewayEvent(input: ModelGatewayEventInput): ModelGat
     imageCount: usage.imageCount,
     estimatedCost: usage.estimatedCost,
     errorCode: input.errorCode ?? null,
-    gateway: input.gateway ?? "litellm",
+    gateway,
+    credentialSource: input.credentialSource ?? defaultCredentialSource(gateway),
   };
 }
 
@@ -58,7 +66,16 @@ export function toLoggableModelGatewayEvent(event: ModelGatewayEvent): Record<st
     estimatedCost: event.estimatedCost,
     errorCode: event.errorCode,
     gateway: event.gateway,
+    credentialSource: event.credentialSource,
   };
+}
+
+function defaultCredentialSource(
+  gateway: ModelGatewayEvent["gateway"],
+): ModelGatewayCredentialSource {
+  if (gateway === "direct-gemini") return "direct-gemini";
+  if (gateway === "mock") return "mock";
+  return "gateway-env";
 }
 
 export function logModelGatewayEvent(

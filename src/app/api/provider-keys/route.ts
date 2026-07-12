@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
+import {
+  getProviderKeyHint,
+  getBrowserProviderKeyCatalog,
+  parseProviderCredentialPayload,
+  serializeProviderCredentials,
+} from "@/lib/provider-key-registry";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-
-const providerKeySchema = z.object({
-  providerId: z.literal("google-gemini"),
-  apiKey: z.string().trim().min(20).max(4000),
-});
-
-function getKeyHint(apiKey: string) {
-  const trimmed = apiKey.trim();
-  return `...${trimmed.slice(-4)}`;
-}
 
 export async function GET() {
   const supabase = await createClient();
@@ -36,13 +31,16 @@ export async function GET() {
     return NextResponse.json({ error: "Unable to load provider keys." }, { status: 500 });
   }
 
-  return NextResponse.json({ providerKeys: data ?? [] });
+  return NextResponse.json({
+    providerKeys: data ?? [],
+    providers: getBrowserProviderKeyCatalog(),
+  });
 }
 
 export async function POST(request: Request) {
-  const parsed = providerKeySchema.safeParse(await request.json().catch(() => null));
+  const parsed = parseProviderCredentialPayload(await request.json().catch(() => null));
 
-  if (!parsed.success) {
+  if (!parsed) {
     return NextResponse.json({ error: "Invalid provider key." }, { status: 400 });
   }
 
@@ -59,9 +57,9 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("upsert_provider_key", {
     p_user_id: user.id,
-    p_provider_id: parsed.data.providerId,
-    p_secret: parsed.data.apiKey,
-    p_key_hint: getKeyHint(parsed.data.apiKey),
+    p_provider_id: parsed.providerId,
+    p_secret: serializeProviderCredentials(parsed.providerId, parsed.credentials),
+    p_key_hint: getProviderKeyHint(parsed.credentials),
   });
 
   if (error) {

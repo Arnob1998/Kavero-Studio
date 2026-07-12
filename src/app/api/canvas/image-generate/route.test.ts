@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getCanvasAdmin: vi.fn(),
   requireCanvasAccess: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   generateContent: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock("@/lib/canvas/api", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@google/genai", () => ({
@@ -44,6 +46,7 @@ describe("canvas image generation API", () => {
     mocks.requireCanvasAccess.mockResolvedValue({ response: null });
     mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({}));
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.generateContent.mockResolvedValue(geminiImageResponse("DIRECT"));
     vi.stubGlobal("fetch", vi.fn<FetchMock>());
     consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -70,6 +73,8 @@ describe("canvas image generation API", () => {
       model: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
       modalities: ["image", "text"],
     });
+    expect(outboundBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "google-gemini");
     expect(JSON.stringify(outboundBody.messages)).toContain("canvas-image-generation");
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
@@ -89,6 +94,70 @@ describe("canvas image generation API", () => {
     expect(body.text).toContain("Gateway text");
     expect(body.images).toHaveLength(4);
     expect(body.warnings).toEqual([]);
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"credentialSource\\":\\"gateway-env\\"');
+  });
+
+  it("injects trusted BYOK credentials, strips reserved fields, and does not persist history", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "canvas-user-key-0123456789" });
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("BYOK")));
+
+    const response = await POST(request(validBody({
+      api_key: "browser-key",
+      api_base: "https://browser.invalid",
+      base_url: "https://browser.invalid",
+      api_version: "browser-version",
+      user_config: { api_key: "nested-browser-key" },
+    })));
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(outbound.api_key).toBe("canvas-user-key-0123456789");
+    expect(outbound).not.toHaveProperty("api_base");
+    expect(outbound).not.toHaveProperty("base_url");
+    expect(outbound).not.toHaveProperty("api_version");
+    expect(outbound).not.toHaveProperty("user_config");
+    expect(mocks.getCanvasAdmin).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"credentialSource\\":\\"user-byok\\"');
+  });
+
+  it("rejects missing required image credentials before provider calls", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+
+    const response = await POST(request(validBody()));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ details: { code: "provider-credentials-required" } });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses env-only without loading or injecting user credentials", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("ENV")));
+
+    const response = await POST(request(validBody()));
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+    expect(outbound).not.toHaveProperty("api_key");
+  });
+
+  it("fails safely when the credential store is unavailable", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockRejectedValueOnce(new Error("vault secret payload"));
+
+    const response = await POST(request(validBody()));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({ details: { code: "provider-credentials-unavailable" } });
+    expect(JSON.stringify(body)).not.toContain("vault secret payload");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -115,6 +184,7 @@ describe("canvas image generation API", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getUserProviderApiKey).toHaveBeenCalledWith("user-1", "google-gemini");
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
     expect(mocks.generateContent).toHaveBeenCalledTimes(4);
     expect(mocks.generateContent).toHaveBeenCalledWith(
       expect.objectContaining({

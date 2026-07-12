@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   createAdminClient: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   getGoogleDriveAccessTokenForUser: vi.fn(),
   markGoogleDriveReconnectRequired: vi.fn(),
   getRuntimeManagedStorageDispatchDependencies: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@/lib/google-drive", () => ({
@@ -68,6 +70,7 @@ describe("canvas AI Local-first access", () => {
     });
     mocks.createAdminClient.mockReturnValue(createCanvasAiAdmin({ plan: "free", driveStatus: null }));
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.getGoogleDriveAccessTokenForUser.mockResolvedValue("drive-token");
     mocks.getRuntimeManagedStorageDispatchDependencies.mockReturnValue({
       ok: true,

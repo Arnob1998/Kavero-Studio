@@ -12,6 +12,11 @@ import {
   isModelGatewayError,
   logModelGatewayEvent,
 } from "@/modules/model-providers";
+import {
+  createSafeRuntimeCredentialFailureResponse,
+  prepareLiteLlmRuntimeRequest,
+  resolveChatOrchestrationRuntimeCredentials,
+} from "@/modules/model-providers/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -361,6 +366,10 @@ async function handleGatewayRefinement({
   const selection = getResolvedModelProviderPreferences(preferences);
   const modelAlias = selection.chatOrchestrationModelAlias;
   const catalogEntry = getModelCatalogEntry(modelAlias);
+  const credentials = await resolveChatOrchestrationRuntimeCredentials({ userId, modelAlias });
+  if (!credentials.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Prompt refinement", credentials);
+  }
   const questionsRemaining = Math.max(0, MAX_REFINER_QUESTIONS - parsed.input.answers.length);
   const client = createLiteLlmClient({ config });
   const startedAt = Date.now();
@@ -376,17 +385,25 @@ async function handleGatewayRefinement({
     });
   }
 
+  const prepared = prepareLiteLlmRuntimeRequest(
+    {
+      model: modelAlias,
+      temperature: 0.35,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: PROMPT_REFINER_SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+    },
+    credentials,
+  );
+  if (!prepared.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Prompt refinement", prepared);
+  }
+
   try {
     const response = await client.chatCompletions(
-      {
-        model: modelAlias,
-        temperature: 0.35,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: PROMPT_REFINER_SYSTEM_PROMPT },
-          { role: "user", content },
-        ],
-      },
+      prepared.body,
       {
         provider: catalogEntry?.provider ?? null,
         model: catalogEntry?.model ?? null,
@@ -412,6 +429,7 @@ async function handleGatewayRefinement({
           latencyMs: Date.now() - startedAt,
           usage: response.usage,
           errorCode: "invalid_response",
+          credentialSource: prepared.credentialSource,
         }),
       );
       return jsonError("Prompt refinement returned an invalid response.", 502);
@@ -429,6 +447,7 @@ async function handleGatewayRefinement({
         status: "success",
         latencyMs: Date.now() - startedAt,
         usage: response.usage,
+        credentialSource: prepared.credentialSource,
       }),
     );
 
@@ -447,6 +466,7 @@ async function handleGatewayRefinement({
         status: "error",
         latencyMs: Date.now() - startedAt,
         errorCode: details?.errorCode ?? "provider_error",
+        credentialSource: prepared.credentialSource,
       }),
     );
     return getGatewayFailureResponse(error);

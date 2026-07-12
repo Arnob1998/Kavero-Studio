@@ -30,6 +30,13 @@ import {
   type ModelGatewayUsage,
   type ModelProviderId,
 } from "@/modules/model-providers";
+import {
+  createSafeRuntimeCredentialFailureResponse,
+  prepareLiteLlmImageRuntimeRequest,
+  prepareLiteLlmRuntimeRequest,
+  resolveChatOrchestrationRuntimeCredentials,
+  resolveImageGenerationRuntimeCredentials,
+} from "@/modules/model-providers/server";
 
 const categoryKeys = ["background", "people", "products", "objects", "text_graphics", "other"] as const;
 const imageModelIds = [
@@ -259,6 +266,20 @@ export async function handleAutoSegmentRequest(request: Request): Promise<Respon
   const sourceBase64 = sourceRead.sourceBase64;
   const sourceName = input.sourceName || asset.original_name || "source image";
 
+  const selectionResult = await loadImageModelSelection({ userId: user.id, admin });
+  if (!selectionResult.ok) return selectionResult.response;
+  const imageCredentials = await resolveImageGenerationRuntimeCredentials({
+    userId: user.id,
+    modelAlias: selectionResult.selection.modelAlias,
+  });
+  if (!imageCredentials.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Auto Segment", imageCredentials);
+  }
+  const preparedImageRequest = prepareLiteLlmImageRuntimeRequest(imageCredentials);
+  if (!("transformRequestBody" in preparedImageRequest)) {
+    return createSafeRuntimeCredentialFailureResponse("Auto Segment", preparedImageRequest);
+  }
+
   const planPayload = await getGatewaySegmentPlanPayload({
     config: gatewayConfig,
     userId: user.id,
@@ -268,9 +289,6 @@ export async function handleAutoSegmentRequest(request: Request): Promise<Respon
     sourceBase64,
   });
   if (responseResult(planPayload)) return planPayload.response;
-
-  const selectionResult = await loadImageModelSelection({ userId: user.id, admin });
-  if (!selectionResult.ok) return selectionResult.response;
 
   return createAutoSegmentResponse({
     planPayload,
@@ -288,6 +306,8 @@ export async function handleAutoSegmentRequest(request: Request): Promise<Respon
         sourceBase64,
         mimeType: asset.content_type,
         warnings,
+        transformRequestBody: preparedImageRequest.transformRequestBody,
+        credentialSource: preparedImageRequest.credentialSource,
       }),
   });
 }
@@ -566,24 +586,44 @@ async function getGatewaySegmentPlanPayload({
   });
   if (!resolved.ok) return { response: resolved.response };
 
+  const credentials = await resolveChatOrchestrationRuntimeCredentials({
+    userId,
+    modelAlias: resolved.selection.modelAlias,
+  });
+  if (!credentials.ok) {
+    return {
+      response: createSafeRuntimeCredentialFailureResponse("Auto Segment", credentials),
+    };
+  }
+
+  const prepared = prepareLiteLlmRuntimeRequest(
+    {
+      model: resolved.selection.modelAlias,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: JSON.stringify(buildSegmentPlanningPayload(sourceName), null, 2) },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${sourceBase64}` } },
+          ],
+        },
+      ],
+    },
+    credentials,
+  );
+  if (!prepared.ok) {
+    return {
+      response: createSafeRuntimeCredentialFailureResponse("Auto Segment", prepared),
+    };
+  }
+
   const client = createLiteLlmClient({ config });
   const startedAt = Date.now();
   try {
     const response = await client.chatCompletions(
-      {
-        model: resolved.selection.modelAlias,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: JSON.stringify(buildSegmentPlanningPayload(sourceName), null, 2) },
-              { type: "image_url", image_url: { url: `data:${mimeType};base64,${sourceBase64}` } },
-            ],
-          },
-        ],
-      },
+      prepared.body,
       {
         provider: resolved.selection.provider,
         model: resolved.selection.model,
@@ -599,6 +639,7 @@ async function getGatewaySegmentPlanPayload({
       requestId: response.requestId,
       callId: response.callId,
       usage: response.usage,
+      credentialSource: prepared.credentialSource,
     });
     return jsonFromText(collectLiteLlmAssistantText(response.data));
   } catch (error) {
@@ -612,6 +653,7 @@ async function getGatewaySegmentPlanPayload({
       requestId: details?.requestId ?? null,
       callId: details?.callId ?? null,
       errorCode: details?.errorCode ?? "provider_error",
+      credentialSource: prepared.credentialSource,
     });
     return { response: createSafeGatewayFailureResponse(error, "Auto Segment") };
   }
@@ -656,6 +698,8 @@ async function isolateSegmentWithGateway({
   sourceBase64,
   mimeType,
   warnings,
+  transformRequestBody,
+  credentialSource,
 }: {
   config: Extract<ModelGatewayConfig, { status: "configured" }>;
   userId: string;
@@ -664,6 +708,8 @@ async function isolateSegmentWithGateway({
   sourceBase64: string;
   mimeType: string;
   warnings: string[];
+  transformRequestBody: (body: Record<string, unknown>) => Record<string, unknown>;
+  credentialSource: "user-byok" | "gateway-env";
 }): Promise<GeneratedSegment> {
   const startedAt = Date.now();
   try {
@@ -689,6 +735,7 @@ async function isolateSegmentWithGateway({
         },
       ],
       taskLabel: "auto-segment-isolation",
+      transformRequestBody,
     });
 
     logAutoSegmentImageGatewayEvent({
@@ -700,6 +747,7 @@ async function isolateSegmentWithGateway({
       callId: result.callId,
       usage: result.usage,
       imageCount: result.images.length,
+      credentialSource,
     });
 
     const image = result.images[0];
@@ -721,6 +769,7 @@ async function isolateSegmentWithGateway({
       requestId: details?.requestId ?? null,
       callId: details?.callId ?? null,
       errorCode: details?.errorCode ?? "provider_error",
+      credentialSource,
     });
     logAutoSegmentGatewayIsolationFailure(error);
     warnings.push(`Unable to isolate ${segment.label}.`);
@@ -742,6 +791,7 @@ function logAutoSegmentImageGatewayEvent(input: {
   usage?: Partial<ModelGatewayUsage> | null;
   imageCount?: number | null;
   errorCode?: string | null;
+  credentialSource: "user-byok" | "gateway-env";
 }) {
   logModelGatewayEvent(
     createModelGatewayEvent({
@@ -759,6 +809,7 @@ function logAutoSegmentImageGatewayEvent(input: {
         imageCount: input.imageCount ?? input.usage?.imageCount ?? null,
       },
       errorCode: input.errorCode ?? null,
+      credentialSource: input.credentialSource,
     }),
   );
 }

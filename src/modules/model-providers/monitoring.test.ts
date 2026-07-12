@@ -26,6 +26,7 @@ describe("model gateway monitoring", () => {
 
     expect(event).toMatchObject({
       gateway: "litellm",
+      credentialSource: "gateway-env",
       status: "success",
       inputTokens: 12,
       outputTokens: 8,
@@ -43,6 +44,38 @@ describe("model gateway monitoring", () => {
     expect(payload).not.toHaveProperty("messages");
     expect(payload).not.toHaveProperty("images");
     expect(payload).not.toHaveProperty("prompt");
+  });
+
+  it("normalizes explicit and non-LiteLLM credential sources", () => {
+    expect(
+      createModelGatewayEvent({
+        feature: "copilot",
+        modelAlias: "mock",
+        status: "success",
+        latencyMs: 1,
+        gateway: "mock",
+      }).credentialSource,
+    ).toBe("mock");
+
+    expect(
+      createModelGatewayEvent({
+        feature: "image-generation",
+        modelAlias: "kavero-image-generation-default",
+        status: "success",
+        latencyMs: 1,
+        gateway: "direct-gemini",
+      }).credentialSource,
+    ).toBe("direct-gemini");
+
+    expect(
+      createModelGatewayEvent({
+        feature: "prompt-refiner",
+        modelAlias: "kavero-chat-orchestration-default",
+        status: "success",
+        latencyMs: 1,
+        credentialSource: "user-byok",
+      }).credentialSource,
+    ).toBe("user-byok");
   });
 
   it("logs structured JSON through the provided logger", () => {

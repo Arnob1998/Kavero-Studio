@@ -7,5 +7,6 @@ export * from "./litellm-image-generation";
 export * from "./litellm-client";
 export * from "./monitoring";
 export * from "./preferences";
+export * from "./provider-key-mapping";
 export * from "./types";
 export * from "./usage";

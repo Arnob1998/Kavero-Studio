@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   requireCanvasAccess: vi.fn(),
   requireCanvasAdmin: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   getGoogleDriveAccessTokenForUser: vi.fn(),
   markGoogleDriveReconnectRequired: vi.fn(),
   getRuntimeManagedStorageDispatchDependencies: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/canvas/api", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@/lib/google-drive", () => ({
@@ -106,6 +108,7 @@ function request(body: Record<string, unknown>) {
 
 describe("canvas auto segment API", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -114,6 +117,7 @@ describe("canvas auto segment API", () => {
     mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
     mocks.requireCanvasAccess.mockResolvedValue({ response: null });
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.getGoogleDriveAccessTokenForUser.mockResolvedValue("drive-token");
     mocks.getRuntimeManagedStorageDispatchDependencies.mockReturnValue({
       ok: true,
@@ -132,6 +136,7 @@ describe("canvas auto segment API", () => {
     });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("source", { headers: { "Content-Type": "image/png" } })));
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.generateContent
       .mockResolvedValueOnce({
         text: JSON.stringify({
@@ -162,6 +167,7 @@ describe("canvas auto segment API", () => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     consoleErrorSpy.mockRestore();
+    consoleInfoSpy.mockRestore();
   });
 
   it("rejects unauthenticated users", async () => {
@@ -208,6 +214,7 @@ describe("canvas auto segment API", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
     expect(admin.__mocks.select).toHaveBeenCalledWith(
       "id, original_name, content_type, drive_file_id, drive_status, storage_ref, storage_kind, storage_status, storage_metadata, storage_external_id, storage_external_url",
     );
@@ -232,6 +239,9 @@ describe("canvas auto segment API", () => {
 
   it("uses the selected chat alias for gateway planning and image alias for isolation", async () => {
     configureGateway();
+    mocks.getUserProviderCredentials.mockImplementation(async (_userId, providerId) =>
+      providerId === "openai" ? { apiKey: "sk-user-openai-1234567890" } : null,
+    );
     const admin = adminForAsset(
       asset({ storage_ref: googleDriveRef() }),
       {
@@ -257,21 +267,115 @@ describe("canvas auto segment API", () => {
     expect(planningBody).toMatchObject({
       model: "kavero-chat-openai-example",
       response_format: { type: "json_object" },
+      api_key: "sk-user-openai-1234567890",
     });
     expect(JSON.stringify(planningBody.messages)).toContain("data:image/png;base64");
     expect(isolationBody).toMatchObject({
       model: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
       modalities: ["image", "text"],
     });
+    expect(isolationBody).not.toHaveProperty("api_key");
     expect(JSON.stringify(isolationBody.messages)).toContain("auto-segment-isolation");
     expect(JSON.stringify(isolationBody.messages)).toContain("White target mask on black background only.");
     expect(JSON.stringify(isolationBody.messages)).toContain("data:image/png;base64");
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
+    const isolationEvent = consoleInfoSpy.mock.calls
+      .map((call: unknown[]) => JSON.parse(String(call[0])) as { feature?: string; credentialSource?: string })
+      .find((event: { feature?: string }) => event.feature === "auto-segment-isolation");
+    expect(isolationEvent?.credentialSource).toBe("gateway-env");
     expect(body.categories[0].segments[0]).toMatchObject({
       status: "ready",
       image: { dataUrl: "data:image/png;base64,MASK" },
     });
+  });
+
+  it("injects trusted image credentials into isolation and strips reserved caller fields", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockResolvedValue({ apiKey: "image-user-key-0123456789" });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("MASK"));
+
+    const response = await POST(request({
+      assetId: "asset-1",
+      api_key: "browser-key",
+      api_base: "https://browser.invalid",
+      base_url: "https://browser.invalid",
+      api_version: "browser-version",
+      user_config: { api_key: "nested-browser-key" },
+    }));
+    const isolationBody = JSON.parse(String(vi.mocked(fetch).mock.calls[2]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(isolationBody.api_key).toBe("image-user-key-0123456789");
+    expect(isolationBody).not.toHaveProperty("api_base");
+    expect(isolationBody).not.toHaveProperty("base_url");
+    expect(isolationBody).not.toHaveProperty("api_version");
+    expect(isolationBody).not.toHaveProperty("user_config");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"feature\\":\\"auto-segment-isolation\\"');
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"credentialSource\\":\\"user-byok\\"');
+  });
+
+  it("rejects missing image credentials in user-required mode before planning or isolation", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+    const admin = adminForAsset(asset({ storage_ref: googleDriveRef() }));
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("source", { headers: { "Content-Type": "image/png" } }),
+    );
+
+    const response = await POST(request({ assetId: "asset-1" }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      details: { code: "provider-credentials-required" },
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("fails safely before planning when the image credential store is unavailable", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockRejectedValueOnce(new Error("vault secret payload"));
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("source", { headers: { "Content-Type": "image/png" } }),
+    );
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({ details: { code: "provider-credentials-unavailable" } });
+    expect(JSON.stringify(body)).not.toContain("vault secret payload");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses gateway-env planning and ignores saved keys in env-only mode", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    const admin = adminForAsset(asset({ storage_ref: googleDriveRef() }));
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("MASK"));
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const planningBody = JSON.parse(String(vi.mocked(fetch).mock.calls[1]![1]!.body));
+    const isolationBody = JSON.parse(String(vi.mocked(fetch).mock.calls[2]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(planningBody).not.toHaveProperty("api_key");
+    expect(isolationBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
   });
 
   it("falls back to the default chat alias when gateway planning stores a wrong-slot alias", async () => {
@@ -587,6 +691,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-or-user");
 }
 
 function litellmResponse(payload: unknown) {

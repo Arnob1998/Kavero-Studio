@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isModelGatewayError, type ModelGatewayConfig } from "@/modules/model-providers";
+import type { ResolvedModelCredentials } from "@/modules/model-providers/server";
 import type { CanvasAssistantProviderInput } from "./assistant-orchestrator";
 import { createLiteLlmCanvasAssistantProvider } from "./litellm-assistant-provider";
 
@@ -105,6 +106,7 @@ describe("LiteLLM canvas assistant provider", () => {
       config,
       modelAlias: "kavero-chat-openai-example",
       userId: "user-1",
+      credentials: userByokCredentials("kavero-chat-openai-example", "sk-user-openai-1234567890"),
     });
     const result = await provider.generate(providerInput);
     const outboundBody = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body));
@@ -120,6 +122,7 @@ describe("LiteLLM canvas assistant provider", () => {
       model: "kavero-chat-openai-example",
       temperature: 0.2,
       tool_choice: "auto",
+      api_key: "sk-user-openai-1234567890",
       messages: [{ role: "system", content: expect.stringContaining("Kavero") }, { role: "user" }],
     });
     expect(outboundBody.tools).toEqual(
@@ -143,6 +146,8 @@ describe("LiteLLM canvas assistant provider", () => {
     expect(imagePart).toEqual({ type: "image_url", image_url: { url: dataUrl } });
     expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain(dataUrl);
     expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain("VISUALPREVIEWPAYLOAD");
+    expect(loggedCredentialSources(consoleInfoSpy)).toContain("user-byok");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain("sk-user-openai-1234567890");
     expect(result).toEqual({
       message: { role: "assistant", content: "Moved the title." },
       toolCalls: [
@@ -177,7 +182,11 @@ describe("LiteLLM canvas assistant provider", () => {
       ),
     );
 
-    const provider = createLiteLlmCanvasAssistantProvider({ config, modelAlias: "kavero-chat-openai-example" });
+    const provider = createLiteLlmCanvasAssistantProvider({
+      config,
+      modelAlias: "kavero-chat-openai-example",
+      credentials: gatewayEnvCredentials("kavero-chat-openai-example"),
+    });
     const result = await provider.generate(providerInput);
 
     expect(result.message.content).toBe("Malformed call.");
@@ -187,7 +196,11 @@ describe("LiteLLM canvas assistant provider", () => {
   it("throws a sanitized invalid-response error for invalid response envelopes", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({ choices: [] })));
 
-    const provider = createLiteLlmCanvasAssistantProvider({ config, modelAlias: "kavero-chat-openai-example" });
+    const provider = createLiteLlmCanvasAssistantProvider({
+      config,
+      modelAlias: "kavero-chat-openai-example",
+      credentials: gatewayEnvCredentials("kavero-chat-openai-example"),
+    });
 
     await expect(provider.generate(providerInput)).rejects.toSatisfy((error: unknown) => {
       expect(isModelGatewayError(error)).toBe(true);
@@ -214,5 +227,42 @@ function litellmResponse(payload: unknown) {
       "x-request-id": "req-1",
       "x-litellm-call-id": "call-1",
     },
+  });
+}
+
+function gatewayEnvCredentials(modelAlias: string): ResolvedModelCredentials {
+  return {
+    ok: true,
+    status: "resolved",
+    credentialSource: "gateway-env",
+    credentials: null,
+    modelAlias,
+    slot: "chatOrchestration",
+    provider: "openai",
+    providerKeyId: "openai",
+  };
+}
+
+function userByokCredentials(modelAlias: string, apiKey: string): ResolvedModelCredentials {
+  return {
+    ok: true,
+    status: "resolved",
+    credentialSource: "user-byok",
+    credentials: { apiKey },
+    modelAlias,
+    slot: "chatOrchestration",
+    provider: "openai",
+    providerKeyId: "openai",
+  };
+}
+
+function loggedCredentialSources(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.flatMap(([value]: unknown[]) => {
+    try {
+      const parsed = JSON.parse(String(value)) as { credentialSource?: unknown };
+      return typeof parsed.credentialSource === "string" ? [parsed.credentialSource] : [];
+    } catch {
+      return [];
+    }
   });
 }

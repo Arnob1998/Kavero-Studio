@@ -18,6 +18,7 @@ describe("browser model catalog", () => {
     expect(catalog[0]).toMatchObject({
       providerLabel: expect.any(String),
       providerLogoPath: expect.stringMatching(/^\/llm-providers\//),
+      providerKeyId: "google-gemini",
       modelAlias: expect.any(String),
       displayLabel: expect.any(String),
       capabilities: {
@@ -27,5 +28,8 @@ describe("browser model catalog", () => {
     expect(JSON.stringify(catalog)).not.toContain("sk-");
     expect(JSON.stringify(catalog)).not.toContain("KAVERO_LITELLM");
     expect(JSON.stringify(catalog)).not.toContain("http://litellm");
+    expect(catalog.find((entry) => entry.provider === "openai")?.providerKeyId).toBe("openai");
+    expect(catalog.find((entry) => entry.provider === "groq")?.providerKeyId).toBe("groq");
+    expect(catalog.find((entry) => entry.provider === "ollama")?.providerKeyId).toBeNull();
   });
 });

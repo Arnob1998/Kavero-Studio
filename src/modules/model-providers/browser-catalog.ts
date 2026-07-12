@@ -1,4 +1,6 @@
 import { modelCatalog } from "./catalog";
+import { getProviderKeyIdForModelProvider } from "./provider-key-mapping";
+import type { SupportedProviderId } from "@/lib/provider-key-registry";
 import type { ModelCatalogEntry, ModelCapabilitySlot, ModelProviderId } from "./types";
 
 const providerDisplay: Record<ModelProviderId, { label: string; logoPath: string }> = {
@@ -24,6 +26,7 @@ export type BrowserModelCatalogEntry = {
   provider: ModelProviderId;
   providerLabel: string;
   providerLogoPath: string;
+  providerKeyId: SupportedProviderId | null;
   modelAlias: string;
   displayLabel: string;
   capabilities: {
@@ -44,6 +47,7 @@ export function toBrowserModelCatalogEntry(entry: ModelCatalogEntry): BrowserMod
     provider: entry.provider,
     providerLabel: provider.label,
     providerLogoPath: provider.logoPath,
+    providerKeyId: getProviderKeyIdForModelProvider(entry.provider),
     modelAlias: entry.modelAlias,
     displayLabel: entry.displayLabel,
     capabilities: {

@@ -100,6 +100,12 @@ export class ModelGatewayError extends Error {
 
 export type ModelGatewayEventStatus = "success" | "error";
 
+export type ModelGatewayCredentialSource =
+  | "user-byok"
+  | "gateway-env"
+  | "direct-gemini"
+  | "mock";
+
 export type ModelGatewayEvent = {
   userId: string | null;
   feature: string;
@@ -117,6 +123,7 @@ export type ModelGatewayEvent = {
   estimatedCost: number | null;
   errorCode: string | null;
   gateway: "litellm" | "direct-gemini" | "mock";
+  credentialSource: ModelGatewayCredentialSource;
 };
 
 export type LiteLlmFetch = (

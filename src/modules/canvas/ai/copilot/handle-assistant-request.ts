@@ -13,6 +13,10 @@ import {
   getModelGatewayConfig,
   getResolvedModelProviderPreferences,
 } from "@/modules/model-providers";
+import {
+  createSafeRuntimeCredentialFailureResponse,
+  resolveChatOrchestrationRuntimeCredentials,
+} from "@/modules/model-providers/server";
 
 export async function handleAssistantRequest(request: Request) {
   const user = await getCanvasUser();
@@ -28,10 +32,18 @@ export async function handleAssistantRequest(request: Request) {
         return NextResponse.json({ error: "Unable to load Copilot model settings." }, { status: 500 });
       }
       const selection = getResolvedModelProviderPreferences(preferences.preferences);
+      const credentials = await resolveChatOrchestrationRuntimeCredentials({
+        userId: user.id,
+        modelAlias: selection.chatOrchestrationModelAlias,
+      });
+      if (!credentials.ok) {
+        return createSafeRuntimeCredentialFailureResponse("Canvas Copilot", credentials);
+      }
       provider = createLiteLlmCanvasAssistantProvider({
         config: gatewayConfig,
         modelAlias: selection.chatOrchestrationModelAlias,
         userId: user.id,
+        credentials,
       });
     } else if (gatewayConfig.status === "error") {
       return NextResponse.json(

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   createAdminClient: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   normalizeUserPlan: vi.fn(),
   getGenerationLimit: vi.fn(),
   getGoogleDriveConnection: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("@google/genai", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -321,6 +323,7 @@ describe("/api/generate POST", () => {
     mocks.createClient.mockResolvedValue(supabase);
     mocks.createAdminClient.mockReturnValue(admin);
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.normalizeUserPlan.mockReturnValue("premium");
     mocks.getGenerationLimit.mockReturnValue(null);
     mocks.getGoogleDriveConnection.mockResolvedValue({
@@ -382,6 +385,7 @@ describe("/api/generate POST", () => {
     delete process.env.KAVERO_MODEL_GATEWAY;
     delete process.env.KAVERO_LITELLM_BASE_URL;
     delete process.env.KAVERO_LITELLM_API_KEY;
+    delete process.env.KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE;
   });
 
   it("returns the current auth error for unauthenticated users", async () => {
@@ -545,6 +549,7 @@ describe("/api/generate POST", () => {
     const body = await json(response);
 
     expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
     expect(body).toMatchObject({
       model: "gemini-3.1-flash-image-preview",
       modelLabel: "Nano Banana 2",
@@ -584,6 +589,8 @@ describe("/api/generate POST", () => {
     expect(response.status).toBe(200);
     expect(requestBody.model).toBe("kavero-image-generation-default");
     expect(requestBody.modalities).toEqual(["image", "text"]);
+    expect(requestBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "google-gemini");
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
     expect(body).toMatchObject({
@@ -601,6 +608,75 @@ describe("/api/generate POST", () => {
       }),
     ]);
     expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).toContain('\\"credentialSource\\":\\"gateway-env\\"');
+  });
+
+  it("injects only trusted image credentials and strips reserved caller fields", async () => {
+    enableGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "user-gemini-key-0123456789" });
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse(gatewayImageResponse()));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      api_key: "browser-key",
+      api_base: "https://browser.invalid",
+      base_url: "https://browser.invalid",
+      api_version: "browser-version",
+      user_config: { api_key: "nested-browser-key" },
+    })));
+    const outbound = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(outbound.api_key).toBe("user-gemini-key-0123456789");
+    expect(outbound).not.toHaveProperty("api_base");
+    expect(outbound).not.toHaveProperty("base_url");
+    expect(outbound).not.toHaveProperty("api_version");
+    expect(outbound).not.toHaveProperty("user_config");
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).toContain('\\"credentialSource\\":\\"user-byok\\"');
+  });
+
+  it("rejects missing required image credentials before any provider call", async () => {
+    enableGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+
+    expect(response.status).toBe(403);
+    await expect(json(response)).resolves.toMatchObject({ details: { code: "provider-credentials-required" } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses env-only without loading user credentials", async () => {
+    enableGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse(gatewayImageResponse()));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+    const outbound = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+    expect(outbound).not.toHaveProperty("api_key");
+  });
+
+  it("fails safely when the image credential store is unavailable", async () => {
+    enableGateway();
+    mocks.getUserProviderCredentials.mockRejectedValueOnce(new Error("vault secret payload"));
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+    const body = await json(response);
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({ details: { code: "provider-credentials-unavailable" } });
+    expect(JSON.stringify(body)).not.toContain("vault secret payload");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
   });
 
   it("falls back to the image-generation default when the stored alias is for the wrong slot", async () => {

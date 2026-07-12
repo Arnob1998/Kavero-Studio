@@ -23,6 +23,11 @@ import {
   type ModelGatewayUsage,
   type ModelProviderId,
 } from "@/modules/model-providers";
+import {
+  createSafeRuntimeCredentialFailureResponse,
+  prepareLiteLlmImageRuntimeRequest,
+  resolveImageGenerationRuntimeCredentials,
+} from "@/modules/model-providers/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -181,6 +186,7 @@ function logStandaloneGenerateGatewayEvent(input: {
   usage?: Partial<ModelGatewayUsage> | null;
   imageCount?: number | null;
   errorCode?: string | null;
+  credentialSource: "user-byok" | "gateway-env";
 }) {
   logModelGatewayEvent(
     createModelGatewayEvent({
@@ -198,6 +204,7 @@ function logStandaloneGenerateGatewayEvent(input: {
         imageCount: input.imageCount ?? input.usage?.imageCount ?? null,
       },
       errorCode: input.errorCode ?? null,
+      credentialSource: input.credentialSource,
     }),
   );
 }
@@ -393,6 +400,19 @@ async function handleGatewayGeneration({
   }
   const selection: ImageModelSelection = loadedSelection;
 
+  const credentials = await resolveImageGenerationRuntimeCredentials({
+    userId,
+    modelAlias: selection.modelAlias,
+  });
+  if (!credentials.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Image generation", credentials);
+  }
+  const prepared = prepareLiteLlmImageRuntimeRequest(credentials);
+  if (!("transformRequestBody" in prepared)) {
+    return createSafeRuntimeCredentialFailureResponse("Image generation", prepared);
+  }
+  const { transformRequestBody, credentialSource } = prepared;
+
   const warnings: string[] = [];
   const runCount = input.count;
 
@@ -418,6 +438,7 @@ async function handleGatewayGeneration({
           mimeType: image.mimeType,
           name: image.name,
         })),
+        transformRequestBody,
       });
 
       logStandaloneGenerateGatewayEvent({
@@ -429,6 +450,7 @@ async function handleGatewayGeneration({
         callId: result.callId,
         usage: result.usage,
         imageCount: result.images.length,
+        credentialSource,
       });
 
       return {
@@ -451,6 +473,7 @@ async function handleGatewayGeneration({
         requestId: details?.requestId ?? null,
         callId: details?.callId ?? null,
         errorCode: details?.errorCode ?? "provider_error",
+        credentialSource,
       });
       throw error;
     }

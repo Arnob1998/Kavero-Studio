@@ -65,6 +65,58 @@ describe("/api/provider-keys/check", () => {
     });
     expect(JSON.stringify(body)).not.toContain(apiKey);
   });
+
+  it.each([
+    ["openai", "sk-openai-012345678901234567890", "https://api.openai.com/v1/models"],
+    ["groq", "gsk_groq_012345678901234567890", "https://api.groq.com/openai/v1/models"],
+  ])("checks %s through a fixed server-side URL", async (providerId, apiKey, expectedUrl) => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(checkCredentialsRequest(providerId, { apiKey }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("passed");
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(expectedUrl);
+    expect(JSON.stringify(body)).not.toContain(apiKey);
+  });
+
+  it.each([
+    [
+      "azure-openai",
+      {
+        apiKey: "azure-key-012345678901234567890",
+        apiBase: "https://kavero.openai.azure.com",
+        apiVersion: "2025-04-01-preview",
+      },
+    ],
+    ["openai-compatible", { apiBase: "https://models.example.com/v1" }],
+  ])("returns safe validation-only metadata for %s", async (providerId, credentials) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(checkCredentialsRequest(providerId, credentials));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: "validation_only", check: "not_implemented" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain("azure-key");
+    expect(JSON.stringify(body)).not.toContain("models.example.com");
+    expect(JSON.stringify(body)).not.toContain("kavero.openai.azure.com");
+  });
+
+  it.each([
+    ["unsupported", { apiKey: "sk-0123456789012345678901234" }],
+    ["openai-compatible", { apiBase: "http://localhost:11434/v1" }],
+    ["azure-openai", { apiKey: "azure-key-012345678901234567890", apiBase: "https://example.com" }],
+  ])("rejects unsupported or invalid checks", async (providerId, credentials) => {
+    const response = await POST(checkCredentialsRequest(providerId, credentials));
+    expect(response.status).toBe(400);
+  });
 });
 
 function checkRequest(apiKey: string) {
@@ -75,6 +127,14 @@ function checkRequest(apiKey: string) {
       providerId: "google-gemini",
       apiKey,
     }),
+  });
+}
+
+function checkCredentialsRequest(providerId: string, credentials: Record<string, string>) {
+  return new Request("http://localhost/api/provider-keys/check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId, credentials }),
   });
 }
 

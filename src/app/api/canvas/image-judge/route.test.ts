@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getCanvasAdmin: vi.fn(),
   requireCanvasAccess: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   generateContent: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("@/lib/canvas/api", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@google/genai", () => ({
@@ -42,6 +44,7 @@ describe("canvas image judge API", () => {
     mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
     mocks.requireCanvasAccess.mockResolvedValue({ response: null });
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({}));
     mocks.generateContent.mockResolvedValue({
       text: JSON.stringify({ winnerId: "candidate-1", reason: "best fit" }),
@@ -60,6 +63,7 @@ describe("canvas image judge API", () => {
 
   it("uses the selected chat orchestration alias when the gateway is configured", async () => {
     configureGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "sk-user-openai-1234567890" });
     mocks.getCanvasAdmin.mockReturnValue(
       adminWithPreferences({
         modelProviders: { chatOrchestrationModelAlias: "kavero-chat-openai-example" },
@@ -76,9 +80,51 @@ describe("canvas image judge API", () => {
     expect(outboundBody).toMatchObject({
       model: "kavero-chat-openai-example",
       response_format: { type: "json_object" },
+      api_key: "sk-user-openai-1234567890",
     });
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(loggedCredentialSources(consoleInfoSpy)).toContain("user-byok");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain("sk-user-openai-1234567890");
+  });
+
+  it("uses gateway-env when env-or-user has no saved Image Judge key", async () => {
+    configureGateway();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({ winnerId: "candidate-1", reason: "best fit" })));
+
+    const response = await POST(judgeRequest());
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outboundBody).not.toHaveProperty("api_key");
+    expect(loggedCredentialSources(consoleInfoSpy)).toContain("gateway-env");
+  });
+
+  it("rejects missing Image Judge credentials in user-required mode", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+
+    const response = await POST(judgeRequest());
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      details: { code: "provider-credentials-required" },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("ignores saved Image Judge credentials in env-only mode", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({ winnerId: "candidate-1", reason: "best fit" })));
+
+    const response = await POST(judgeRequest());
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outboundBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
   });
 
   it("sends preview and candidate images only to LiteLLM without logging or responding with data URLs", async () => {
@@ -168,6 +214,18 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-or-user");
+}
+
+function loggedCredentialSources(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.flatMap(([value]: unknown[]) => {
+    try {
+      const parsed = JSON.parse(String(value)) as { credentialSource?: unknown };
+      return typeof parsed.credentialSource === "string" ? [parsed.credentialSource] : [];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function judgeRequest(options: { includePreview?: boolean } = {}) {

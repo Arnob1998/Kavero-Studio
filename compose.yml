@@ -30,6 +30,7 @@ services:
       KAVERO_MODEL_GATEWAY: ${KAVERO_MODEL_GATEWAY:-litellm}
       KAVERO_LITELLM_BASE_URL: ${KAVERO_LITELLM_BASE_URL:-http://litellm:4000}
       KAVERO_LITELLM_API_KEY: ${KAVERO_LITELLM_API_KEY:-sk-replace-with-kavero-litellm-api-key}
+      KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE: ${KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE:-env-or-user}
     volumes:
       - kavero-local-storage:/data/kavero-storage
     extra_hosts:

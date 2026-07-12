@@ -8,6 +8,7 @@ model_list:
     litellm_params:
       model: gemini/gemini-3.1-pro-preview
       api_key: os.environ/GEMINI_API_KEY
+    configurable_clientside_auth_params: ["api_key"]
 
   # Current Kavero image-generation default, labeled "Nano Banana 2" in today's UI:
   # standalone /generate, canvas image generation, and Auto Segment image/mask generation.
@@ -15,17 +16,20 @@ model_list:
     litellm_params:
       model: gemini/gemini-3.1-flash-image-preview
       api_key: os.environ/GEMINI_API_KEY
+    configurable_clientside_auth_params: ["api_key"]
 
   # Optional provider examples. These are not used by current runtime code.
   - model_name: kavero-chat-openai-example
     litellm_params:
       model: gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
+    configurable_clientside_auth_params: ["api_key"]
 
   - model_name: kavero-chat-groq-example
     litellm_params:
       model: groq/llama-3.1-8b-instant
       api_key: os.environ/GROQ_API_KEY
+    configurable_clientside_auth_params: ["api_key"]
 
   - model_name: kavero-chat-ollama-example
     litellm_params:

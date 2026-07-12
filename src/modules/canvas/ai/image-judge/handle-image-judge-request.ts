@@ -16,6 +16,11 @@ import {
   getModelGatewayConfig,
   isModelGatewayError,
 } from "@/modules/model-providers";
+import {
+  createSafeRuntimeCredentialFailureResponse,
+  prepareLiteLlmRuntimeRequest,
+  resolveChatOrchestrationRuntimeCredentials,
+} from "@/modules/model-providers/server";
 
 const imageInputSchema = z.object({
   id: z.string().trim().min(1).max(160),
@@ -169,23 +174,39 @@ async function handleGatewayImageJudge({
   });
   if (!resolved.ok) return resolved.response;
 
+  const credentials = await resolveChatOrchestrationRuntimeCredentials({
+    userId,
+    modelAlias: resolved.selection.modelAlias,
+  });
+  if (!credentials.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Image Judge", credentials);
+  }
+
+  const prepared = prepareLiteLlmRuntimeRequest(
+    {
+      model: resolved.selection.modelAlias,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a strict visual judge. Return only compact JSON. Prefer the image that best satisfies the user's intent, fits the canvas context, has clean composition, and has usable edges for canvas placement.",
+        },
+        { role: "user", content: buildGatewayJudgeContent(input, candidateIds) },
+      ],
+    },
+    credentials,
+  );
+  if (!prepared.ok) {
+    return createSafeRuntimeCredentialFailureResponse("Image Judge", prepared);
+  }
+
   const client = createLiteLlmClient({ config });
   const startedAt = Date.now();
   try {
     const response = await client.chatCompletions(
-      {
-        model: resolved.selection.modelAlias,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a strict visual judge. Return only compact JSON. Prefer the image that best satisfies the user's intent, fits the canvas context, has clean composition, and has usable edges for canvas placement.",
-          },
-          { role: "user", content: buildGatewayJudgeContent(input, candidateIds) },
-        ],
-      },
+      prepared.body,
       {
         provider: resolved.selection.provider,
         model: resolved.selection.model,
@@ -201,6 +222,7 @@ async function handleGatewayImageJudge({
       requestId: response.requestId,
       callId: response.callId,
       usage: response.usage,
+      credentialSource: prepared.credentialSource,
     });
 
     const text = collectLiteLlmAssistantText(response.data);
@@ -223,6 +245,7 @@ async function handleGatewayImageJudge({
       requestId: details?.requestId ?? null,
       callId: details?.callId ?? null,
       errorCode: details?.errorCode ?? "provider_error",
+      credentialSource: prepared.credentialSource,
     });
     return createSafeGatewayFailureResponse(error, "Image Judge");
   }

@@ -30,16 +30,38 @@ describe("/api/provider-keys", () => {
   });
 
   it("lists existing provider keys without secret material", async () => {
+    const providerKeys = [
+      providerKeyRow(),
+      { ...providerKeyRow(), id: "key-2", provider_id: "openai", provider_label: "OpenAI" },
+      { ...providerKeyRow(), id: "key-3", provider_id: "groq", provider_label: "Groq" },
+    ];
     mocks.createClient.mockResolvedValue(createSupabaseClient({ user: { id: "user-1" } }));
-    mocks.createAdminClient.mockReturnValue(createAdminClient({ providerKeys: [providerKeyRow()] }));
+    mocks.createAdminClient.mockReturnValue(createAdminClient({ providerKeys }));
 
     const response = await GET();
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ providerKeys: [providerKeyRow()] });
+    expect(body.providerKeys).toEqual(providerKeys);
+    expect(body.providers.map((provider: { id: string }) => provider.id)).toEqual([
+      "google-gemini",
+      "openai",
+      "groq",
+      "azure-openai",
+      "openai-compatible",
+    ]);
+    expect(body.providers.find((provider: { id: string }) => provider.id === "azure-openai")).toMatchObject({
+      checkMode: "validation-only",
+      credentialFields: [
+        { id: "apiKey", secret: true, inputType: "password" },
+        { id: "apiBase", secret: false, inputType: "url" },
+        { id: "apiVersion", secret: false, inputType: "text" },
+      ],
+    });
     expect(JSON.stringify(body)).not.toContain("sk-secret");
     expect(JSON.stringify(body)).not.toContain("AIza");
+    expect(JSON.stringify(body)).not.toContain("api_base");
+    expect(JSON.stringify(body)).not.toContain("storageFormat");
   });
 
   it("keeps google-gemini save behavior compatible", async () => {
@@ -90,16 +112,72 @@ describe("/api/provider-keys", () => {
     });
   });
 
-  it("continues to reject unsupported providers", async () => {
+  it.each([
+    ["openai", { apiKey: "sk-openai-012345678901234567890" }, "sk-openai-012345678901234567890", "...7890"],
+    ["groq", { apiKey: "gsk_groq_012345678901234567890" }, "gsk_groq_012345678901234567890", "...7890"],
+  ])("saves and validates %s credentials", async (providerId, credentials, expectedSecret, keyHint) => {
+    const rpc = createUpsertRpc(providerId, keyHint);
+    mocks.createClient.mockResolvedValue(createSupabaseClient({ user: { id: "user-1" } }));
+    mocks.createAdminClient.mockReturnValue({ rpc });
+
+    const response = await POST(providerRequest(providerId, credentials));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith("upsert_provider_key", {
+      p_user_id: "user-1",
+      p_provider_id: providerId,
+      p_secret: expectedSecret,
+      p_key_hint: keyHint,
+    });
+    expect(JSON.stringify(body)).not.toContain(expectedSecret);
+  });
+
+  it("stores Azure OpenAI multi-field credentials as encrypted JSON text", async () => {
+    const rpc = createUpsertRpc("azure-openai", "...7890");
+    mocks.createClient.mockResolvedValue(createSupabaseClient({ user: { id: "user-1" } }));
+    mocks.createAdminClient.mockReturnValue({ rpc });
+
+    const credentials = {
+      apiKey: "azure-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com/",
+      apiVersion: "2025-04-01-preview",
+    };
+    const response = await POST(providerRequest("azure-openai", credentials));
+    const body = await response.json();
+    const rpcPayload = rpc.mock.calls[0]![1] as { p_secret: string };
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(rpcPayload.p_secret)).toEqual({ ...credentials, apiBase: "https://kavero.openai.azure.com" });
+    expect(JSON.stringify(body)).not.toContain(credentials.apiKey);
+    expect(JSON.stringify(body)).not.toContain(credentials.apiBase);
+  });
+
+  it("accepts an OpenAI-compatible public base URL without requiring an API key", async () => {
+    const rpc = createUpsertRpc("openai-compatible", "Configured");
+    mocks.createClient.mockResolvedValue(createSupabaseClient({ user: { id: "user-1" } }));
+    mocks.createAdminClient.mockReturnValue({ rpc });
+
     const response = await POST(
-      new Request("http://localhost/api/provider-keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          providerId: "openai",
-          apiKey: "sk-0123456789012345678901234",
-        }),
-      }),
+      providerRequest("openai-compatible", { apiBase: "https://models.example.com/v1" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith("upsert_provider_key", {
+      p_user_id: "user-1",
+      p_provider_id: "openai-compatible",
+      p_secret: JSON.stringify({ apiBase: "https://models.example.com/v1" }),
+      p_key_hint: "Configured",
+    });
+  });
+
+  it.each([
+    ["anthropic", { apiKey: "sk-0123456789012345678901234" }],
+    ["azure-openai", { apiKey: "azure-key-012345678901234567890", apiBase: "https://example.com" }],
+    ["openai-compatible", { apiBase: "http://127.0.0.1:11434/v1" }],
+  ])("rejects unsupported providers or invalid credential shapes", async (providerId, credentials) => {
+    const response = await POST(
+      providerRequest(providerId, credentials),
     );
 
     expect(response.status).toBe(400);
@@ -113,6 +191,29 @@ function createSupabaseClient(options: { user: { id: string } | null }) {
       getUser: vi.fn(async () => ({ data: { user: options.user }, error: null })),
     },
   };
+}
+
+function providerRequest(providerId: string, credentials: Record<string, string>) {
+  return new Request("http://localhost/api/provider-keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId, credentials }),
+  });
+}
+
+function createUpsertRpc(providerId: string, keyHint: string) {
+  return vi.fn(async (_name: string, _payload: Record<string, unknown>) => ({
+    data: {
+      id: `key-${providerId}`,
+      provider_id: providerId,
+      provider_label: providerId,
+      key_hint: keyHint,
+      status: "active",
+      last_checked_at: null,
+      updated_at: "2026-07-10T00:00:00.000Z",
+    },
+    error: null,
+  }));
 }
 
 function createAdminClient(options: { providerKeys: unknown[] }) {
