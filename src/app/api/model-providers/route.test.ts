@@ -18,6 +18,7 @@ const envKeys = [
   "KAVERO_MODEL_GATEWAY",
   "KAVERO_LITELLM_BASE_URL",
   "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
   "KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE",
 ] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -48,6 +49,7 @@ describe("/api/model-providers", () => {
     process.env.KAVERO_MODEL_GATEWAY = "litellm";
     process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
     process.env.KAVERO_LITELLM_API_KEY = "sk-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
     mocks.createClient.mockResolvedValue(createSupabaseClient({ preferences: null }));
 
     const response = (await GET())!;

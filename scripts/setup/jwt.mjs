@@ -47,6 +47,7 @@ export function createDockerSecrets({ now } = {}) {
   const anonKey = signSupabaseJwt({ secret: jwtSecret, role: "anon", now });
   const serviceRoleKey = signSupabaseJwt({ secret: jwtSecret, role: "service_role", now });
   const liteLlmKey = randomSkSecret(48);
+  const liteLlmRoutingSecret = randomSecret(48);
 
   return {
     POSTGRES_PASSWORD: postgresPassword,
@@ -56,5 +57,6 @@ export function createDockerSecrets({ now } = {}) {
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
     LITELLM_MASTER_KEY: liteLlmKey,
     KAVERO_LITELLM_API_KEY: liteLlmKey,
+    KAVERO_LITELLM_ROUTING_SECRET: liteLlmRoutingSecret,
   };
 }

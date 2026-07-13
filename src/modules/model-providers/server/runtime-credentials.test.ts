@@ -23,6 +23,7 @@ describe("runtime model credentials", () => {
       ok: true,
       body: { model: "kavero-chat-openai-example", messages: [] },
       credentialSource: "gateway-env",
+      monitoringModel: null,
     });
 
     const userByok = prepareLiteLlmRuntimeRequest(
@@ -37,6 +38,7 @@ describe("runtime model credentials", () => {
         api_key: "server-key-012345678901234567890",
       },
       credentialSource: "user-byok",
+      monitoringModel: null,
     });
   });
 
@@ -61,6 +63,47 @@ describe("runtime model credentials", () => {
       api_key: "server-image-key-012345678901234",
     });
     expect(prepared.credentialSource).toBe("user-byok");
+    expect(prepared.monitoringModel).toBeNull();
+  });
+
+  it("constructs Azure user_config only from trusted resolved credentials", () => {
+    const prepared = prepareLiteLlmRuntimeRequest(
+      {
+        model: "caller-model",
+        messages: [],
+        user_config: { browser: true },
+      },
+      {
+        ok: true,
+        status: "resolved",
+        credentialSource: "gateway-env",
+        credentials: {
+          apiKey: "azure-key-012345678901234567890",
+          apiBase: "https://kavero.openai.azure.com",
+          apiVersion: "2025-04-01-preview",
+          deploymentName: "deployment-five",
+          baseModel: "gpt-5",
+        },
+        modelAlias: "kavero-chat-azure-openai",
+        slot: "chatOrchestration",
+        provider: "azure-openai",
+        providerKeyId: "azure-openai",
+      },
+    );
+
+    expect(prepared).toMatchObject({
+      ok: true,
+      credentialSource: "gateway-env",
+      monitoringModel: "gpt-5",
+      body: {
+        model: "kavero-chat-azure-openai",
+        user_config: {
+          model_list: [{ litellm_params: { model: "azure/gpt5_series/deployment-five" } }],
+        },
+      },
+    });
+    expect(JSON.stringify(prepared)).not.toContain("caller-model");
+    expect(JSON.stringify(prepared)).not.toContain("browser");
   });
 
   it("returns fixed safe runtime credential errors", async () => {

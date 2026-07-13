@@ -5,6 +5,13 @@ import {
 } from "./errors";
 import { normalizeModelGatewayUsage } from "./usage";
 import {
+  createRoutingSignature,
+  KAVERO_ROUTING_CONTRACT_VERSION,
+  KAVERO_ROUTING_HEADER_SIGNATURE,
+  KAVERO_ROUTING_HEADER_TIMESTAMP,
+  KAVERO_ROUTING_HEADER_VERSION,
+} from "./routing-signature";
+import {
   ModelGatewayError,
   type LiteLlmClientOptions,
   type LiteLlmJsonResponse,
@@ -41,12 +48,16 @@ function responseIds(response: Response) {
 export class LiteLlmClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly routingSecret: string;
   private readonly fetchImpl: NonNullable<LiteLlmClientOptions["fetchImpl"]>;
+  private readonly now: NonNullable<LiteLlmClientOptions["now"]>;
 
   constructor(options: LiteLlmClientOptions) {
     this.baseUrl = trimTrailingSlash(options.config.baseUrl);
     this.apiKey = options.config.apiKey;
+    this.routingSecret = options.config.routingSecret;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? Date.now;
   }
 
   async chatCompletions<TData = unknown>(
@@ -88,16 +99,32 @@ export class LiteLlmClient {
     },
   ): Promise<LiteLlmJsonResponse<TData>> {
     const url = `${this.baseUrl}${path}`;
+    const pathname = new URL(url).pathname;
+    const serializedBody = options.body ? JSON.stringify(options.body) : undefined;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+
+    if (serializedBody !== undefined) {
+      const timestamp = Math.floor(this.now() / 1000);
+      headers[KAVERO_ROUTING_HEADER_VERSION] = KAVERO_ROUTING_CONTRACT_VERSION;
+      headers[KAVERO_ROUTING_HEADER_TIMESTAMP] = String(timestamp);
+      headers[KAVERO_ROUTING_HEADER_SIGNATURE] = createRoutingSignature({
+        secret: this.routingSecret,
+        timestamp,
+        method: options.method,
+        pathname,
+        serializedBody,
+      });
+    }
     let response: Response;
 
     try {
       response = await this.fetchImpl(url, {
         method: options.method,
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: options.body ? JSON.stringify(options.body) : undefined,
+        headers,
+        body: serializedBody,
       });
     } catch (error) {
       throw createNetworkModelGatewayError(error, options.context);

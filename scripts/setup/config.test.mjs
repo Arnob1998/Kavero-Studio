@@ -42,10 +42,14 @@ describe("setup config", () => {
 
   it("treats gateway secrets and upstream provider keys as sensitive", () => {
     expect(sensitiveEnvKeys.has("KAVERO_LITELLM_API_KEY")).toBe(true);
+    expect(sensitiveEnvKeys.has("KAVERO_LITELLM_ROUTING_SECRET")).toBe(true);
     expect(sensitiveEnvKeys.has("LITELLM_MASTER_KEY")).toBe(true);
     expect(sensitiveEnvKeys.has("OPENAI_API_KEY")).toBe(true);
     expect(sensitiveEnvKeys.has("GEMINI_API_KEY")).toBe(true);
     expect(sensitiveEnvKeys.has("GROQ_API_KEY")).toBe(true);
+    for (const key of ["AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION", "AZURE_DEPLOYMENT_NAME", "AZURE_BASE_MODEL"]) {
+      expect(sensitiveEnvKeys.has(key)).toBe(true);
+    }
   });
 
   it("requires the local Docker LiteLLM gateway shape", () => {
@@ -54,6 +58,7 @@ describe("setup config", () => {
         "KAVERO_MODEL_GATEWAY",
         "KAVERO_LITELLM_BASE_URL",
         "KAVERO_LITELLM_API_KEY",
+        "KAVERO_LITELLM_ROUTING_SECRET",
         "LITELLM_MASTER_KEY",
       ]),
     );

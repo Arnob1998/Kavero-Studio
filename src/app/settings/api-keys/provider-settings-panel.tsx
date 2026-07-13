@@ -388,11 +388,11 @@ function ModelCredentialAdvisory({
       : credentialMode === "user-required"
         ? model.providerKeyId
           ? savedKey
-            ? "A saved provider key is available for required-key mode when runtime enforcement is enabled."
-            : `This selected model needs a saved ${model.providerLabel} key before runtime enforcement is enabled.`
+            ? "The saved provider key will be used for required-key mode."
+            : `This selected model requires a saved ${model.providerLabel} key before it can run.`
           : "This provider cannot satisfy required-key mode through Settings."
         : model.providerKeyId
-          ? "A saved user key will be used when available after runtime enforcement; otherwise gateway environment credentials may be used."
+          ? "A saved user key is used when available; otherwise gateway environment credentials are used."
           : "This model uses gateway environment configuration because it has no Settings provider-key mapping.";
 
   return (

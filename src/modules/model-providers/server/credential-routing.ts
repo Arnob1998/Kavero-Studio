@@ -8,6 +8,7 @@ import {
   getModelGatewayCredentialMode,
   type ModelGatewayCredentialMode,
 } from "./credential-mode";
+import { getAzureOpenAiEnvCredentials, type AzureOpenAiEnv } from "./azure-routing";
 
 export { getProviderKeyIdForModelProvider } from "../provider-key-mapping";
 
@@ -36,7 +37,7 @@ export type GatewayEnvCredentialResolution = CredentialResolutionContext & {
   ok: true;
   status: "resolved";
   credentialSource: "gateway-env";
-  credentials: null;
+  credentials: ProviderCredentials | null;
 };
 
 export type FailedCredentialResolution = CredentialResolutionContext & {
@@ -54,7 +55,7 @@ export type ModelCredentialResolution =
 
 export type SafeModelCredentialResolution =
   | (Omit<UserByokCredentialResolution, "credentials"> & { hasCredentials: true })
-  | GatewayEnvCredentialResolution
+  | (Omit<GatewayEnvCredentialResolution, "credentials"> & { hasCredentials: boolean })
   | FailedCredentialResolution;
 
 type ResolveModelCredentialsInput = {
@@ -66,6 +67,7 @@ type ResolveModelCredentialsInput = {
 
 type ResolveModelCredentialsDependencies = {
   getUserProviderCredentials: typeof getUserProviderCredentials;
+  env?: AzureOpenAiEnv;
 };
 
 const defaultDependencies: ResolveModelCredentialsDependencies = {
@@ -96,7 +98,7 @@ export async function resolveModelCredentials(
   };
 
   if (credentialMode === "env-only") {
-    return gatewayEnv(context);
+    return gatewayEnvOrFailure(input, context, dependencies.env);
   }
 
   if (!providerKeyId) {
@@ -135,7 +137,7 @@ export async function resolveModelCredentials(
   }
 
   return credentialMode === "env-or-user"
-    ? gatewayEnv(context)
+    ? gatewayEnvOrFailure(input, context, dependencies.env)
     : failure(
         input,
         entry.provider,
@@ -153,17 +155,44 @@ export function toSafeModelCredentialResolution(
     return { ...safe, hasCredentials: true };
   }
 
+  if (resolution.ok && resolution.credentialSource === "gateway-env") {
+    const { credentials: _credentials, ...safe } = resolution;
+    return { ...safe, hasCredentials: Boolean(resolution.credentials) };
+  }
+
   return resolution;
 }
 
-function gatewayEnv(context: CredentialResolutionContext): GatewayEnvCredentialResolution {
+function gatewayEnv(
+  context: CredentialResolutionContext,
+  credentials: ProviderCredentials | null = null,
+): GatewayEnvCredentialResolution {
   return {
     ...context,
     ok: true,
     status: "resolved",
     credentialSource: "gateway-env",
-    credentials: null,
+    credentials,
   };
+}
+
+function gatewayEnvOrFailure(
+  input: Pick<ResolveModelCredentialsInput, "modelAlias" | "slot">,
+  context: CredentialResolutionContext,
+  env?: AzureOpenAiEnv,
+): GatewayEnvCredentialResolution | FailedCredentialResolution {
+  if (context.providerKeyId !== "azure-openai") return gatewayEnv(context);
+
+  const credentials = getAzureOpenAiEnvCredentials(env);
+  return credentials
+    ? gatewayEnv(context, credentials)
+    : failure(
+        input,
+        context.provider,
+        context.providerKeyId,
+        "missing-credentials",
+        "Complete Azure OpenAI environment credentials are required.",
+      );
 }
 
 function failure(

@@ -4,6 +4,7 @@ export type ModelGatewayEnv = {
   KAVERO_MODEL_GATEWAY?: string | undefined;
   KAVERO_LITELLM_BASE_URL?: string | undefined;
   KAVERO_LITELLM_API_KEY?: string | undefined;
+  KAVERO_LITELLM_ROUTING_SECRET?: string | undefined;
   [key: string]: string | undefined;
 };
 
@@ -26,6 +27,10 @@ function isHttpUrl(value: string) {
   } catch {
     return false;
   }
+}
+
+function isValidRoutingSecret(value: string) {
+  return value.length >= 43 && /^[A-Za-z0-9_-]+$/.test(value);
 }
 
 function issue(code: GatewayConfigIssue["code"], message: string, key?: string): GatewayConfigIssue {
@@ -68,6 +73,7 @@ export function getModelGatewayConfig(
   const issues: GatewayConfigIssue[] = [];
   const baseUrl = env.KAVERO_LITELLM_BASE_URL?.trim();
   const apiKey = env.KAVERO_LITELLM_API_KEY?.trim();
+  const routingSecret = env.KAVERO_LITELLM_ROUTING_SECRET?.trim();
 
   if (!hasValue(baseUrl)) {
     issues.push(issue("missing-base-url", "LiteLLM base URL is required.", "KAVERO_LITELLM_BASE_URL"));
@@ -77,6 +83,24 @@ export function getModelGatewayConfig(
 
   if (!hasValue(apiKey)) {
     issues.push(issue("missing-api-key", "LiteLLM API key is required.", "KAVERO_LITELLM_API_KEY"));
+  }
+
+  if (!hasValue(routingSecret)) {
+    issues.push(
+      issue(
+        "missing-routing-secret",
+        "LiteLLM routing secret is required.",
+        "KAVERO_LITELLM_ROUTING_SECRET",
+      ),
+    );
+  } else if (!isValidRoutingSecret(routingSecret)) {
+    issues.push(
+      issue(
+        "invalid-routing-secret",
+        "LiteLLM routing secret must be a base64url secret of at least 43 characters.",
+        "KAVERO_LITELLM_ROUTING_SECRET",
+      ),
+    );
   }
 
   if (issues.length > 0) {
@@ -89,12 +113,14 @@ export function getModelGatewayConfig(
 
   const configuredBaseUrl = baseUrl as string;
   const configuredApiKey = apiKey as string;
+  const configuredRoutingSecret = routingSecret as string;
 
   return {
     status: "configured",
     gateway: "litellm",
     baseUrl: configuredBaseUrl,
     apiKey: configuredApiKey,
+    routingSecret: configuredRoutingSecret,
   };
 }
 
@@ -105,5 +131,6 @@ export function getLoggableGatewayConfigResult(result: ModelGatewayConfig) {
     gateway: result.gateway,
     baseUrl: result.baseUrl,
     apiKey: "[redacted]",
+    routingSecret: "[redacted]",
   } as const;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AZURE_OPENAI_CHAT_MODEL_ALIAS,
   DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
   DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
   getDefaultModelAliasForSlot,
@@ -48,8 +49,10 @@ describe("model provider catalog", () => {
     const imageModels = getModelsForCapability("imageGeneration").map((entry) => entry.modelAlias);
 
     expect(chatModels).toContain(DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS);
+    expect(chatModels).toContain(AZURE_OPENAI_CHAT_MODEL_ALIAS);
     expect(chatModels).not.toContain(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
     expect(imageModels).toEqual([DEFAULT_IMAGE_GENERATION_MODEL_ALIAS]);
+    expect(imageModels).not.toContain(AZURE_OPENAI_CHAT_MODEL_ALIAS);
     expect(modelCatalog.find((entry) => entry.provider === "groq")?.capabilities.supportsImageOutput).toBe(false);
     expect(modelCatalog.find((entry) => entry.provider === "ollama")?.capabilities.requirements).toContain("local-runtime");
   });

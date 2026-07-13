@@ -618,6 +618,10 @@ async function getGatewaySegmentPlanPayload({
       response: createSafeRuntimeCredentialFailureResponse("Auto Segment", prepared),
     };
   }
+  const monitoringSelection = {
+    ...resolved.selection,
+    model: prepared.monitoringModel ?? resolved.selection.model,
+  };
 
   const client = createLiteLlmClient({ config });
   const startedAt = Date.now();
@@ -626,14 +630,14 @@ async function getGatewaySegmentPlanPayload({
       prepared.body,
       {
         provider: resolved.selection.provider,
-        model: resolved.selection.model,
+        model: monitoringSelection.model,
         modelAlias: resolved.selection.modelAlias,
       },
     );
     logCanvasAiGatewayEvent({
       userId,
       feature: "auto-segment-planning",
-      selection: resolved.selection,
+      selection: monitoringSelection,
       status: "success",
       startedAt,
       requestId: response.requestId,
@@ -647,7 +651,7 @@ async function getGatewaySegmentPlanPayload({
     logCanvasAiGatewayEvent({
       userId,
       feature: "auto-segment-planning",
-      selection: resolved.selection,
+      selection: monitoringSelection,
       status: "error",
       startedAt,
       requestId: details?.requestId ?? null,

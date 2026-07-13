@@ -31,6 +31,8 @@ describe("LiteLLM credential params", () => {
       apiKey: "azure-key-012345678901234567890",
       apiBase: "https://kavero.openai.azure.com",
       apiVersion: "2025-04-01-preview",
+      deploymentName: "deployment-one",
+      baseModel: "gpt-4.1",
     });
 
     expect(result).toEqual({
@@ -47,6 +49,8 @@ describe("LiteLLM credential params", () => {
         apiKey: "azure-key-012345678901234567890",
         apiBase: "http://127.0.0.1:4000",
         apiVersion: "2025-04-01-preview",
+        deploymentName: "deployment-one",
+        baseModel: "gpt-4.1",
       }).ok,
     ).toBe(false);
   });

@@ -303,6 +303,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 }
 
 function litellmResponse(payload: unknown) {

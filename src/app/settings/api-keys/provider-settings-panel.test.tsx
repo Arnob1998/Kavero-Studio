@@ -30,7 +30,8 @@ describe("ProviderSettingsPanel", () => {
 
     expect(await screen.findByText("Orchestration/chat model")).toBeInTheDocument();
     expect(screen.getByText("Image-generation model")).toBeInTheDocument();
-    expect(screen.getAllByRole("combobox")).toHaveLength(2);
+    const [chatSelect, imageSelect] = screen.getAllByRole("combobox") as HTMLSelectElement[];
+    expect([chatSelect, imageSelect]).toHaveLength(2);
     for (const label of ["Google Gemini", "OpenAI", "Groq", "Azure OpenAI", "OpenAI-compatible"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
@@ -38,6 +39,12 @@ describe("ProviderSettingsPanel", () => {
     expect(screen.queryByText("Ollama", { selector: "button *" })).not.toBeInTheDocument();
     expect(screen.queryByText("http://litellm:4000")).not.toBeInTheDocument();
     expect(screen.queryByText("sk-secret")).not.toBeInTheDocument();
+
+    expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-azure-openai");
+    expect(Array.from(imageSelect!.options, (option) => option.value)).not.toContain("kavero-chat-azure-openai");
+
+    const azureButton = screen.getByRole("button", { name: "Azure OpenAI provider settings" });
+    expect(azureButton.querySelector("img")).toHaveAttribute("src", "/llm-providers/Microsoft_Azure.svg");
   });
 
   it("keeps existing Gemini saved metadata compatible without displaying secret values", async () => {
@@ -91,20 +98,24 @@ describe("ProviderSettingsPanel", () => {
     expect(input).toHaveValue("");
   });
 
-  it("validates and saves Azure OpenAI multi-field credentials, then clears every field", async () => {
+  it("live-checks and saves Azure OpenAI credentials, then clears every field", async () => {
     const user = userEvent.setup();
     render(<ProviderSettingsPanel />);
     await screen.findByText("Provider keys");
     await user.click(screen.getByRole("button", { name: "Azure OpenAI provider settings" }));
 
     const apiKeyInput = screen.getByLabelText("Azure OpenAI API key");
-    const apiBaseInput = screen.getByLabelText("Azure OpenAI API base URL");
+    const apiBaseInput = screen.getByLabelText("Azure OpenAI Azure endpoint");
     const apiVersionInput = screen.getByLabelText("Azure OpenAI API version");
+    const deploymentInput = screen.getByLabelText("Azure OpenAI Deployment name");
+    const baseModelInput = screen.getByLabelText("Azure OpenAI Model family");
     await user.type(apiKeyInput, "azure-key-012345678901234567890");
     await user.type(apiBaseInput, "https://kavero.openai.azure.com");
     await user.type(apiVersionInput, "2025-04-01-preview");
-    await user.click(screen.getByRole("button", { name: "Validate" }));
-    await screen.findByText("Credentials validated locally. A live check is not available.");
+    await user.type(deploymentInput, "deployment-one");
+    await user.selectOptions(baseModelInput, "gpt-4.1");
+    await user.click(screen.getByRole("button", { name: "Check key" }));
+    await screen.findByText("Live check passed. Credentials are ready to save.");
     await user.click(screen.getByRole("button", { name: "Save credentials" }));
 
     const expected = {
@@ -113,6 +124,8 @@ describe("ProviderSettingsPanel", () => {
         apiKey: "azure-key-012345678901234567890",
         apiBase: "https://kavero.openai.azure.com",
         apiVersion: "2025-04-01-preview",
+        deploymentName: "deployment-one",
+        baseModel: "gpt-4.1",
       },
     };
     expect(requestBodies("/api/provider-keys/check")).toContainEqual(expected);
@@ -120,6 +133,8 @@ describe("ProviderSettingsPanel", () => {
     expect(apiKeyInput).toHaveValue("");
     expect(apiBaseInput).toHaveValue("");
     expect(apiVersionInput).toHaveValue("");
+    expect(deploymentInput).toHaveValue("");
+    expect(baseModelInput).toHaveValue("");
   });
 
   it("omits the optional OpenAI-compatible API key when it is blank", async () => {
@@ -161,8 +176,8 @@ describe("ProviderSettingsPanel", () => {
   });
 
   it.each([
-    ["env-or-user", /saved user key will be used when available.*gateway environment credentials may be used/i],
-    ["user-required", /needs a saved Google Gemini key before runtime enforcement is enabled/i],
+    ["env-or-user", /saved user key is used when available.*gateway environment credentials are used/i],
+    ["user-required", /requires a saved Google Gemini key before it can run/i],
     ["env-only", /gateway runtime uses administrator\/environment credentials/i],
   ] as const)("renders the %s credential-mode advisory", async (mode, expected) => {
     credentialMode = mode;
@@ -200,7 +215,7 @@ async function fetchMock(input: string | URL | Request, init?: RequestInit) {
   }
   if (url === "/api/provider-keys/check" && init?.method === "POST") {
     const body = JSON.parse(String(init.body)) as { providerId: string };
-    const validationOnly = ["azure-openai", "openai-compatible"].includes(body.providerId);
+    const validationOnly = body.providerId === "openai-compatible";
     return jsonResponse({ status: validationOnly ? "validation_only" : "passed" });
   }
   if (url === "/api/provider-keys" && init?.method === "POST") {
@@ -253,10 +268,20 @@ const providerCatalog = [
   provider("google-gemini", "Google Gemini", "live", [field("apiKey", "API key", true, true)]),
   provider("openai", "OpenAI", "live", [field("apiKey", "API key", true, true)]),
   provider("groq", "Groq", "live", [field("apiKey", "API key", true, true)]),
-  provider("azure-openai", "Azure OpenAI", "validation-only", [
+  provider("azure-openai", "Azure OpenAI", "live", [
     field("apiKey", "API key", true, true),
-    field("apiBase", "API base URL", true, false),
+    field("apiBase", "Azure endpoint", true, false),
     field("apiVersion", "API version", true, false),
+    field("deploymentName", "Deployment name", true, false),
+    {
+      ...field("baseModel", "Model family", true, false),
+      inputType: "select",
+      options: [
+        { value: "gpt-4o", label: "GPT-4o family" },
+        { value: "gpt-4.1", label: "GPT-4.1 family" },
+        { value: "gpt-5", label: "GPT-5 family" },
+      ],
+    },
   ]),
   provider("openai-compatible", "OpenAI-compatible", "validation-only", [
     field("apiKey", "API key", false, true),
@@ -265,7 +290,13 @@ const providerCatalog = [
 ];
 
 function provider(id: string, label: string, checkMode: string, credentialFields: unknown[]) {
-  return { id, label, logoPath: "/llm-providers/openai.png", checkMode, credentialFields };
+  return {
+    id,
+    label,
+    logoPath: id === "azure-openai" ? "/llm-providers/Microsoft_Azure.svg" : "/llm-providers/openai.png",
+    checkMode,
+    credentialFields,
+  };
 }
 
 function field(id: string, label: string, required: boolean, secret: boolean) {
@@ -276,13 +307,14 @@ const modelCatalog = [
   model("gemini", "Google Gemini", "google-gemini", DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS, "Gemini 3.1 Pro Preview", "chatOrchestration"),
   model("gemini", "Google Gemini", "google-gemini", DEFAULT_IMAGE_GENERATION_MODEL_ALIAS, "Nano Banana 2", "imageGeneration"),
   model("openai", "OpenAI", "openai", "kavero-chat-openai-example", "OpenAI GPT-4o Mini", "chatOrchestration"),
+  model("azure-openai", "Azure OpenAI", "azure-openai", "kavero-chat-azure-openai", "Azure OpenAI deployment", "chatOrchestration"),
 ];
 
 function model(providerId: string, providerLabel: string, providerKeyId: string, modelAlias: string, displayLabel: string, slot: string) {
   return {
     provider: providerId,
     providerLabel,
-    providerLogoPath: "/llm-providers/openai.png",
+    providerLogoPath: providerId === "azure-openai" ? "/llm-providers/Microsoft_Azure.svg" : "/llm-providers/openai.png",
     providerKeyId,
     modelAlias,
     displayLabel,

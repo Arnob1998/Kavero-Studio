@@ -39,6 +39,8 @@ const configIssueMessages: Record<GatewayConfigIssue["code"], string> = {
   "missing-base-url": "Model gateway URL is missing.",
   "invalid-base-url": "Model gateway URL is invalid.",
   "missing-api-key": "Model gateway credential is missing.",
+  "missing-routing-secret": "Model gateway routing authorization is missing.",
+  "invalid-routing-secret": "Model gateway routing authorization is invalid.",
   "public-env-exposure": "Model gateway values must stay server-only.",
 };
 

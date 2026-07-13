@@ -14,7 +14,13 @@ export type ProviderCredentialsMap = {
   "google-gemini": { apiKey: string };
   openai: { apiKey: string };
   groq: { apiKey: string };
-  "azure-openai": { apiKey: string; apiBase: string; apiVersion: string };
+  "azure-openai": {
+    apiKey: string;
+    apiBase: string;
+    apiVersion: string;
+    deploymentName: string;
+    baseModel: AzureOpenAiBaseModel;
+  };
   "openai-compatible": { apiKey?: string; apiBase: string };
 };
 
@@ -24,7 +30,7 @@ export type ProviderKeyRegistryEntry = {
   id: SupportedProviderId;
   label: string;
   credentialFields: Array<{
-    id: "apiKey" | "apiBase" | "apiVersion";
+    id: "apiKey" | "apiBase" | "apiVersion" | "deploymentName" | "baseModel";
     required: boolean;
     secret: boolean;
   }>;
@@ -38,11 +44,12 @@ export type BrowserProviderKeyCatalogEntry = {
   logoPath: string;
   checkMode: "live" | "validation-only";
   credentialFields: Array<{
-    id: "apiKey" | "apiBase" | "apiVersion";
+    id: "apiKey" | "apiBase" | "apiVersion" | "deploymentName" | "baseModel";
     label: string;
     required: boolean;
     secret: boolean;
-    inputType: "password" | "url" | "text";
+    inputType: "password" | "url" | "text" | "select";
+    options?: Array<{ value: string; label: string }>;
   }>;
 };
 
@@ -75,9 +82,11 @@ export const providerKeyRegistry: Record<SupportedProviderId, ProviderKeyRegistr
       { id: "apiKey", required: true, secret: true },
       { id: "apiBase", required: true, secret: false },
       { id: "apiVersion", required: true, secret: false },
+      { id: "deploymentName", required: true, secret: false },
+      { id: "baseModel", required: true, secret: false },
     ],
     storageFormat: "json",
-    checkMode: "validation-only",
+    checkMode: "live",
   },
   "openai-compatible": {
     id: "openai-compatible",
@@ -95,7 +104,7 @@ const providerLogoPaths: Record<SupportedProviderId, string> = {
   "google-gemini": "/llm-providers/google-gemini-icon.png",
   openai: "/llm-providers/openai.png",
   groq: "/llm-providers/grok-icon.png",
-  "azure-openai": "/llm-providers/openai.png",
+  "azure-openai": "/llm-providers/Microsoft_Azure.svg",
   "openai-compatible": "/llm-providers/openai.png",
 };
 
@@ -103,7 +112,18 @@ const credentialFieldLabels = {
   apiKey: "API key",
   apiBase: "API base URL",
   apiVersion: "API version",
+  deploymentName: "Deployment name",
+  baseModel: "Model family",
 } as const;
+
+export const azureOpenAiBaseModels = ["gpt-4o", "gpt-4.1", "gpt-5"] as const;
+export type AzureOpenAiBaseModel = (typeof azureOpenAiBaseModels)[number];
+
+const azureBaseModelLabels: Record<AzureOpenAiBaseModel, string> = {
+  "gpt-4o": "GPT-4o family",
+  "gpt-4.1": "GPT-4.1 family",
+  "gpt-5": "GPT-5 family",
+};
 
 export function getBrowserProviderKeyCatalog(): BrowserProviderKeyCatalogEntry[] {
   return supportedProviderIds.map((providerId) => {
@@ -116,8 +136,25 @@ export function getBrowserProviderKeyCatalog(): BrowserProviderKeyCatalogEntry[]
       checkMode: entry.checkMode,
       credentialFields: entry.credentialFields.map((field) => ({
         ...field,
-        label: credentialFieldLabels[field.id],
-        inputType: field.secret ? "password" : field.id === "apiBase" ? "url" : "text",
+        label:
+          providerId === "azure-openai" && field.id === "apiBase"
+            ? "Azure endpoint"
+            : credentialFieldLabels[field.id],
+        inputType: field.secret
+          ? "password"
+          : field.id === "apiBase"
+            ? "url"
+            : field.id === "baseModel"
+              ? "select"
+              : "text",
+        ...(field.id === "baseModel"
+          ? {
+              options: azureOpenAiBaseModels.map((value) => ({
+                value,
+                label: azureBaseModelLabels[value],
+              })),
+            }
+          : {}),
       })),
     };
   });
@@ -130,6 +167,13 @@ const apiVersionSchema = z
   .min(1)
   .max(100)
   .regex(/^[A-Za-z0-9._-]+$/);
+const deploymentNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+const azureBaseModelSchema = z.enum(azureOpenAiBaseModels);
 const apiBaseSchema = z.string().trim().max(2048).transform((value, context) => {
   let url: URL;
 
@@ -154,13 +198,27 @@ const apiBaseSchema = z.string().trim().max(2048).transform((value, context) => 
   url.search = "";
   return url.toString().replace(/\/$/, "");
 });
+const azureApiBaseSchema = apiBaseSchema.transform((value, context) => {
+  const url = new URL(value);
+  if (url.pathname !== "/" || !url.hostname.toLowerCase().endsWith(".openai.azure.com")) {
+    context.addIssue({ code: "custom", message: "Invalid Azure endpoint." });
+    return z.NEVER;
+  }
+  return url.origin;
+});
 
 const credentialSchemas = {
   "google-gemini": z.object({ apiKey: apiKeySchema }).strict(),
   openai: z.object({ apiKey: apiKeySchema }).strict(),
   groq: z.object({ apiKey: apiKeySchema }).strict(),
   "azure-openai": z
-    .object({ apiKey: apiKeySchema, apiBase: apiBaseSchema, apiVersion: apiVersionSchema })
+    .object({
+      apiKey: apiKeySchema,
+      apiBase: azureApiBaseSchema,
+      apiVersion: apiVersionSchema,
+      deploymentName: deploymentNameSchema,
+      baseModel: azureBaseModelSchema,
+    })
     .strict(),
   "openai-compatible": z
     .object({ apiKey: apiKeySchema.optional(), apiBase: apiBaseSchema })

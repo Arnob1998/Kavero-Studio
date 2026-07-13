@@ -99,10 +99,16 @@ export const sensitiveEnvKeys = new Set([
   "SUPABASE_SERVICE_ROLE_KEY",
   "GOOGLE_DRIVE_CLIENT_SECRET",
   "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
   "LITELLM_MASTER_KEY",
   "OPENAI_API_KEY",
   "GEMINI_API_KEY",
   "GROQ_API_KEY",
+  "AZURE_API_KEY",
+  "AZURE_API_BASE",
+  "AZURE_API_VERSION",
+  "AZURE_DEPLOYMENT_NAME",
+  "AZURE_BASE_MODEL",
 ]);
 
 export const dockerGeneratedSecretKeys = [
@@ -113,6 +119,7 @@ export const dockerGeneratedSecretKeys = [
   "SUPABASE_SERVICE_ROLE_KEY",
   "LITELLM_MASTER_KEY",
   "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
 ];
 
 export function getSetupProfile(profileId) {
@@ -170,6 +177,7 @@ export function requiredEnvKeysForProfile(profileId) {
       "KAVERO_MODEL_GATEWAY",
       "KAVERO_LITELLM_BASE_URL",
       "KAVERO_LITELLM_API_KEY",
+      "KAVERO_LITELLM_ROUTING_SECRET",
       "LITELLM_MASTER_KEY",
     ];
   }

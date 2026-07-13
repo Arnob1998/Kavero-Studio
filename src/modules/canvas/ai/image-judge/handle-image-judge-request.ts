@@ -201,6 +201,10 @@ async function handleGatewayImageJudge({
   if (!prepared.ok) {
     return createSafeRuntimeCredentialFailureResponse("Image Judge", prepared);
   }
+  const monitoringSelection = {
+    ...resolved.selection,
+    model: prepared.monitoringModel ?? resolved.selection.model,
+  };
 
   const client = createLiteLlmClient({ config });
   const startedAt = Date.now();
@@ -209,14 +213,14 @@ async function handleGatewayImageJudge({
       prepared.body,
       {
         provider: resolved.selection.provider,
-        model: resolved.selection.model,
+        model: monitoringSelection.model,
         modelAlias: resolved.selection.modelAlias,
       },
     );
     logCanvasAiGatewayEvent({
       userId,
       feature: "image-judge",
-      selection: resolved.selection,
+      selection: monitoringSelection,
       status: "success",
       startedAt,
       requestId: response.requestId,
@@ -239,7 +243,7 @@ async function handleGatewayImageJudge({
     logCanvasAiGatewayEvent({
       userId,
       feature: "image-judge",
-      selection: resolved.selection,
+      selection: monitoringSelection,
       status: "error",
       startedAt,
       requestId: details?.requestId ?? null,

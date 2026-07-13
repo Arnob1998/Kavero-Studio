@@ -14,6 +14,7 @@ describe("model provider connectivity helpers", () => {
       gateway: "litellm",
       baseUrl: "http://litellm:4000",
       apiKey: "sk-secret",
+      routingSecret: "routing-secret",
     };
 
     const status = getSafeGatewayStatus(config);

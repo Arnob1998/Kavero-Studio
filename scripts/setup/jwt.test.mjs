@@ -32,5 +32,7 @@ describe("setup JWT helpers", () => {
     const secrets = createDockerSecrets({ now: 100 });
     expect(secrets.LITELLM_MASTER_KEY).toMatch(/^sk-/);
     expect(secrets.KAVERO_LITELLM_API_KEY).toBe(secrets.LITELLM_MASTER_KEY);
+    expect(secrets.KAVERO_LITELLM_ROUTING_SECRET).toMatch(/^[A-Za-z0-9_-]{64}$/);
+    expect(secrets.KAVERO_LITELLM_ROUTING_SECRET).not.toBe(secrets.LITELLM_MASTER_KEY);
   });
 });

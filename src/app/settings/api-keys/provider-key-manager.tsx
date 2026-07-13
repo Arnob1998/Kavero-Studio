@@ -5,7 +5,7 @@ import { CheckCircle2, ChevronDown, Eye, EyeOff, KeyRound, LockKeyhole, Save, XC
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type CredentialFieldId = "apiKey" | "apiBase" | "apiVersion";
+type CredentialFieldId = "apiKey" | "apiBase" | "apiVersion" | "deploymentName" | "baseModel";
 
 export type BrowserProviderKeyCatalogEntry = {
   id: string;
@@ -17,7 +17,8 @@ export type BrowserProviderKeyCatalogEntry = {
     label: string;
     required: boolean;
     secret: boolean;
-    inputType: "password" | "url" | "text";
+    inputType: "password" | "url" | "text" | "select";
+    options?: Array<{ value: string; label: string }>;
   }>;
 };
 
@@ -245,16 +246,41 @@ export function ProviderKeyManager({
                           {field.label}{field.required ? " *" : " (optional)"}
                         </span>
                         <span className="relative">
+                          {field.inputType === "select" ? (
+                            <select
+                              className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 text-[13px] font-medium text-white outline-none focus:border-accent/70"
+                              aria-label={`${provider.label} ${field.label}`}
+                              value={forms[provider.id]?.[field.id] ?? ""}
+                              disabled={loading || saveState === "saving"}
+                              onChange={(event) => updateField(provider.id, field.id, event.target.value)}
+                            >
+                              <option value="">Select a supported family</option>
+                              {field.options?.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          ) : (
                           <input
                             className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 pr-10 text-[13px] font-medium text-white outline-none placeholder:text-white/25 focus:border-accent/70"
                             aria-label={`${provider.label} ${field.label}`}
                             type={field.secret && !showSecret ? "password" : field.inputType === "password" ? "text" : field.inputType}
                             autoComplete="off"
                             value={forms[provider.id]?.[field.id] ?? ""}
-                            placeholder={field.secret ? "Enter a new secret" : field.id === "apiBase" ? "https://provider.example/v1" : "Enter API version"}
+                            placeholder={
+                              field.secret
+                                ? "Enter a new secret"
+                                : field.id === "apiBase"
+                                  ? provider.id === "azure-openai"
+                                    ? "https://resource.openai.azure.com"
+                                    : "https://provider.example/v1"
+                                  : field.id === "deploymentName"
+                                    ? "Enter deployment name"
+                                    : "Enter API version"
+                            }
                             disabled={loading || saveState === "saving"}
                             onChange={(event) => updateField(provider.id, field.id, event.target.value)}
                           />
+                          )}
                           {field.secret ? (
                             <button
                               type="button"

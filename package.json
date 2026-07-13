@@ -12,6 +12,7 @@
     "setup:run": "node scripts/kavero.mjs run",
     "gateway:up": "docker compose --env-file .env.local -f compose.yml -f compose.dev.yml up -d litellm",
     "gateway:down": "docker compose --env-file .env.local -f compose.yml -f compose.dev.yml stop litellm",
+    "test:litellm-routing": "node scripts/litellm-routing-security-gate.mjs",
     "dev:ui": "next dev",
     "dev": "next dev",
     "build": "next build",

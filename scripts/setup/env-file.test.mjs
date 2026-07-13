@@ -37,13 +37,13 @@ describe("env file helpers", () => {
 
   it("protects existing LiteLLM and provider secrets", async () => {
     const result = await buildUpdatedEnvEntries({
-      existingContent: "KAVERO_LITELLM_API_KEY=sk-old\nOPENAI_API_KEY=old\n",
-      values: { KAVERO_LITELLM_API_KEY: "sk-new", OPENAI_API_KEY: "new" },
+      existingContent: "KAVERO_LITELLM_API_KEY=sk-old\nKAVERO_LITELLM_ROUTING_SECRET=routing-old\nOPENAI_API_KEY=old\n",
+      values: { KAVERO_LITELLM_API_KEY: "sk-new", KAVERO_LITELLM_ROUTING_SECRET: "routing-new", OPENAI_API_KEY: "new" },
       confirmOverwrite: async () => false,
     });
 
-    expect(result.content).toBe("KAVERO_LITELLM_API_KEY=sk-old\nOPENAI_API_KEY=old\n");
-    expect(result.preserved).toEqual(["KAVERO_LITELLM_API_KEY", "OPENAI_API_KEY"]);
+    expect(result.content).toBe("KAVERO_LITELLM_API_KEY=sk-old\nKAVERO_LITELLM_ROUTING_SECRET=routing-old\nOPENAI_API_KEY=old\n");
+    expect(result.preserved).toEqual(["KAVERO_LITELLM_API_KEY", "KAVERO_LITELLM_ROUTING_SECRET", "OPENAI_API_KEY"]);
   });
 
   it("updates placeholder values without confirmation", async () => {

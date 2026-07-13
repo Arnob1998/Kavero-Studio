@@ -7,6 +7,7 @@ const config: Extract<ModelGatewayConfig, { status: "configured" }> = {
   gateway: "litellm",
   baseUrl: "http://litellm:4000/",
   apiKey: "sk-test-secret",
+  routingSecret: "routing-test-secret",
 };
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
@@ -29,7 +30,7 @@ describe("LiteLLM client", () => {
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       }),
     );
-    const client = createLiteLlmClient({ config, fetchImpl });
+    const client = createLiteLlmClient({ config, fetchImpl, now: () => 1_750_000_000_000 });
 
     const result = await client.chatCompletions(
       { model: "kavero-chat-orchestration-default", messages: [{ role: "user", content: "Hello" }] },
@@ -41,6 +42,9 @@ describe("LiteLLM client", () => {
       headers: {
         Authorization: "Bearer sk-test-secret",
         "Content-Type": "application/json",
+        "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
+        "x-kavero-routing-timestamp": "1750000000",
+        "x-kavero-routing-version": "v1",
       },
       body: JSON.stringify({
         model: "kavero-chat-orchestration-default",
@@ -71,8 +75,15 @@ describe("LiteLLM client", () => {
       "http://litellm:4000/model/info?model=kavero-chat-orchestration-default",
       "http://litellm:4000/v1/models",
     ]);
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "x-kavero-routing-version": "v1",
+      "x-kavero-routing-timestamp": expect.stringMatching(/^\d{10}$/),
+      "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     expect(fetchImpl.mock.calls[1]?.[1]?.method).toBe("GET");
     expect(fetchImpl.mock.calls[2]?.[1]?.method).toBe("GET");
+    expect(fetchImpl.mock.calls[1]?.[1]?.headers).not.toHaveProperty("x-kavero-routing-signature");
+    expect(fetchImpl.mock.calls[2]?.[1]?.headers).not.toHaveProperty("x-kavero-routing-signature");
   });
 
   it("normalizes non-2xx errors without leaking response bodies or keys", async () => {

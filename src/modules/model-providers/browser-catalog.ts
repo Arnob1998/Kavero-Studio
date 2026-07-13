@@ -20,6 +20,10 @@ const providerDisplay: Record<ModelProviderId, { label: string; logoPath: string
     label: "Ollama",
     logoPath: "/llm-providers/ollama-icon.svg",
   },
+  "azure-openai": {
+    label: "Azure OpenAI",
+    logoPath: "/llm-providers/Microsoft_Azure.svg",
+  },
 };
 
 export type BrowserModelCatalogEntry = {

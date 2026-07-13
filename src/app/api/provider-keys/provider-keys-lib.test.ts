@@ -22,10 +22,22 @@ describe("provider key secret helpers", () => {
       apiKey: "azure-key-012345678901234567890",
       apiBase: "https://kavero.openai.azure.com",
       apiVersion: "2025-04-01-preview",
+      deploymentName: "deployment-one",
+      baseModel: "gpt-4o",
     };
     mocks.createAdminClient.mockReturnValue(createAdmin(JSON.stringify(credentials)));
 
     await expect(getUserProviderCredentials("user-1", "azure-openai")).resolves.toEqual(credentials);
+  });
+
+  it("treats incomplete legacy Azure rows as unconfigured", async () => {
+    mocks.createAdminClient.mockReturnValue(createAdmin(JSON.stringify({
+      apiKey: "azure-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+    })));
+
+    await expect(getUserProviderCredentials("user-1", "azure-openai")).resolves.toBeNull();
   });
 });
 

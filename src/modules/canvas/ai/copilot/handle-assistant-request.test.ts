@@ -129,14 +129,19 @@ function createAdmin(assetRows: Record<string, AssetRow | null>, preferences: un
   };
 }
 
-function request(assetIdsToInspect: string[]) {
+function request(
+  assetIdsToInspect: string[],
+  messages: Array<{ role: "user" | "assistant"; content: string }> = [
+    { role: "user", content: "inspect the uploaded assets" },
+  ],
+) {
   return new Request("http://localhost/api/canvas/assistant", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       designId: "design-1",
       pageId: "page-1",
-      messages: [{ role: "user", content: "inspect the uploaded assets" }],
+      messages,
       assetIdsToInspect,
     }),
   });
@@ -259,6 +264,7 @@ describe("handleAssistantRequest provider selection", () => {
     vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
     vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
     vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+    vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 
     const response = await handleAssistantRequest(request([]));
     const body = await response.json();
@@ -348,6 +354,38 @@ describe("handleAssistantRequest provider selection", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("preserves Copilot tools and multi-turn messages through Azure routing", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({
+      apiKey: "azure-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+      deploymentName: "copilot-private-deployment",
+      baseModel: "gpt-5",
+    });
+    mocks.getCanvasAdmin.mockReturnValue(createAdmin(
+      { "asset-1": asset() },
+      { modelProviders: { chatOrchestrationModelAlias: "kavero-chat-azure-openai" } },
+    ));
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse(litellmAssistantPayload())));
+
+    const response = await handleAssistantRequest(request([], [
+      { role: "user", content: "First instruction" },
+      { role: "assistant", content: "First response" },
+    ]));
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outbound).toMatchObject({
+      model: "kavero-chat-azure-openai",
+      user_config: { model_list: [{ litellm_params: { model: "azure/gpt5_series/copilot-private-deployment" } }] },
+    });
+    expect(outbound.tools).toEqual(expect.arrayContaining([expect.objectContaining({ type: "function" })]));
+    expect(JSON.stringify(outbound.messages)).toContain("First instruction");
+    expect(JSON.stringify(outbound.messages)).toContain("First response");
+  });
+
   it("ignores saved Copilot credentials in env-only mode", async () => {
     configureGateway();
     vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
@@ -391,6 +429,7 @@ describe("handleAssistantRequest provider selection", () => {
     vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
     vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
     vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+    vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 
     const response = await handleAssistantRequest(request([]));
     const body = await response.json();
@@ -443,6 +482,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
   vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-or-user");
 }
 

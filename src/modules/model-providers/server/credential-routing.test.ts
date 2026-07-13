@@ -16,6 +16,7 @@ describe("model credential routing", () => {
     expect(getProviderKeyIdForModelProvider("openai")).toBe("openai");
     expect(getProviderKeyIdForModelProvider("groq")).toBe("groq");
     expect(getProviderKeyIdForModelProvider("ollama")).toBeNull();
+    expect(getProviderKeyIdForModelProvider("azure-openai")).toBe("azure-openai");
   });
 
   it.each([
@@ -96,6 +97,58 @@ describe("model credential routing", () => {
 
     expect(getCredentials).not.toHaveBeenCalled();
     expect(result).toMatchObject({ ok: true, credentialSource: "gateway-env" });
+  });
+
+  it("enforces all Azure credential modes with complete credentials only", async () => {
+    const saved = {
+      apiKey: "saved-azure-key-012345678901234",
+      apiBase: "https://saved.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+      deploymentName: "saved-deployment",
+      baseModel: "gpt-4.1",
+    };
+    const env = {
+      AZURE_API_KEY: "env-azure-key-01234567890123456",
+      AZURE_API_BASE: "https://env.openai.azure.com",
+      AZURE_API_VERSION: "2025-04-01-preview",
+      AZURE_DEPLOYMENT_NAME: "env-deployment",
+      AZURE_BASE_MODEL: "gpt-5",
+    };
+    const input = {
+      userId: "user-1",
+      modelAlias: "kavero-chat-azure-openai",
+      slot: "chatOrchestration" as const,
+    };
+
+    getCredentials.mockResolvedValue(saved);
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-or-user" },
+      { ...dependencies, env },
+    )).resolves.toMatchObject({ credentialSource: "user-byok", credentials: saved });
+
+    getCredentials.mockResolvedValue(null);
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-or-user" },
+      { ...dependencies, env },
+    )).resolves.toMatchObject({
+      credentialSource: "gateway-env",
+      credentials: { deploymentName: "env-deployment", baseModel: "gpt-5" },
+    });
+
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "user-required" },
+      { ...dependencies, env },
+    )).resolves.toMatchObject({ ok: false, code: "missing-credentials" });
+
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-only" },
+      { ...dependencies, env },
+    )).resolves.toMatchObject({ credentialSource: "gateway-env", credentials: { baseModel: "gpt-5" } });
+
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-only" },
+      { ...dependencies, env: { AZURE_API_KEY: env.AZURE_API_KEY } },
+    )).resolves.toMatchObject({ ok: false, code: "missing-credentials" });
   });
 
   it("handles unknown aliases and wrong slots before credential loading", async () => {

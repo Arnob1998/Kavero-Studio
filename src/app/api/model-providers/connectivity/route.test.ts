@@ -14,6 +14,7 @@ const envKeys = [
   "KAVERO_MODEL_GATEWAY",
   "KAVERO_LITELLM_BASE_URL",
   "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
 ] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 
@@ -54,6 +55,7 @@ describe("/api/model-providers/connectivity", () => {
 
     process.env.KAVERO_MODEL_GATEWAY = "litellm";
     process.env.KAVERO_LITELLM_API_KEY = "sk-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
     const misconfigured = await POST();
     const misconfiguredBody = await misconfigured.json();
 
@@ -70,6 +72,7 @@ describe("/api/model-providers/connectivity", () => {
     process.env.KAVERO_MODEL_GATEWAY = "litellm";
     process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
     process.env.KAVERO_LITELLM_API_KEY = "sk-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -98,6 +101,7 @@ describe("/api/model-providers/connectivity", () => {
     process.env.KAVERO_MODEL_GATEWAY = "litellm";
     process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
     process.env.KAVERO_LITELLM_API_KEY = "sk-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: "missing" }), { status: 404 }))

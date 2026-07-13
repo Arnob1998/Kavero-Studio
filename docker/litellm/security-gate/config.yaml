@@ -1,0 +1,14 @@
+model_list:
+  - model_name: kavero-static-gate
+    litellm_params:
+      model: openai/static-gate-model
+      api_base: http://mp9f1-mock:8080/static/v1
+      api_key: gate-static-provider-key
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  custom_auth: kavero_auth.user_api_key_auth
+  allow_client_side_credentials: true
+
+litellm_settings:
+  set_verbose: false

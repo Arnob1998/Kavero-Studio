@@ -26,7 +26,10 @@ describe("provider key registry", () => {
       "apiKey",
       "apiBase",
       "apiVersion",
+      "deploymentName",
+      "baseModel",
     ]);
+    expect(providerKeyRegistry["azure-openai"].checkMode).toBe("live");
     expect(providerKeyRegistry["openai-compatible"]).toMatchObject({
       storageFormat: "json",
       checkMode: "validation-only",
@@ -46,6 +49,14 @@ describe("provider key registry", () => {
     });
     expect(JSON.stringify(catalog)).not.toContain("storageFormat");
     expect(JSON.stringify(catalog)).not.toContain("apiBase\":\"https://");
+    expect(catalog.find((provider) => provider.id === "azure-openai")).toMatchObject({
+      logoPath: "/llm-providers/Microsoft_Azure.svg",
+      checkMode: "live",
+      credentialFields: expect.arrayContaining([
+        expect.objectContaining({ id: "deploymentName" }),
+        expect.objectContaining({ id: "baseModel", inputType: "select" }),
+      ]),
+    });
   });
 
   it("round-trips legacy Gemini strings and JSON multi-field credentials", () => {
@@ -57,6 +68,8 @@ describe("provider key registry", () => {
       apiKey: "azure-key-012345678901234567890",
       apiBase: "https://kavero.openai.azure.com",
       apiVersion: "2025-04-01-preview",
+      deploymentName: "deployment-one",
+      baseModel: "gpt-4.1" as const,
     };
     expect(deserializeProviderCredentials("azure-openai", serializeProviderCredentials("azure-openai", azure))).toEqual(azure);
   });
@@ -70,5 +83,20 @@ describe("provider key registry", () => {
     "https://user:password@example.com/v1",
   ])("rejects unsafe OpenAI-compatible base URL %s", (apiBase) => {
     expect(parseProviderCredentials("openai-compatible", { apiBase })).toBeNull();
+  });
+
+  it("rejects incomplete, arbitrary-route, and unsafe Azure credentials", () => {
+    const valid = {
+      apiKey: "azure-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+      deploymentName: "deployment-one",
+      baseModel: "gpt-4o",
+    };
+    expect(parseProviderCredentials("azure-openai", valid)).toEqual(valid);
+    expect(parseProviderCredentials("azure-openai", { ...valid, deploymentName: "bad/name" })).toBeNull();
+    expect(parseProviderCredentials("azure-openai", { ...valid, baseModel: "azure/arbitrary" })).toBeNull();
+    expect(parseProviderCredentials("azure-openai", { ...valid, apiBase: "https://example.com" })).toBeNull();
+    expect(parseProviderCredentials("azure-openai", { ...valid, baseModel: undefined })).toBeNull();
   });
 });

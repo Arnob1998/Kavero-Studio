@@ -9,6 +9,7 @@ const config: Extract<ModelGatewayConfig, { status: "configured" }> = {
   gateway: "litellm",
   baseUrl: "http://litellm:4000",
   apiKey: "sk-test-secret",
+  routingSecret: "routing-test-secret",
 };
 
 const dataUrl = "data:image/png;base64,VISUALPREVIEWPAYLOAD";

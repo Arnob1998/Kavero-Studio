@@ -19,6 +19,7 @@ describe("/api/provider-keys/check", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("requires auth", async () => {
@@ -84,29 +85,72 @@ describe("/api/provider-keys/check", () => {
     expect(JSON.stringify(body)).not.toContain(apiKey);
   });
 
-  it.each([
-    [
-      "azure-openai",
-      {
-        apiKey: "azure-key-012345678901234567890",
-        apiBase: "https://kavero.openai.azure.com",
-        apiVersion: "2025-04-01-preview",
-      },
-    ],
-    ["openai-compatible", { apiBase: "https://models.example.com/v1" }],
-  ])("returns safe validation-only metadata for %s", async (providerId, credentials) => {
+  it("returns safe validation-only metadata for OpenAI-compatible", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await POST(checkCredentialsRequest(providerId, credentials));
+    const response = await POST(checkCredentialsRequest("openai-compatible", { apiBase: "https://models.example.com/v1" }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ status: "validation_only", check: "not_implemented" });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(JSON.stringify(body)).not.toContain("azure-key");
     expect(JSON.stringify(body)).not.toContain("models.example.com");
-    expect(JSON.stringify(body)).not.toContain("kavero.openai.azure.com");
+  });
+
+  it("runs Azure connectivity through the signed dynamic route without exposing credentials", async () => {
+    configureGateway();
+    const credentials = azureCredentials();
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ choices: [], usage: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(checkCredentialsRequest("azure-openai", credentials));
+    const body = await response.json();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    const outbound = JSON.parse(String(init?.body));
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("passed");
+    expect(String(url)).toBe("http://litellm:4000/v1/chat/completions");
+    expect(init?.headers).toMatchObject({
+      Authorization: "Bearer sk-gateway-secret",
+      "x-kavero-routing-version": "v1",
+      "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(outbound).toMatchObject({
+      model: "kavero-chat-azure-openai",
+      user_config: {
+        model_list: [{
+          model_name: "kavero-chat-azure-openai",
+          litellm_params: {
+            model: "azure/deployment-one",
+            api_key: credentials.apiKey,
+            api_base: credentials.apiBase,
+            api_version: credentials.apiVersion,
+          },
+        }],
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(credentials.apiKey);
+    expect(JSON.stringify(body)).not.toContain(credentials.apiBase);
+    expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
+  });
+
+  it("returns a safe Azure live-check failure", async () => {
+    configureGateway();
+    const credentials = azureCredentials();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: credentials }), { status: 401 })));
+
+    const response = await POST(checkCredentialsRequest("azure-openai", credentials));
+    const body = await response.json();
+
+    expect(body).toMatchObject({ status: "failed", code: "authentication_error" });
+    expect(JSON.stringify(body)).not.toContain(credentials.apiKey);
+    expect(JSON.stringify(body)).not.toContain(credentials.apiBase);
+    expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
   });
 
   it.each([
@@ -128,6 +172,23 @@ function checkRequest(apiKey: string) {
       apiKey,
     }),
   });
+}
+
+function configureGateway() {
+  vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+  vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
+  vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-gateway-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
+}
+
+function azureCredentials() {
+  return {
+    apiKey: "azure-key-012345678901234567890",
+    apiBase: "https://kavero.openai.azure.com",
+    apiVersion: "2025-04-01-preview",
+    deploymentName: "deployment-one",
+    baseModel: "gpt-4.1",
+  };
 }
 
 function checkCredentialsRequest(providerId: string, credentials: Record<string, string>) {

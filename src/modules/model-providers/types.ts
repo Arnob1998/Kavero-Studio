@@ -1,4 +1,4 @@
-export const modelProviderIds = ["gemini", "openai", "groq", "ollama"] as const;
+export const modelProviderIds = ["gemini", "openai", "groq", "ollama", "azure-openai"] as const;
 
 export type ModelProviderId = (typeof modelProviderIds)[number];
 
@@ -39,6 +39,7 @@ export type ModelGatewayConfig =
       gateway: "litellm";
       baseUrl: string;
       apiKey: string;
+      routingSecret: string;
     }
   | {
       status: "error";
@@ -51,6 +52,8 @@ export type GatewayConfigIssueCode =
   | "missing-base-url"
   | "invalid-base-url"
   | "missing-api-key"
+  | "missing-routing-secret"
+  | "invalid-routing-secret"
   | "public-env-exposure";
 
 export type GatewayConfigIssue = {
@@ -134,6 +137,7 @@ export type LiteLlmFetch = (
 export type LiteLlmClientOptions = {
   config: Extract<ModelGatewayConfig, { status: "configured" }>;
   fetchImpl?: LiteLlmFetch;
+  now?: () => number;
 };
 
 export type LiteLlmResponseMetadata = {

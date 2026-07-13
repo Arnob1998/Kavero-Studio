@@ -18,6 +18,11 @@ function gatewayProviderEnv(inputs = {}, { defaultOllamaBaseUrl = "" } = {}) {
     OPENAI_API_KEY: inputs.OPENAI_API_KEY ?? "",
     GEMINI_API_KEY: inputs.GEMINI_API_KEY ?? "",
     GROQ_API_KEY: inputs.GROQ_API_KEY ?? "",
+    AZURE_API_KEY: inputs.AZURE_API_KEY ?? "",
+    AZURE_API_BASE: inputs.AZURE_API_BASE ?? "",
+    AZURE_API_VERSION: inputs.AZURE_API_VERSION ?? "",
+    AZURE_DEPLOYMENT_NAME: inputs.AZURE_DEPLOYMENT_NAME ?? "",
+    AZURE_BASE_MODEL: inputs.AZURE_BASE_MODEL ?? "",
     OLLAMA_BASE_URL: inputs.OLLAMA_BASE_URL ?? defaultOllamaBaseUrl,
   };
 }
@@ -61,6 +66,7 @@ export function buildSetupValues({
       KAVERO_MODEL_GATEWAY: "litellm",
       KAVERO_LITELLM_BASE_URL: localLiteLlmBaseUrl,
       KAVERO_LITELLM_API_KEY: secrets.KAVERO_LITELLM_API_KEY,
+      KAVERO_LITELLM_ROUTING_SECRET: secrets.KAVERO_LITELLM_ROUTING_SECRET,
       LITELLM_MASTER_KEY: secrets.LITELLM_MASTER_KEY,
       ...gatewayProviderEnv(inputs, { defaultOllamaBaseUrl: localOllamaBaseUrl }),
     };
@@ -81,6 +87,7 @@ export function buildSetupValues({
     KAVERO_MODEL_GATEWAY: inputs.KAVERO_MODEL_GATEWAY ?? "",
     KAVERO_LITELLM_BASE_URL: inputs.KAVERO_LITELLM_BASE_URL ?? "",
     KAVERO_LITELLM_API_KEY: inputs.KAVERO_LITELLM_API_KEY ?? "",
+    KAVERO_LITELLM_ROUTING_SECRET: inputs.KAVERO_LITELLM_ROUTING_SECRET ?? "",
     LITELLM_MASTER_KEY: inputs.LITELLM_MASTER_KEY ?? "",
     ...gatewayProviderEnv(inputs),
     GOOGLE_DRIVE_CLIENT_ID: inputs.GOOGLE_DRIVE_CLIENT_ID ?? "",
@@ -185,6 +192,35 @@ export async function runSetupWizard({
       await prompts.password({ message: "Groq API key for the gateway", placeholder: "Optional" }),
       prompts,
     );
+    inputs.AZURE_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Azure OpenAI API key for this server", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.AZURE_API_BASE = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI endpoint", placeholder: "https://resource.openai.azure.com" }),
+      prompts,
+    );
+    inputs.AZURE_API_VERSION = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI API version", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.AZURE_DEPLOYMENT_NAME = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI deployment name", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.AZURE_BASE_MODEL = assertNotCanceled(
+      await prompts.select({
+        message: "Azure OpenAI model family",
+        initialValue: "",
+        options: [
+          { value: "", label: "Not configured" },
+          { value: "gpt-4o", label: "GPT-4o family" },
+          { value: "gpt-4.1", label: "GPT-4.1 family" },
+          { value: "gpt-5", label: "GPT-5 family" },
+        ],
+      }),
+      prompts,
+    );
     inputs.OLLAMA_BASE_URL = assertNotCanceled(
       await prompts.text({
         message: "Ollama base URL for the gateway",
@@ -264,6 +300,10 @@ export async function runSetupWizard({
         await prompts.password({ message: "Kavero-to-LiteLLM API key" }),
         prompts,
       );
+      inputs.KAVERO_LITELLM_ROUTING_SECRET = assertNotCanceled(
+        await prompts.password({ message: "Matching LiteLLM routing secret" }),
+        prompts,
+      );
       inputs.GEMINI_API_KEY = assertNotCanceled(
         await prompts.password({ message: "Gemini API key for this server", placeholder: "Optional" }),
         prompts,
@@ -274,6 +314,35 @@ export async function runSetupWizard({
       );
       inputs.GROQ_API_KEY = assertNotCanceled(
         await prompts.password({ message: "Groq API key for this server", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.AZURE_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "Azure OpenAI API key for this server", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.AZURE_API_BASE = assertNotCanceled(
+        await prompts.text({ message: "Azure OpenAI endpoint", placeholder: "https://resource.openai.azure.com" }),
+        prompts,
+      );
+      inputs.AZURE_API_VERSION = assertNotCanceled(
+        await prompts.text({ message: "Azure OpenAI API version", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.AZURE_DEPLOYMENT_NAME = assertNotCanceled(
+        await prompts.text({ message: "Azure OpenAI deployment name", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.AZURE_BASE_MODEL = assertNotCanceled(
+        await prompts.select({
+          message: "Azure OpenAI model family",
+          initialValue: "",
+          options: [
+            { value: "", label: "Not configured" },
+            { value: "gpt-4o", label: "GPT-4o family" },
+            { value: "gpt-4.1", label: "GPT-4.1 family" },
+            { value: "gpt-5", label: "GPT-5 family" },
+          ],
+        }),
         prompts,
       );
       inputs.OLLAMA_BASE_URL = assertNotCanceled(

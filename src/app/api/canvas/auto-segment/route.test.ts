@@ -319,6 +319,45 @@ describe("canvas auto segment API", () => {
     expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"credentialSource\\":\\"user-byok\\"');
   });
 
+  it("uses Azure only for Auto Segment planning and preserves image isolation", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockImplementation(async (_userId, providerId) =>
+      providerId === "azure-openai"
+        ? {
+            apiKey: "azure-key-012345678901234567890",
+            apiBase: "https://kavero.openai.azure.com",
+            apiVersion: "2025-04-01-preview",
+            deploymentName: "segment-private-deployment",
+            baseModel: "gpt-4o",
+          }
+        : null,
+    );
+    const admin = adminForAsset(asset({ storage_ref: googleDriveRef() }), {
+      modelProviders: {
+        chatOrchestrationModelAlias: "kavero-chat-azure-openai",
+        imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      },
+    });
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+    mocks.generateContent.mockReset();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("source", { headers: { "Content-Type": "image/png" } }))
+      .mockResolvedValueOnce(litellmResponse(segmentPlanPayload()))
+      .mockResolvedValueOnce(litellmImageResponse("MASK"));
+
+    const response = await POST(request({ assetId: "asset-1" }));
+    const planning = JSON.parse(String(vi.mocked(fetch).mock.calls[1]![1]!.body));
+    const isolation = JSON.parse(String(vi.mocked(fetch).mock.calls[2]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(planning).toMatchObject({
+      model: "kavero-chat-azure-openai",
+      user_config: { model_list: [{ litellm_params: { model: "azure/segment-private-deployment" } }] },
+    });
+    expect(isolation.model).toBe(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
+    expect(isolation).not.toHaveProperty("user_config");
+  });
+
   it("rejects missing image credentials in user-required mode before planning or isolation", async () => {
     configureGateway();
     vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
@@ -431,6 +470,7 @@ describe("canvas auto segment API", () => {
   it("returns a safe gateway configuration error without model fallback", async () => {
     vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
     vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+    vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 
     const response = await POST(request({ assetId: "asset-1" }));
     const body = await response.json();
@@ -691,6 +731,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
   vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-or-user");
 }
 

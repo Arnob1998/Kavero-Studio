@@ -155,6 +155,7 @@ function enableGateway() {
   process.env.KAVERO_MODEL_GATEWAY = "litellm";
   process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
   process.env.KAVERO_LITELLM_API_KEY = "sk-test-secret";
+  process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingTestSecret_012345678901234567890123456789012345";
 }
 
 function rawRequest(body: string) {
@@ -385,6 +386,7 @@ describe("/api/generate POST", () => {
     delete process.env.KAVERO_MODEL_GATEWAY;
     delete process.env.KAVERO_LITELLM_BASE_URL;
     delete process.env.KAVERO_LITELLM_API_KEY;
+    delete process.env.KAVERO_LITELLM_ROUTING_SECRET;
     delete process.env.KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE;
   });
 
@@ -784,6 +786,7 @@ describe("/api/generate POST", () => {
     process.env.KAVERO_MODEL_GATEWAY = "litellm";
     delete process.env.KAVERO_LITELLM_BASE_URL;
     process.env.KAVERO_LITELLM_API_KEY = "sk-test-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingTestSecret_012345678901234567890123456789012345";
 
     const response = await POST(request(validBody()));
 

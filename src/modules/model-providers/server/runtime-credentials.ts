@@ -8,6 +8,7 @@ import {
   injectServerLiteLlmCredentials,
   sanitizeLiteLlmRequestBody,
 } from "./litellm-credentials";
+import { buildAzureOpenAiLiteLlmRequest } from "./azure-routing";
 
 export type ResolvedModelCredentials = Extract<ModelCredentialResolution, { ok: true }>;
 
@@ -55,13 +56,29 @@ export function prepareLiteLlmRuntimeRequest(
       ok: true;
       body: Record<string, unknown>;
       credentialSource: Extract<ModelGatewayCredentialSource, "user-byok" | "gateway-env">;
+      monitoringModel: string | null;
     }
   | RuntimeCredentialFailure {
+  if (resolution.providerKeyId === "azure-openai") {
+    const azure = buildAzureOpenAiLiteLlmRequest(body, resolution.credentials);
+    if (!azure) {
+      return { ok: false, status: "error", code: "invalid-provider-credentials" };
+    }
+
+    return {
+      ok: true,
+      body: azure.body,
+      credentialSource: resolution.credentialSource,
+      monitoringModel: azure.monitoringModel,
+    };
+  }
+
   if (resolution.credentialSource === "gateway-env") {
     return {
       ok: true,
       body: sanitizeLiteLlmRequestBody(body),
       credentialSource: resolution.credentialSource,
+      monitoringModel: null,
     };
   }
 
@@ -82,6 +99,7 @@ export function prepareLiteLlmRuntimeRequest(
     ok: true,
     body: injected.body,
     credentialSource: resolution.credentialSource,
+    monitoringModel: null,
   };
 }
 
@@ -92,6 +110,7 @@ export function prepareLiteLlmImageRuntimeRequest(
       ok: true;
       credentialSource: Extract<ModelGatewayCredentialSource, "user-byok" | "gateway-env">;
       transformRequestBody: (body: Record<string, unknown>) => Record<string, unknown>;
+      monitoringModel: string | null;
     }
   | RuntimeCredentialFailure {
   const prepared = prepareLiteLlmRuntimeRequest({}, resolution);
@@ -101,6 +120,7 @@ export function prepareLiteLlmImageRuntimeRequest(
   return {
     ok: true,
     credentialSource: prepared.credentialSource,
+    monitoringModel: prepared.monitoringModel,
     transformRequestBody: (body) => ({
       ...sanitizeLiteLlmRequestBody(body),
       ...trustedCredentialParams,

@@ -53,6 +53,28 @@ function isValidSkSecret(value) {
   return trimmed.startsWith("sk-") && trimmed.length > 8 && !isPlaceholderValue(trimmed);
 }
 
+function isValidRoutingSecret(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed.length >= 43 && /^[A-Za-z0-9_-]+$/.test(trimmed) && !isPlaceholderValue(trimmed);
+}
+
+function isValidAzureEndpoint(value) {
+  try {
+    const url = new URL(String(value));
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      url.pathname === "/" &&
+      url.hostname.toLowerCase().endsWith(".openai.azure.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
 const publicEnvPrefix = "NEXT_PUBLIC";
 const liteLlmEnvToken = "LITE" + "LLM";
 
@@ -112,7 +134,8 @@ export function validateEnvForProfile({ profileId, env }) {
     profileId === "local-docker" ||
     hasValue(env.KAVERO_MODEL_GATEWAY) ||
     hasValue(env.KAVERO_LITELLM_BASE_URL) ||
-    hasValue(env.KAVERO_LITELLM_API_KEY);
+    hasValue(env.KAVERO_LITELLM_API_KEY) ||
+    hasValue(env.KAVERO_LITELLM_ROUTING_SECRET);
 
   if (gatewayConfigured) {
     if (env.KAVERO_MODEL_GATEWAY && env.KAVERO_MODEL_GATEWAY !== "litellm") {
@@ -127,11 +150,28 @@ export function validateEnvForProfile({ profileId, env }) {
       if (!hasValue(env.KAVERO_LITELLM_API_KEY)) {
         checks.push(check("fail", "KAVERO_LITELLM_API_KEY", "Missing value."));
       }
+
+      if (!hasValue(env.KAVERO_LITELLM_ROUTING_SECRET)) {
+        checks.push(check("fail", "KAVERO_LITELLM_ROUTING_SECRET", "Missing value."));
+      }
     }
 
     if (hasValue(env.KAVERO_LITELLM_API_KEY) && !isValidSkSecret(env.KAVERO_LITELLM_API_KEY)) {
       checks.push(check("fail", "KAVERO_LITELLM_API_KEY", "Must be a non-placeholder sk- secret."));
     }
+  }
+
+  if (
+    hasValue(env.KAVERO_LITELLM_ROUTING_SECRET) &&
+    !isValidRoutingSecret(env.KAVERO_LITELLM_ROUTING_SECRET)
+  ) {
+    checks.push(
+      check(
+        "fail",
+        "KAVERO_LITELLM_ROUTING_SECRET",
+        "Must be a non-placeholder base64url secret of at least 43 characters.",
+      ),
+    );
   }
 
   if (hasValue(env.LITELLM_MASTER_KEY) && !isValidSkSecret(env.LITELLM_MASTER_KEY)) {
@@ -141,6 +181,34 @@ export function validateEnvForProfile({ profileId, env }) {
   for (const key of ["OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"]) {
     if (hasValue(env[key]) && isPlaceholderValue(env[key])) {
       checks.push(check("fail", key, "Blank or a real value is required."));
+    }
+  }
+
+  const azureKeys = [
+    "AZURE_API_KEY",
+    "AZURE_API_BASE",
+    "AZURE_API_VERSION",
+    "AZURE_DEPLOYMENT_NAME",
+    "AZURE_BASE_MODEL",
+  ];
+  if (azureKeys.some((key) => hasValue(env[key]))) {
+    for (const key of azureKeys) {
+      if (!hasValue(env[key])) checks.push(check("fail", key, "Required for Azure OpenAI configuration."));
+    }
+    if (hasValue(env.AZURE_API_KEY) && (String(env.AZURE_API_KEY).trim().length < 20 || isPlaceholderValue(env.AZURE_API_KEY))) {
+      checks.push(check("fail", "AZURE_API_KEY", "Must be a non-placeholder Azure API key."));
+    }
+    if (hasValue(env.AZURE_API_BASE) && !isValidAzureEndpoint(env.AZURE_API_BASE)) {
+      checks.push(check("fail", "AZURE_API_BASE", "Must be an Azure OpenAI HTTPS endpoint."));
+    }
+    if (hasValue(env.AZURE_API_VERSION) && !/^[A-Za-z0-9._-]{1,100}$/.test(String(env.AZURE_API_VERSION).trim())) {
+      checks.push(check("fail", "AZURE_API_VERSION", "Invalid Azure API version."));
+    }
+    if (hasValue(env.AZURE_DEPLOYMENT_NAME) && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(env.AZURE_DEPLOYMENT_NAME).trim())) {
+      checks.push(check("fail", "AZURE_DEPLOYMENT_NAME", "Invalid Azure deployment name."));
+    }
+    if (hasValue(env.AZURE_BASE_MODEL) && !["gpt-4o", "gpt-4.1", "gpt-5"].includes(String(env.AZURE_BASE_MODEL).trim())) {
+      checks.push(check("fail", "AZURE_BASE_MODEL", "Unsupported Azure model family."));
     }
   }
 

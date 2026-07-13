@@ -32,6 +32,7 @@ const envKeys = [
   "KAVERO_MODEL_GATEWAY",
   "KAVERO_LITELLM_BASE_URL",
   "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
   "KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE",
 ] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -119,6 +120,39 @@ describe("/api/prompt-refiner", () => {
     expect(response.status).toBe(200);
     expect(outboundBody).not.toHaveProperty("api_key");
     expect(loggedCredentialSources(consoleInfoSpy)).toContain("gateway-env");
+  });
+
+  it("routes Azure Prompt Refiner through signed trusted user_config", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({
+      apiKey: "azure-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+      deploymentName: "private-deployment-one",
+      baseModel: "gpt-4.1",
+    });
+    mocks.createClient.mockResolvedValue(createSupabaseClient({
+      preferences: { modelProviders: { chatOrchestrationModelAlias: "kavero-chat-azure-openai" } },
+    }));
+    const fetchMock = vi.fn<typeof fetch>(async () => litellmResponse(refinedPayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = (await POST(jsonRequest(validBody())))!;
+    const body = await response.json();
+    const outbound = outboundJson(fetchMock);
+
+    expect(response.status).toBe(200);
+    expect(body.model).toBe("kavero-chat-azure-openai");
+    expect(outbound).toMatchObject({
+      model: "kavero-chat-azure-openai",
+      user_config: { model_list: [{ litellm_params: { model: "azure/private-deployment-one" } }] },
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "x-kavero-routing-version": "v1",
+      "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain("gpt-4.1");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain("private-deployment-one");
   });
 
   it("rejects missing credentials in user-required mode without calling LiteLLM", async () => {
@@ -232,6 +266,7 @@ describe("/api/prompt-refiner", () => {
   it("returns a safe gateway configuration error without direct Gemini fallback", async () => {
     process.env.KAVERO_MODEL_GATEWAY = "litellm";
     process.env.KAVERO_LITELLM_API_KEY = "sk-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
 
     const response = (await POST(jsonRequest(validBody())))!;
     const body = await response.json();
@@ -331,6 +366,7 @@ function configureGateway() {
   process.env.KAVERO_MODEL_GATEWAY = "litellm";
   process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
   process.env.KAVERO_LITELLM_API_KEY = "sk-secret";
+  process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
   process.env.KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE = "env-or-user";
 }
 

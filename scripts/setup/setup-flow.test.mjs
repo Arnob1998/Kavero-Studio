@@ -10,6 +10,7 @@ function localDockerSecrets() {
     SUPABASE_SERVICE_ROLE_KEY: "service",
     LITELLM_MASTER_KEY: "sk-local-litellm",
     KAVERO_LITELLM_API_KEY: "sk-local-litellm",
+    KAVERO_LITELLM_ROUTING_SECRET: "localRoutingSecret_012345678901234567890123456789",
   };
 }
 
@@ -24,6 +25,11 @@ describe("setup flow values", () => {
         SUPABASE_KONG_PORT: "54322",
         GEMINI_API_KEY: "gemini-key",
         OLLAMA_BASE_URL: "http://host.docker.internal:11434",
+        AZURE_API_KEY: "azure-key-012345678901234567890",
+        AZURE_API_BASE: "https://kavero.openai.azure.com",
+        AZURE_API_VERSION: "2025-04-01-preview",
+        AZURE_DEPLOYMENT_NAME: "deployment-one",
+        AZURE_BASE_MODEL: "gpt-4.1",
       },
       dockerSecrets: localDockerSecrets(),
     });
@@ -39,11 +45,17 @@ describe("setup flow values", () => {
       KAVERO_MODEL_GATEWAY: "litellm",
       KAVERO_LITELLM_BASE_URL: "http://litellm:4000",
       KAVERO_LITELLM_API_KEY: "sk-local-litellm",
+      KAVERO_LITELLM_ROUTING_SECRET: "localRoutingSecret_012345678901234567890123456789",
       LITELLM_MASTER_KEY: "sk-local-litellm",
       GEMINI_API_KEY: "gemini-key",
       OPENAI_API_KEY: "",
       GROQ_API_KEY: "",
       OLLAMA_BASE_URL: "http://host.docker.internal:11434",
+      AZURE_API_KEY: "azure-key-012345678901234567890",
+      AZURE_API_BASE: "https://kavero.openai.azure.com",
+      AZURE_API_VERSION: "2025-04-01-preview",
+      AZURE_DEPLOYMENT_NAME: "deployment-one",
+      AZURE_BASE_MODEL: "gpt-4.1",
     });
   });
 
@@ -80,6 +92,7 @@ describe("setup flow values", () => {
       KAVERO_MODEL_GATEWAY: "",
       KAVERO_LITELLM_BASE_URL: "",
       KAVERO_LITELLM_API_KEY: "",
+      KAVERO_LITELLM_ROUTING_SECRET: "",
       LITELLM_MASTER_KEY: "",
       GEMINI_API_KEY: "",
       OPENAI_API_KEY: "",
@@ -101,6 +114,7 @@ describe("setup flow values", () => {
         KAVERO_MODEL_GATEWAY: "litellm",
         KAVERO_LITELLM_BASE_URL: "https://litellm.example.com",
         KAVERO_LITELLM_API_KEY: "sk-hosted-app",
+        KAVERO_LITELLM_ROUTING_SECRET: "hostedRoutingSecret_0123456789012345678901234567",
         OPENAI_API_KEY: "openai-key",
         OLLAMA_BASE_URL: "https://ollama.example.com",
       },
@@ -110,6 +124,7 @@ describe("setup flow values", () => {
       KAVERO_MODEL_GATEWAY: "litellm",
       KAVERO_LITELLM_BASE_URL: "https://litellm.example.com",
       KAVERO_LITELLM_API_KEY: "sk-hosted-app",
+      KAVERO_LITELLM_ROUTING_SECRET: "hostedRoutingSecret_0123456789012345678901234567",
       LITELLM_MASTER_KEY: "",
       OPENAI_API_KEY: "openai-key",
       GEMINI_API_KEY: "",

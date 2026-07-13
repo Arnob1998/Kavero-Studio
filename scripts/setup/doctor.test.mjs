@@ -35,6 +35,7 @@ function validLocalDockerEnv(overrides = {}) {
     KAVERO_MODEL_GATEWAY: "litellm",
     KAVERO_LITELLM_BASE_URL: "http://litellm:4000",
     KAVERO_LITELLM_API_KEY: "sk-local-app",
+    KAVERO_LITELLM_ROUTING_SECRET: "localRoutingSecret_012345678901234567890123456789",
     LITELLM_MASTER_KEY: "sk-local-master",
     OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
@@ -149,9 +150,52 @@ describe("setup doctor", () => {
         KAVERO_MODEL_GATEWAY: "litellm",
         KAVERO_LITELLM_BASE_URL: "https://litellm.example.com",
         KAVERO_LITELLM_API_KEY: "sk-hosted-app",
+        KAVERO_LITELLM_ROUTING_SECRET: "hostedRoutingSecret_0123456789012345678901234567",
       },
     });
     expect(configuredChecks.filter((item) => item.status === "fail")).toEqual([]);
+  });
+
+  it("allows empty Azure configuration and rejects partial or unsafe values", () => {
+    expect(validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv(),
+    }).filter((item) => item.status === "fail")).toEqual([]);
+
+    const partial = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({ AZURE_API_KEY: "azure-key-012345678901234567890" }),
+    });
+    expect(partial).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "fail", label: "AZURE_API_BASE" }),
+      expect.objectContaining({ status: "fail", label: "AZURE_DEPLOYMENT_NAME" }),
+    ]));
+
+    const complete = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({
+        AZURE_API_KEY: "azure-key-012345678901234567890",
+        AZURE_API_BASE: "https://kavero.openai.azure.com",
+        AZURE_API_VERSION: "2025-04-01-preview",
+        AZURE_DEPLOYMENT_NAME: "deployment-one",
+        AZURE_BASE_MODEL: "gpt-5",
+      }),
+    });
+    expect(complete.filter((item) => item.status === "fail")).toEqual([]);
+
+    const unsafe = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({
+        AZURE_API_KEY: "azure-key-012345678901234567890",
+        AZURE_API_BASE: "http://127.0.0.1:4000",
+        AZURE_API_VERSION: "bad version",
+        AZURE_DEPLOYMENT_NAME: "bad/deployment",
+        AZURE_BASE_MODEL: "azure/arbitrary",
+      }),
+    });
+    for (const key of ["AZURE_API_BASE", "AZURE_API_VERSION", "AZURE_DEPLOYMENT_NAME", "AZURE_BASE_MODEL"]) {
+      expect(unsafe).toEqual(expect.arrayContaining([expect.objectContaining({ status: "fail", label: key })]));
+    }
   });
 
   it("passes a valid local Docker env and compose config", () => {

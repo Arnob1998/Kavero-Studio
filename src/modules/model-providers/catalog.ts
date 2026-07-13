@@ -2,6 +2,7 @@ import type { ModelCatalogEntry, ModelCapabilitySlot } from "./types";
 
 export const DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS = "kavero-chat-orchestration-default";
 export const DEFAULT_IMAGE_GENERATION_MODEL_ALIAS = "kavero-image-generation-default";
+export const AZURE_OPENAI_CHAT_MODEL_ALIAS = "kavero-chat-azure-openai";
 
 export const modelCatalog = [
   {
@@ -59,6 +60,21 @@ export const modelCatalog = [
       supportsTools: true,
       supportsStructuredJson: true,
       supportsMultimodalImageInput: false,
+      supportsImageOutput: false,
+      supportsStreaming: true,
+      requirements: ["provider-key"],
+    },
+  },
+  {
+    provider: "azure-openai",
+    model: "gpt-4o",
+    modelAlias: AZURE_OPENAI_CHAT_MODEL_ALIAS,
+    displayLabel: "Azure OpenAI deployment",
+    capabilities: {
+      slots: ["chatOrchestration"],
+      supportsTools: true,
+      supportsStructuredJson: true,
+      supportsMultimodalImageInput: true,
       supportsImageOutput: false,
       supportsStreaming: true,
       requirements: ["provider-key"],

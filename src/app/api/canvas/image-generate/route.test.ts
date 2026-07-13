@@ -222,6 +222,7 @@ describe("canvas image generation API", () => {
   it("returns a safe gateway configuration error without direct Gemini fallback", async () => {
     vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
     vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+    vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 
     const response = await POST(request(validBody()));
     const body = await response.json();
@@ -361,6 +362,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 }
 
 function validBody(overrides: Record<string, unknown> = {}) {

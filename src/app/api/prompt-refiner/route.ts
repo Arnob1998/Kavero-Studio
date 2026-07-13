@@ -400,13 +400,14 @@ async function handleGatewayRefinement({
   if (!prepared.ok) {
     return createSafeRuntimeCredentialFailureResponse("Prompt refinement", prepared);
   }
+  const monitoringModel = prepared.monitoringModel ?? catalogEntry?.model ?? null;
 
   try {
     const response = await client.chatCompletions(
       prepared.body,
       {
         provider: catalogEntry?.provider ?? null,
-        model: catalogEntry?.model ?? null,
+        model: monitoringModel,
         modelAlias,
       },
     );
@@ -421,7 +422,7 @@ async function handleGatewayRefinement({
           userId,
           feature: "prompt-refiner",
           provider: catalogEntry?.provider ?? null,
-          model: catalogEntry?.model ?? null,
+          model: monitoringModel,
           modelAlias,
           requestId: response.requestId,
           callId: response.callId,
@@ -440,7 +441,7 @@ async function handleGatewayRefinement({
         userId,
         feature: "prompt-refiner",
         provider: catalogEntry?.provider ?? null,
-        model: catalogEntry?.model ?? null,
+        model: monitoringModel,
         modelAlias,
         requestId: response.requestId,
         callId: response.callId,
@@ -459,7 +460,7 @@ async function handleGatewayRefinement({
         userId,
         feature: "prompt-refiner",
         provider: catalogEntry?.provider ?? null,
-        model: catalogEntry?.model ?? null,
+        model: monitoringModel,
         modelAlias,
         requestId: details?.requestId ?? null,
         callId: details?.callId ?? null,

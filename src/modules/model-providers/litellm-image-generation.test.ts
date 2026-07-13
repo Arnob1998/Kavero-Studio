@@ -8,6 +8,7 @@ const config: Extract<ModelGatewayConfig, { status: "configured" }> = {
   gateway: "litellm",
   baseUrl: "http://litellm:4000",
   apiKey: "sk-test-secret",
+  routingSecret: "routing-test-secret",
 };
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
@@ -85,10 +86,10 @@ describe("generateLiteLlmImage", () => {
       "http://litellm:4000/v1/chat/completions",
       expect.objectContaining({
         method: "POST",
-        headers: {
+        headers: expect.objectContaining({
           Authorization: "Bearer sk-test-secret",
           "Content-Type": "application/json",
-        },
+        }),
       }),
     );
     expect(requestBody.model).toBe("kavero-image-generation-default");

@@ -51,11 +51,13 @@ describe("/api/provider-keys", () => {
       "openai-compatible",
     ]);
     expect(body.providers.find((provider: { id: string }) => provider.id === "azure-openai")).toMatchObject({
-      checkMode: "validation-only",
+      checkMode: "live",
       credentialFields: [
         { id: "apiKey", secret: true, inputType: "password" },
         { id: "apiBase", secret: false, inputType: "url" },
         { id: "apiVersion", secret: false, inputType: "text" },
+        { id: "deploymentName", secret: false, inputType: "text" },
+        { id: "baseModel", secret: false, inputType: "select", options: expect.any(Array) },
       ],
     });
     expect(JSON.stringify(body)).not.toContain("sk-secret");
@@ -142,6 +144,8 @@ describe("/api/provider-keys", () => {
       apiKey: "azure-key-012345678901234567890",
       apiBase: "https://kavero.openai.azure.com/",
       apiVersion: "2025-04-01-preview",
+      deploymentName: "deployment-one",
+      baseModel: "gpt-4.1",
     };
     const response = await POST(providerRequest("azure-openai", credentials));
     const body = await response.json();
@@ -151,6 +155,8 @@ describe("/api/provider-keys", () => {
     expect(JSON.parse(rpcPayload.p_secret)).toEqual({ ...credentials, apiBase: "https://kavero.openai.azure.com" });
     expect(JSON.stringify(body)).not.toContain(credentials.apiKey);
     expect(JSON.stringify(body)).not.toContain(credentials.apiBase);
+    expect(JSON.stringify(body)).not.toContain(credentials.apiVersion);
+    expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
   });
 
   it("accepts an OpenAI-compatible public base URL without requiring an API key", async () => {

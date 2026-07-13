@@ -15,6 +15,7 @@ describe("model gateway config", () => {
       KAVERO_MODEL_GATEWAY: "litellm",
       KAVERO_LITELLM_BASE_URL: "http://litellm:4000",
       KAVERO_LITELLM_API_KEY: "sk-secret",
+      KAVERO_LITELLM_ROUTING_SECRET: "routingSecret_0123456789012345678901234567890123456789",
     });
 
     expect(result).toEqual({
@@ -22,12 +23,14 @@ describe("model gateway config", () => {
       gateway: "litellm",
       baseUrl: "http://litellm:4000",
       apiKey: "sk-secret",
+      routingSecret: "routingSecret_0123456789012345678901234567890123456789",
     });
     expect(getLoggableGatewayConfigResult(result)).toEqual({
       status: "configured",
       gateway: "litellm",
       baseUrl: "http://litellm:4000",
       apiKey: "[redacted]",
+      routingSecret: "[redacted]",
     });
   });
 
@@ -36,10 +39,12 @@ describe("model gateway config", () => {
       KAVERO_MODEL_GATEWAY: "litellm",
       KAVERO_LITELLM_BASE_URL: "not a url",
       KAVERO_LITELLM_API_KEY: "sk-super-secret",
+      KAVERO_LITELLM_ROUTING_SECRET: "routingSuperSecret_01234567890123456789012345678901234",
     });
 
     expect(result.status).toBe("error");
     expect(JSON.stringify(result)).not.toContain("sk-super-secret");
+    expect(JSON.stringify(result)).not.toContain("routing-super-secret");
     expect(result).toMatchObject({
       gateway: "litellm",
       issues: [
@@ -56,6 +61,7 @@ describe("model gateway config", () => {
       issues: expect.arrayContaining([
         expect.objectContaining({ code: "missing-base-url" }),
         expect.objectContaining({ code: "missing-api-key" }),
+        expect.objectContaining({ code: "missing-routing-secret" }),
       ]),
     });
   });
@@ -66,6 +72,7 @@ describe("model gateway config", () => {
       KAVERO_MODEL_GATEWAY: "litellm",
       KAVERO_LITELLM_BASE_URL: "http://litellm:4000",
       KAVERO_LITELLM_API_KEY: "sk-secret",
+      KAVERO_LITELLM_ROUTING_SECRET: "routingSecret_0123456789012345678901234567890123456789",
       [publicLiteLlmKey]: "http://litellm:4000",
     });
 

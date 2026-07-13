@@ -6,6 +6,12 @@ import {
   type SupportedProviderId,
 } from "@/lib/provider-key-registry";
 import { createClient } from "@/lib/supabase/server";
+import {
+  createLiteLlmClient,
+  getModelGatewayConfig,
+  isModelGatewayError,
+} from "@/modules/model-providers";
+import { buildAzureOpenAiLiteLlmRequest } from "@/modules/model-providers/server";
 
 export async function POST(request: Request) {
   const parsed = parseProviderCredentialPayload(await request.json().catch(() => null));
@@ -63,7 +69,36 @@ export async function POST(request: Request) {
   }
 }
 
-function checkProviderCredentials(providerId: SupportedProviderId, credentials: ProviderCredentials) {
+async function checkProviderCredentials(providerId: SupportedProviderId, credentials: ProviderCredentials) {
+  if (providerId === "azure-openai") {
+    const config = getModelGatewayConfig();
+    if (config.status !== "configured") return { ok: false, status: 503 };
+
+    const request = buildAzureOpenAiLiteLlmRequest(
+      {
+        model: "kavero-chat-azure-openai",
+        max_tokens: 1,
+        messages: [{ role: "user", content: "Connectivity check" }],
+      },
+      credentials,
+    );
+    if (!request) return { ok: false, status: 400 };
+
+    try {
+      await createLiteLlmClient({ config }).chatCompletions(request.body, {
+        provider: "azure-openai",
+        model: request.monitoringModel,
+        modelAlias: "kavero-chat-azure-openai",
+      });
+      return { ok: true, status: 200 };
+    } catch (error) {
+      return {
+        ok: false,
+        status: isModelGatewayError(error) ? error.details.status ?? 502 : 502,
+      };
+    }
+  }
+
   const apiKey = (credentials as { apiKey: string }).apiKey;
 
   if (providerId === "google-gemini") {

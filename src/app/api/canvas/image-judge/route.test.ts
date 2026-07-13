@@ -100,6 +100,33 @@ describe("canvas image judge API", () => {
     expect(loggedCredentialSources(consoleInfoSpy)).toContain("gateway-env");
   });
 
+  it("routes multimodal Image Judge through a curated Azure family", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({
+      apiKey: "azure-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+      deploymentName: "judge-private-deployment",
+      baseModel: "gpt-4o",
+    });
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({
+      modelProviders: { chatOrchestrationModelAlias: "kavero-chat-azure-openai" },
+    }));
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({ winnerId: "candidate-1", reason: "best fit" })));
+
+    const response = await POST(judgeRequest());
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
+
+    expect(response.status).toBe(200);
+    expect(outbound).toMatchObject({
+      model: "kavero-chat-azure-openai",
+      user_config: { model_list: [{ litellm_params: { model: "azure/judge-private-deployment" } }] },
+    });
+    expect(JSON.stringify(outbound.messages)).toContain("data:image/png;base64");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain("gpt-4o");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain("judge-private-deployment");
+  });
+
   it("rejects missing Image Judge credentials in user-required mode", async () => {
     configureGateway();
     vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
@@ -164,6 +191,7 @@ describe("canvas image judge API", () => {
   it("returns a safe gateway configuration error without direct Gemini fallback", async () => {
     vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
     vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+    vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
 
     const response = await POST(judgeRequest());
     const body = await response.json();
@@ -214,6 +242,7 @@ function configureGateway() {
   vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
   vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
   vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
   vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-or-user");
 }
 

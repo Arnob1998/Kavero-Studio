@@ -84,20 +84,21 @@ export function createLiteLlmCanvasAssistantProvider({
           "authentication_error",
         );
       }
+      const monitoringModel = prepared.monitoringModel ?? catalogEntry?.model ?? null;
 
       try {
         const response = await client.chatCompletions<OpenAiChatCompletionResponse>(
           prepared.body,
           {
             provider: catalogEntry?.provider ?? null,
-            model: catalogEntry?.model ?? null,
+            model: monitoringModel,
             modelAlias,
           },
         );
 
         const result = parseAssistantResponse(response.data, {
           provider: catalogEntry?.provider ?? null,
-          model: catalogEntry?.model ?? null,
+          model: monitoringModel,
           modelAlias,
           requestId: response.requestId,
           callId: response.callId,
@@ -108,7 +109,7 @@ export function createLiteLlmCanvasAssistantProvider({
             userId,
             feature: "canvas-copilot",
             provider: catalogEntry?.provider ?? null,
-            model: catalogEntry?.model ?? null,
+            model: monitoringModel,
             modelAlias,
             requestId: response.requestId,
             callId: response.callId,
@@ -127,7 +128,7 @@ export function createLiteLlmCanvasAssistantProvider({
             userId,
             feature: "canvas-copilot",
             provider: catalogEntry?.provider ?? null,
-            model: catalogEntry?.model ?? null,
+            model: monitoringModel,
             modelAlias,
             requestId: details?.requestId ?? null,
             callId: details?.callId ?? null,
