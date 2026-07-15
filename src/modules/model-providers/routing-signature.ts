@@ -22,8 +22,13 @@ export function createRoutingCanonicalValue(input: {
   ].join("\n");
 }
 
-export function hashRoutingBody(serializedBody: string) {
-  return createHash("sha256").update(serializedBody, "utf8").digest("hex");
+export type RoutingBody = string | Uint8Array;
+
+export function hashRoutingBody(serializedBody: RoutingBody) {
+  const hash = createHash("sha256");
+  if (typeof serializedBody === "string") hash.update(serializedBody, "utf8");
+  else hash.update(serializedBody);
+  return hash.digest("hex");
 }
 
 export function createRoutingSignature(input: {
@@ -31,7 +36,7 @@ export function createRoutingSignature(input: {
   timestamp: number;
   method: string;
   pathname: string;
-  serializedBody: string;
+  serializedBody: RoutingBody;
 }) {
   const canonicalValue = createRoutingCanonicalValue({
     timestamp: input.timestamp,

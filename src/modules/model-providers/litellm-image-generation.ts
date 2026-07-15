@@ -2,6 +2,9 @@ import {
   createModelGatewayError,
 } from "./errors";
 import { createLiteLlmClient } from "./litellm-client";
+import { getImageModelAdapter } from "./image-adapters";
+import type { ImageGenerationIntent } from "./image-capabilities";
+export { OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 import type {
   ModelGatewayConfig,
   ModelGatewayUsage,
@@ -31,6 +34,7 @@ export type LiteLlmGeneratedImage = {
 export type LiteLlmImageGenerationResult = {
   text: string;
   images: LiteLlmGeneratedImage[];
+  warnings: string[];
   requestId: string | null;
   callId: string | null;
   usage: ModelGatewayUsage;
@@ -42,6 +46,7 @@ type GenerateLiteLlmImageInput = {
   provider: ModelProviderId | null;
   model: string | null;
   prompt: string;
+  intent?: ImageGenerationIntent;
   settings: LiteLlmImageGenerationSettings;
   referenceImages: LiteLlmImageReference[];
   taskLabel?: string;
@@ -97,6 +102,53 @@ function getFirstAssistantMessage(data: unknown) {
   return objectOrNull(firstChoice?.message);
 }
 
+function getOpenAiImageWarnings(settings: LiteLlmImageGenerationSettings) {
+  const warnings: string[] = [];
+  if (settings.thinking !== "balanced") {
+    warnings.push("GPT Image 2 uses provider-managed image reasoning; the selected thinking level was not sent.");
+  }
+  if (settings.aspectRatio !== "auto") {
+    warnings.push("GPT Image 2 used automatic output dimensions; the selected aspect ratio was not sent.");
+  }
+  if (settings.imageSize !== "1K" && settings.imageSize !== "source-aligned") {
+    warnings.push("GPT Image 2 used automatic output dimensions; the selected image size was not sent.");
+  }
+  return warnings;
+}
+
+function normalizeOpenAiImageData(data: unknown, context: Record<string, unknown>) {
+  const root = objectOrNull(data);
+  const entries = Array.isArray(root?.data) ? root.data : [];
+  const images: LiteLlmGeneratedImage[] = [];
+  const revisedPrompts: string[] = [];
+
+  for (const entry of entries) {
+    const record = objectOrNull(entry);
+    const base64 = typeof record?.b64_json === "string" ? record.b64_json : null;
+    if (!base64 || !/^[A-Za-z0-9+/=_-]+$/.test(base64)) {
+      throw createModelGatewayError(
+        "LiteLLM returned an invalid image response.",
+        context,
+        "invalid_response",
+      );
+    }
+    images.push({ dataUrl: `data:image/png;base64,${base64}`, mimeType: "image/png" });
+    if (typeof record?.revised_prompt === "string" && record.revised_prompt.trim()) {
+      revisedPrompts.push(record.revised_prompt.trim());
+    }
+  }
+
+  if (images.length === 0) {
+    throw createModelGatewayError(
+      "LiteLLM returned no generated images.",
+      context,
+      "invalid_response",
+    );
+  }
+
+  return { images, text: revisedPrompts.join("\n\n") };
+}
+
 export async function generateLiteLlmImage(
   input: GenerateLiteLlmImageInput,
 ): Promise<LiteLlmImageGenerationResult> {
@@ -106,6 +158,57 @@ export async function generateLiteLlmImage(
     model: input.model,
     modelAlias: input.modelAlias,
   };
+
+  if (input.intent) {
+    const adapter = getImageModelAdapter(input.intent.modelAlias);
+    if (!adapter) throw createModelGatewayError("Unknown image model adapter.", context, "provider_error");
+    const request = adapter.buildRequest(input.intent);
+    if (request.transport === "json" && request.endpoint === "openai-generations") {
+      const body = input.transformRequestBody ? input.transformRequestBody(request.body) : request.body;
+      const response = await client.generateImage(body, context);
+      const normalized = normalizeOpenAiImageData(response.data, { ...context, requestId: response.requestId, callId: response.callId });
+      return { ...normalized, warnings: [], requestId: response.requestId, callId: response.callId, usage: response.usage };
+    }
+    throw createModelGatewayError(
+      request.transport === "multipart"
+        ? "Image reference and mask editing is not available."
+        : "This image adapter is not enabled for product requests.",
+      context,
+      "provider_error",
+    );
+  }
+
+  if (input.provider === "openai" && input.model === "gpt-image-2") {
+    if (input.referenceImages.length > 0) {
+      throw createModelGatewayError(
+        "GPT Image 2 reference editing is not available.",
+        context,
+        "provider_error",
+      );
+    }
+    const body = {
+      model: input.modelAlias,
+      prompt: input.prompt,
+      n: 1,
+      size: "auto",
+      quality: "auto",
+    };
+    const transformedBody = input.transformRequestBody ? input.transformRequestBody(body) : body;
+    const response = await client.generateImage(transformedBody, context);
+    const responseContext = {
+      ...context,
+      requestId: response.requestId,
+      callId: response.callId,
+    };
+    const normalized = normalizeOpenAiImageData(response.data, responseContext);
+    return {
+      ...normalized,
+      warnings: getOpenAiImageWarnings(input.settings),
+      requestId: response.requestId,
+      callId: response.callId,
+      usage: response.usage,
+    };
+  }
   const content: Array<Record<string, unknown>> = [
     {
       type: "text",
@@ -185,6 +288,7 @@ export async function generateLiteLlmImage(
   return {
     text,
     images,
+    warnings: [],
     requestId: response.requestId,
     callId: response.callId,
     usage: response.usage,

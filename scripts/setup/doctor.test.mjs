@@ -178,7 +178,7 @@ describe("setup doctor", () => {
         AZURE_API_BASE: "https://kavero.openai.azure.com",
         AZURE_API_VERSION: "2025-04-01-preview",
         AZURE_DEPLOYMENT_NAME: "deployment-one",
-        AZURE_BASE_MODEL: "gpt-5",
+        AZURE_BASE_MODEL: "gpt-5.6-terra",
       }),
     });
     expect(complete.filter((item) => item.status === "fail")).toEqual([]);

@@ -3,6 +3,7 @@ import {
   AZURE_OPENAI_CHAT_MODEL_ALIAS,
   DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
   DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+  OPENAI_GPT_5_6_MODEL_ALIASES,
   getDefaultModelAliasForSlot,
   getModelCatalogEntry,
   getModelsForCapability,
@@ -55,5 +56,31 @@ describe("model provider catalog", () => {
     expect(imageModels).not.toContain(AZURE_OPENAI_CHAT_MODEL_ALIAS);
     expect(modelCatalog.find((entry) => entry.provider === "groq")?.capabilities.supportsImageOutput).toBe(false);
     expect(modelCatalog.find((entry) => entry.provider === "ollama")?.capabilities.requirements).toContain("local-runtime");
+  });
+
+  it("exposes the current OpenAI GPT-5.6 family without changing defaults", () => {
+    expect(Object.values(OPENAI_GPT_5_6_MODEL_ALIASES)).toEqual([
+      "kavero-chat-openai-gpt-5-6",
+      "kavero-chat-openai-gpt-5-6-sol",
+      "kavero-chat-openai-gpt-5-6-terra",
+      "kavero-chat-openai-gpt-5-6-luna",
+    ]);
+    expect(Object.entries(OPENAI_GPT_5_6_MODEL_ALIASES).map(([, modelAlias]) =>
+      getModelCatalogEntry(modelAlias),
+    )).toEqual([
+      expect.objectContaining({ provider: "openai", model: "gpt-5.6" }),
+      expect.objectContaining({ provider: "openai", model: "gpt-5.6-sol" }),
+      expect.objectContaining({ provider: "openai", model: "gpt-5.6-terra" }),
+      expect.objectContaining({ provider: "openai", model: "gpt-5.6-luna" }),
+    ]);
+    for (const modelAlias of Object.values(OPENAI_GPT_5_6_MODEL_ALIASES)) {
+      expect(getModelCatalogEntry(modelAlias)?.capabilities).toMatchObject({
+        slots: ["chatOrchestration"],
+        supportsTools: true,
+        supportsStructuredJson: true,
+        supportsMultimodalImageInput: true,
+        supportsImageOutput: false,
+      });
+    }
   });
 });

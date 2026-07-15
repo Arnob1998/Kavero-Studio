@@ -76,7 +76,7 @@ describe("/api/prompt-refiner", () => {
       createSupabaseClient({
         preferences: {
           modelProviders: {
-            chatOrchestrationModelAlias: "kavero-chat-openai-example",
+            chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
           },
         },
       }),
@@ -92,11 +92,11 @@ describe("/api/prompt-refiner", () => {
     expect(body).toMatchObject({
       status: "refined",
       refinedPrompt: "A refined product prompt.",
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       maxQuestions: 3,
     });
     expect(outboundBody).toMatchObject({
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       temperature: 0.35,
       response_format: { type: "json_object" },
       api_key: "sk-user-openai-1234567890",

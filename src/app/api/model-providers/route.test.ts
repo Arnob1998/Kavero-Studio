@@ -109,7 +109,7 @@ describe("/api/model-providers", () => {
 
     const response = (await PATCH(
       jsonRequest({
-        chatOrchestrationModelAlias: "kavero-chat-openai-example",
+        chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
         imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
       }),
     ))!;
@@ -123,7 +123,7 @@ describe("/api/model-providers", () => {
           theme: "dark",
           modelProviders: {
             collapsed: true,
-            chatOrchestrationModelAlias: "kavero-chat-openai-example",
+            chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
             imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
           },
         },
@@ -131,7 +131,7 @@ describe("/api/model-providers", () => {
       { onConflict: "user_id" },
     );
     expect(body.selected).toEqual({
-      chatOrchestrationModelAlias: "kavero-chat-openai-example",
+      chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
       imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
     });
   });

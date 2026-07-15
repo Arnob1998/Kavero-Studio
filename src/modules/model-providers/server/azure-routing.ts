@@ -30,7 +30,7 @@ export function getAzureOpenAiRoute(
   baseModel: AzureOpenAiBaseModel,
   deploymentName: string,
 ) {
-  return baseModel === "gpt-5"
+  return baseModel.startsWith("gpt-5")
     ? `azure/gpt5_series/${deploymentName}`
     : `azure/${deploymentName}`;
 }

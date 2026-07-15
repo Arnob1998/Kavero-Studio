@@ -207,7 +207,14 @@ export function validateEnvForProfile({ profileId, env }) {
     if (hasValue(env.AZURE_DEPLOYMENT_NAME) && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(env.AZURE_DEPLOYMENT_NAME).trim())) {
       checks.push(check("fail", "AZURE_DEPLOYMENT_NAME", "Invalid Azure deployment name."));
     }
-    if (hasValue(env.AZURE_BASE_MODEL) && !["gpt-4o", "gpt-4.1", "gpt-5"].includes(String(env.AZURE_BASE_MODEL).trim())) {
+    if (hasValue(env.AZURE_BASE_MODEL) && ![
+      "gpt-4o",
+      "gpt-4.1",
+      "gpt-5",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ].includes(String(env.AZURE_BASE_MODEL).trim())) {
       checks.push(check("fail", "AZURE_BASE_MODEL", "Unsupported Azure model family."));
     }
   }

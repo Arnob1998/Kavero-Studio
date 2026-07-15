@@ -35,7 +35,7 @@ describe("model provider preferences", () => {
         theme: "dark",
         modelProviders: {
           collapsed: true,
-          chatOrchestrationModelAlias: "kavero-chat-openai-example",
+          chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
         },
       },
       {
@@ -46,14 +46,14 @@ describe("model provider preferences", () => {
     expect(result).toMatchObject({
       ok: true,
       selection: {
-        chatOrchestrationModelAlias: "kavero-chat-openai-example",
+        chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
         imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
       },
       preferences: {
         theme: "dark",
         modelProviders: {
           collapsed: true,
-          chatOrchestrationModelAlias: "kavero-chat-openai-example",
+          chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
           imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
         },
       },

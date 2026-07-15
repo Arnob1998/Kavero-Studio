@@ -57,6 +57,12 @@ describe("provider key registry", () => {
         expect.objectContaining({ id: "baseModel", inputType: "select" }),
       ]),
     });
+    expect(catalog.find((provider) => provider.id === "azure-openai")?.credentialFields
+      .find((field) => field.id === "baseModel")?.options).toEqual(expect.arrayContaining([
+        { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+        { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+        { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+      ]));
   });
 
   it("round-trips legacy Gemini strings and JSON multi-field credentials", () => {
@@ -94,6 +100,10 @@ describe("provider key registry", () => {
       baseModel: "gpt-4o",
     };
     expect(parseProviderCredentials("azure-openai", valid)).toEqual(valid);
+    expect(parseProviderCredentials("azure-openai", { ...valid, baseModel: "gpt-5.6-sol" })).toEqual({
+      ...valid,
+      baseModel: "gpt-5.6-sol",
+    });
     expect(parseProviderCredentials("azure-openai", { ...valid, deploymentName: "bad/name" })).toBeNull();
     expect(parseProviderCredentials("azure-openai", { ...valid, baseModel: "azure/arbitrary" })).toBeNull();
     expect(parseProviderCredentials("azure-openai", { ...valid, apiBase: "https://example.com" })).toBeNull();

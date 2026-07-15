@@ -82,7 +82,7 @@ describe("LiteLLM credential params", () => {
   it("strips browser-provided credential fields before server injection", () => {
     const result = injectServerLiteLlmCredentials(
       {
-        model: "kavero-chat-openai-example",
+        model: "kavero-chat-openai-gpt-5-6",
         messages: [],
         api_key: "browser-secret",
         api_base: "https://browser.example.com",
@@ -97,7 +97,7 @@ describe("LiteLLM credential params", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.body).toEqual({
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       messages: [],
       api_key: "server-key-012345678901234567890",
     });

@@ -26,7 +26,11 @@ describe("LiteLLM guarded dynamic routing config", () => {
   it.each([
     ["kavero-chat-orchestration-default", "GEMINI_API_KEY"],
     ["kavero-image-generation-default", "GEMINI_API_KEY"],
-    ["kavero-chat-openai-example", "OPENAI_API_KEY"],
+    ["kavero-chat-openai-gpt-5-6", "OPENAI_API_KEY"],
+    ["kavero-chat-openai-gpt-5-6-sol", "OPENAI_API_KEY"],
+    ["kavero-chat-openai-gpt-5-6-terra", "OPENAI_API_KEY"],
+    ["kavero-chat-openai-gpt-5-6-luna", "OPENAI_API_KEY"],
+    ["kavero-image-openai-gpt-image-2", "OPENAI_API_KEY"],
     ["kavero-chat-groq-example", "GROQ_API_KEY"],
   ])("keeps env credentials and allows only api_key for %s", (alias, envKey) => {
     const block = modelBlock(alias);

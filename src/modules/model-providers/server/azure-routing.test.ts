@@ -18,6 +18,9 @@ describe("Azure OpenAI signed dynamic routing", () => {
     expect(getAzureOpenAiRoute("gpt-4o", "deploy-o")).toBe("azure/deploy-o");
     expect(getAzureOpenAiRoute("gpt-4.1", "deploy-41")).toBe("azure/deploy-41");
     expect(getAzureOpenAiRoute("gpt-5", "deploy-5")).toBe("azure/gpt5_series/deploy-5");
+    expect(getAzureOpenAiRoute("gpt-5.6-sol", "custom-sol")).toBe("azure/gpt5_series/custom-sol");
+    expect(getAzureOpenAiRoute("gpt-5.6-terra", "custom-terra")).toBe("azure/gpt5_series/custom-terra");
+    expect(getAzureOpenAiRoute("gpt-5.6-luna", "custom-luna")).toBe("azure/gpt5_series/custom-luna");
   });
 
   it("strips caller routing fields and constructs trusted user_config", () => {

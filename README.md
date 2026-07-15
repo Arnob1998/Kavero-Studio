@@ -203,7 +203,9 @@ KAVERO_LITELLM_ROUTING_SECRET=
 
 Keep LiteLLM credentials, the routing secret, upstream provider keys, and internal gateway URLs server-only. A hosted external LiteLLM service must run the matching Kavero custom-auth hook with the same routing secret and pinned LiteLLM contract; an unmodified LiteLLM endpoint is not supported for dynamic client routing.
 
-Azure OpenAI orchestration can use saved Settings credentials or a complete server environment configuration. Set `AZURE_API_KEY`, `AZURE_API_BASE`, `AZURE_API_VERSION`, `AZURE_DEPLOYMENT_NAME`, and `AZURE_BASE_MODEL` together. Supported model families are `gpt-4o`, `gpt-4.1`, and `gpt-5`; Azure image generation is not configured by these values.
+Azure OpenAI orchestration can use saved Settings credentials or a complete server environment configuration. Set `AZURE_API_KEY`, `AZURE_API_BASE`, `AZURE_API_VERSION`, `AZURE_DEPLOYMENT_NAME`, and `AZURE_BASE_MODEL` together. Supported model families are `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; Azure image generation is not configured by these values.
+
+OpenAI orchestration offers stable Kavero aliases for `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
 
 ## First Run
 
@@ -252,7 +254,7 @@ Important envs:
 | `AZURE_API_BASE` | Azure OpenAI HTTPS endpoint such as `https://resource.openai.azure.com`. |
 | `AZURE_API_VERSION` | Azure OpenAI API version used for orchestration requests. |
 | `AZURE_DEPLOYMENT_NAME` | Account-specific Azure OpenAI deployment name; kept server-only. |
-| `AZURE_BASE_MODEL` | Curated routing family: `gpt-4o`, `gpt-4.1`, or `gpt-5`. |
+| `AZURE_BASE_MODEL` | Curated routing family: `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`. GPT-5 families use LiteLLM's explicit `azure/gpt5_series/<deployment>` route. |
 | `OLLAMA_BASE_URL` | Optional server-side Ollama URL for the LiteLLM gateway. |
 
 The setup CLI keeps existing non-empty values by default, asks before replacing secrets, writes through a backup, and never echoes secrets back to your terminal.

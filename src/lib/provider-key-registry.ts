@@ -116,13 +116,23 @@ const credentialFieldLabels = {
   baseModel: "Model family",
 } as const;
 
-export const azureOpenAiBaseModels = ["gpt-4o", "gpt-4.1", "gpt-5"] as const;
+export const azureOpenAiBaseModels = [
+  "gpt-4o",
+  "gpt-4.1",
+  "gpt-5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+] as const;
 export type AzureOpenAiBaseModel = (typeof azureOpenAiBaseModels)[number];
 
 const azureBaseModelLabels: Record<AzureOpenAiBaseModel, string> = {
   "gpt-4o": "GPT-4o family",
   "gpt-4.1": "GPT-4.1 family",
   "gpt-5": "GPT-5 family",
+  "gpt-5.6-sol": "GPT-5.6 Sol",
+  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-5.6-luna": "GPT-5.6 Luna",
 };
 
 export function getBrowserProviderKeyCatalog(): BrowserProviderKeyCatalogEntry[] {

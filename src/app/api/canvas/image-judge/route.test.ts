@@ -66,7 +66,7 @@ describe("canvas image judge API", () => {
     mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "sk-user-openai-1234567890" });
     mocks.getCanvasAdmin.mockReturnValue(
       adminWithPreferences({
-        modelProviders: { chatOrchestrationModelAlias: "kavero-chat-openai-example" },
+        modelProviders: { chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6" },
       }),
     );
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({ winnerId: "candidate-1", reason: "best fit" })));
@@ -78,7 +78,7 @@ describe("canvas image judge API", () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ winnerId: "candidate-1", reason: "best fit" });
     expect(outboundBody).toMatchObject({
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       response_format: { type: "json_object" },
       api_key: "sk-user-openai-1234567890",
     });

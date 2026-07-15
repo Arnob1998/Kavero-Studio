@@ -86,6 +86,23 @@ describe("LiteLLM client", () => {
     expect(fetchImpl.mock.calls[2]?.[1]?.headers).not.toHaveProperty("x-kavero-routing-signature");
   });
 
+  it("signs the exact multipart bytes for image edits", async () => {
+    const fetchImpl = vi.fn<LiteLlmFetch>(async () => jsonResponse({ data: [] }));
+    const client = createLiteLlmClient({ config, fetchImpl, now: () => 1_750_000_000_000 });
+    const bytes = new TextEncoder().encode("--boundary\r\nexact multipart bytes\r\n--boundary--\r\n");
+
+    await client.editImage(bytes, "multipart/form-data; boundary=boundary");
+
+    expect(fetchImpl).toHaveBeenCalledWith("http://litellm:4000/v1/images/edits", {
+      method: "POST",
+      headers: expect.objectContaining({
+        "Content-Type": "multipart/form-data; boundary=boundary",
+        "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+      body: bytes,
+    });
+  });
+
   it("normalizes non-2xx errors without leaking response bodies or keys", async () => {
     const fetchImpl = vi.fn<LiteLlmFetch>(async () =>
       new Response(JSON.stringify({ error: { message: "contains sk-provider-secret" } }), {

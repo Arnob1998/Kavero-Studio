@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isModelGatewayError } from "./litellm-client";
-import { generateLiteLlmImage } from "./litellm-image-generation";
+import {
+  generateLiteLlmImage,
+  OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+} from "./litellm-image-generation";
 import type { LiteLlmFetch, ModelGatewayConfig } from "./types";
 
 const config: Extract<ModelGatewayConfig, { status: "configured" }> = {
@@ -45,6 +48,26 @@ async function callGenerate() {
         name: "reference.png",
       },
     ],
+  });
+}
+
+async function callOpenAiGenerate(overrides: { referenceImages?: Array<{ dataUrl: string; mimeType: string }> } = {}) {
+  return generateLiteLlmImage({
+    config,
+    modelAlias: OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+    provider: "openai",
+    model: "gpt-image-2",
+    prompt: "Create a clean product image.",
+    settings: {
+      legacyModel: "gemini-3.1-flash-image-preview",
+      count: 1,
+      thinking: "deep",
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      schema: "none",
+    },
+    referenceImages: overrides.referenceImages ?? [],
+    transformRequestBody: (body) => ({ ...body, api_key: "sk-openai-byok-secret" }),
   });
 }
 
@@ -183,5 +206,80 @@ describe("generateLiteLlmImage", () => {
       expect(error.details.errorCode).toBe("invalid_response");
       return true;
     });
+  });
+
+  it("uses the signed image-generation endpoint and normalizes GPT Image 2 base64 output", async () => {
+    const fetchImpl = vi.fn<LiteLlmFetch>(async () =>
+      jsonResponse({
+        data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==", revised_prompt: "A revised prompt" }],
+        usage: { prompt_tokens: 7, completion_tokens: 11, total_tokens: 18 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const result = await callOpenAiGenerate();
+    const requestBody = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://litellm:4000/v1/images/generations",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
+      }),
+    );
+    expect(requestBody).toEqual({
+      model: OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+      prompt: "Create a clean product image.",
+      n: 1,
+      size: "auto",
+      quality: "auto",
+      api_key: "sk-openai-byok-secret",
+    });
+    expect(result).toMatchObject({
+      text: "A revised prompt",
+      images: [{
+        dataUrl: "data:image/png;base64,R0lGODlhAQABAIAAAAUEBA==",
+        mimeType: "image/png",
+      }],
+      warnings: expect.arrayContaining([
+        expect.stringContaining("thinking level"),
+        expect.stringContaining("aspect ratio"),
+        expect.stringContaining("image size"),
+      ]),
+      usage: { inputTokens: 7, outputTokens: 11, totalTokens: 18 },
+    });
+  });
+
+  it("rejects malformed or empty GPT Image 2 responses without leaking provider data", async () => {
+    const fetchImpl = vi.fn<LiteLlmFetch>(async () =>
+      jsonResponse({ data: [{ b64_json: "not valid base64!" }] }),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    await expect(callOpenAiGenerate()).rejects.toSatisfy((error: unknown) => {
+      expect(isModelGatewayError(error)).toBe(true);
+      expect(JSON.stringify(error)).not.toContain("sk-openai-byok-secret");
+      if (!isModelGatewayError(error)) return false;
+      return error.details.errorCode === "invalid_response";
+    });
+  });
+
+  it("fails closed before upstream traffic for GPT Image 2 reference requests", async () => {
+    const fetchImpl = vi.fn<LiteLlmFetch>(async () =>
+      jsonResponse({ data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }] }),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    await expect(callOpenAiGenerate({
+      referenceImages: [{ dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" }],
+    })).rejects.toSatisfy((error: unknown) => {
+      expect(isModelGatewayError(error)).toBe(true);
+      if (!isModelGatewayError(error)) return false;
+      expect(error.message).toBe("GPT Image 2 reference editing is not available.");
+      return error.details.errorCode === "provider_error";
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

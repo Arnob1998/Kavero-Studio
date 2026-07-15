@@ -246,7 +246,7 @@ describe("canvas auto segment API", () => {
       asset({ storage_ref: googleDriveRef() }),
       {
         modelProviders: {
-          chatOrchestrationModelAlias: "kavero-chat-openai-example",
+          chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
           imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
         },
       },
@@ -265,7 +265,7 @@ describe("canvas auto segment API", () => {
 
     expect(response.status).toBe(200);
     expect(planningBody).toMatchObject({
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       response_format: { type: "json_object" },
       api_key: "sk-user-openai-1234567890",
     });

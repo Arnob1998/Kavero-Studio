@@ -29,7 +29,7 @@ describe("setup flow values", () => {
         AZURE_API_BASE: "https://kavero.openai.azure.com",
         AZURE_API_VERSION: "2025-04-01-preview",
         AZURE_DEPLOYMENT_NAME: "deployment-one",
-        AZURE_BASE_MODEL: "gpt-4.1",
+        AZURE_BASE_MODEL: "gpt-5.6-luna",
       },
       dockerSecrets: localDockerSecrets(),
     });
@@ -55,7 +55,7 @@ describe("setup flow values", () => {
       AZURE_API_BASE: "https://kavero.openai.azure.com",
       AZURE_API_VERSION: "2025-04-01-preview",
       AZURE_DEPLOYMENT_NAME: "deployment-one",
-      AZURE_BASE_MODEL: "gpt-4.1",
+      AZURE_BASE_MODEL: "gpt-5.6-luna",
     });
   });
 

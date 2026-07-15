@@ -284,7 +284,7 @@ describe("handleAssistantRequest provider selection", () => {
         { "asset-1": asset() },
         {
           modelProviders: {
-            chatOrchestrationModelAlias: "kavero-chat-openai-example",
+            chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
           },
         },
       ),
@@ -299,9 +299,9 @@ describe("handleAssistantRequest provider selection", () => {
     expect(body).toMatchObject({
       ok: true,
       provider: "litellm",
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
     });
-    expect(outboundBody.model).toBe("kavero-chat-openai-example");
+    expect(outboundBody.model).toBe("kavero-chat-openai-gpt-5-6");
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
   });
@@ -313,7 +313,7 @@ describe("handleAssistantRequest provider selection", () => {
     mocks.getCanvasAdmin.mockReturnValue(
       createAdmin(
         { "asset-1": asset() },
-        { modelProviders: { chatOrchestrationModelAlias: "kavero-chat-openai-example" } },
+        { modelProviders: { chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6" } },
       ),
     );
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({

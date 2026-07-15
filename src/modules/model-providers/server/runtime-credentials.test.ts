@@ -9,7 +9,7 @@ import {
 describe("runtime model credentials", () => {
   it("prepares gateway-env and user BYOK bodies without leaking caller credentials", () => {
     const callerBody = {
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       messages: [],
       api_key: "browser-secret",
       user_config: { api_key: "nested-browser-secret" },
@@ -21,7 +21,7 @@ describe("runtime model credentials", () => {
     );
     expect(gatewayEnv).toEqual({
       ok: true,
-      body: { model: "kavero-chat-openai-example", messages: [] },
+      body: { model: "kavero-chat-openai-gpt-5-6", messages: [] },
       credentialSource: "gateway-env",
       monitoringModel: null,
     });
@@ -33,7 +33,7 @@ describe("runtime model credentials", () => {
     expect(userByok).toEqual({
       ok: true,
       body: {
-        model: "kavero-chat-openai-example",
+        model: "kavero-chat-openai-gpt-5-6",
         messages: [],
         api_key: "server-key-012345678901234567890",
       },
@@ -124,7 +124,7 @@ describe("runtime model credentials", () => {
       credentialSource: null,
       code: "credential-load-failed",
       message: "secret store details",
-      modelAlias: "kavero-chat-openai-example",
+      modelAlias: "kavero-chat-openai-gpt-5-6",
       slot: "chatOrchestration",
       provider: "openai",
       providerKeyId: "openai",
@@ -148,7 +148,7 @@ function resolution(
     status: "resolved",
     credentialSource,
     credentials,
-    modelAlias: "kavero-chat-openai-example",
+    modelAlias: "kavero-chat-openai-gpt-5-6",
     slot: "chatOrchestration",
     provider: "openai",
     providerKeyId: "openai",

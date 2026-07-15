@@ -22,7 +22,7 @@ describe("model credential routing", () => {
   it.each([
     ["kavero-chat-orchestration-default", "google-gemini"],
     ["kavero-image-generation-default", "google-gemini"],
-    ["kavero-chat-openai-example", "openai"],
+    ["kavero-chat-openai-gpt-5-6", "openai"],
     ["kavero-chat-groq-example", "groq"],
   ] as const)("resolves user credentials for %s", async (modelAlias, providerKeyId) => {
     const credentials = { apiKey: `${providerKeyId}-012345678901234567890` };
@@ -54,7 +54,7 @@ describe("model credential routing", () => {
       resolveModelCredentials(
         {
           userId: "user-1",
-          modelAlias: "kavero-chat-openai-example",
+          modelAlias: "kavero-chat-openai-gpt-5-6",
           slot: "chatOrchestration",
           credentialMode: "env-or-user",
         },
@@ -226,7 +226,7 @@ describe("model credential routing", () => {
     const result = await resolveModelCredentials(
       {
         userId: "user-1",
-        modelAlias: "kavero-chat-openai-example",
+        modelAlias: "kavero-chat-openai-gpt-5-6",
         slot: "chatOrchestration",
         credentialMode: "env-or-user",
       },

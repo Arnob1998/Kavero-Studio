@@ -3,6 +3,12 @@ import type { ModelCatalogEntry, ModelCapabilitySlot } from "./types";
 export const DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS = "kavero-chat-orchestration-default";
 export const DEFAULT_IMAGE_GENERATION_MODEL_ALIAS = "kavero-image-generation-default";
 export const AZURE_OPENAI_CHAT_MODEL_ALIAS = "kavero-chat-azure-openai";
+export const OPENAI_GPT_5_6_MODEL_ALIASES = {
+  alias: "kavero-chat-openai-gpt-5-6",
+  sol: "kavero-chat-openai-gpt-5-6-sol",
+  terra: "kavero-chat-openai-gpt-5-6-terra",
+  luna: "kavero-chat-openai-gpt-5-6-luna",
+} as const;
 
 export const modelCatalog = [
   {
@@ -35,21 +41,26 @@ export const modelCatalog = [
       requirements: ["provider-key"],
     },
   },
-  {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    modelAlias: "kavero-chat-openai-example",
-    displayLabel: "OpenAI GPT-4o Mini",
+  ...([
+    ["gpt-5.6", OPENAI_GPT_5_6_MODEL_ALIASES.alias, "GPT-5.6"],
+    ["gpt-5.6-sol", OPENAI_GPT_5_6_MODEL_ALIASES.sol, "GPT-5.6 Sol"],
+    ["gpt-5.6-terra", OPENAI_GPT_5_6_MODEL_ALIASES.terra, "GPT-5.6 Terra"],
+    ["gpt-5.6-luna", OPENAI_GPT_5_6_MODEL_ALIASES.luna, "GPT-5.6 Luna"],
+  ] as const).map(([model, modelAlias, displayLabel]) => ({
+    provider: "openai" as const,
+    model,
+    modelAlias,
+    displayLabel,
     capabilities: {
-      slots: ["chatOrchestration"],
+      slots: ["chatOrchestration"] as const,
       supportsTools: true,
       supportsStructuredJson: true,
       supportsMultimodalImageInput: true,
       supportsImageOutput: false,
       supportsStreaming: true,
-      requirements: ["provider-key"],
+      requirements: ["provider-key"] as const,
     },
-  },
+  })),
   {
     provider: "groq",
     model: "groq/llama-3.1-8b-instant",

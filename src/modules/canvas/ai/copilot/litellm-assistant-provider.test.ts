@@ -105,9 +105,9 @@ describe("LiteLLM canvas assistant provider", () => {
 
     const provider = createLiteLlmCanvasAssistantProvider({
       config,
-      modelAlias: "kavero-chat-openai-example",
+      modelAlias: "kavero-chat-openai-gpt-5-6",
       userId: "user-1",
-      credentials: userByokCredentials("kavero-chat-openai-example", "sk-user-openai-1234567890"),
+      credentials: userByokCredentials("kavero-chat-openai-gpt-5-6", "sk-user-openai-1234567890"),
     });
     const result = await provider.generate(providerInput);
     const outboundBody = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body));
@@ -120,7 +120,7 @@ describe("LiteLLM canvas assistant provider", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(outboundBody).toMatchObject({
-      model: "kavero-chat-openai-example",
+      model: "kavero-chat-openai-gpt-5-6",
       temperature: 0.2,
       tool_choice: "auto",
       api_key: "sk-user-openai-1234567890",
@@ -185,8 +185,8 @@ describe("LiteLLM canvas assistant provider", () => {
 
     const provider = createLiteLlmCanvasAssistantProvider({
       config,
-      modelAlias: "kavero-chat-openai-example",
-      credentials: gatewayEnvCredentials("kavero-chat-openai-example"),
+      modelAlias: "kavero-chat-openai-gpt-5-6",
+      credentials: gatewayEnvCredentials("kavero-chat-openai-gpt-5-6"),
     });
     const result = await provider.generate(providerInput);
 
@@ -199,8 +199,8 @@ describe("LiteLLM canvas assistant provider", () => {
 
     const provider = createLiteLlmCanvasAssistantProvider({
       config,
-      modelAlias: "kavero-chat-openai-example",
-      credentials: gatewayEnvCredentials("kavero-chat-openai-example"),
+      modelAlias: "kavero-chat-openai-gpt-5-6",
+      credentials: gatewayEnvCredentials("kavero-chat-openai-gpt-5-6"),
     });
 
     await expect(provider.generate(providerInput)).rejects.toSatisfy((error: unknown) => {
@@ -210,7 +210,7 @@ describe("LiteLLM canvas assistant provider", () => {
       if (!isModelGatewayError(error)) return false;
       expect(error.details).toMatchObject({
         errorCode: "invalid_response",
-        modelAlias: "kavero-chat-openai-example",
+        modelAlias: "kavero-chat-openai-gpt-5-6",
         requestId: "req-1",
         callId: "call-1",
       });

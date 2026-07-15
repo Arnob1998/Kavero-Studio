@@ -5,6 +5,12 @@ model_list:
       api_base: http://mp9f1-mock:8080/static/v1
       api_key: gate-static-provider-key
 
+  - model_name: kavero-image-gate
+    litellm_params:
+      model: gpt-image-2
+      api_base: http://mp9f1-mock:8080/static/v1
+      api_key: gate-static-provider-key
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   custom_auth: kavero_auth.user_api_key_auth

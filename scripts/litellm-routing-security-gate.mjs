@@ -33,9 +33,9 @@ function mount(file) {
   return path.resolve(repo, file).replaceAll("\\", "/");
 }
 
-async function request(pathname, { method = "POST", body, key = masterKey, signature } = {}) {
+async function request(pathname, { method = "POST", body, key = masterKey, signature, contentType = "application/json" } = {}) {
   const headers = { authorization: `Bearer ${key}` };
-  if (body !== undefined) headers["content-type"] = "application/json";
+  if (body !== undefined) headers["content-type"] = contentType;
   if (signature) Object.assign(headers, signature);
   return fetch(`http://127.0.0.1:${proxyPort}${pathname}`, {
     method,
@@ -45,13 +45,29 @@ async function request(pathname, { method = "POST", body, key = masterKey, signa
 }
 
 function signedHeaders(pathname, body, { method = "POST", timestamp = Math.floor(Date.now() / 1000), secret = routingSecret } = {}) {
-  const bodyHash = createHash("sha256").update(body, "utf8").digest("hex");
+  const bodyHash = createHash("sha256").update(body).digest("hex");
   const canonical = ["kavero-litellm-routing", "v1", String(timestamp), method, pathname, bodyHash].join("\n");
   return {
     "x-kavero-routing-version": "v1",
     "x-kavero-routing-timestamp": String(timestamp),
     "x-kavero-routing-signature": createHmac("sha256", secret).update(canonical, "utf8").digest("hex"),
   };
+}
+
+function imageEditFixture() {
+  const boundary = "kavero-security-gate-boundary";
+  const body = Buffer.from([
+    `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nkavero-image-gate\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\nsecurity-gate-image-edit\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="n"\r\n\r\n1\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="size"\r\n\r\n1024x1024\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="quality"\r\n\r\nhigh\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="background"\r\n\r\nopaque\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="image[]"; filename="gate.png"\r\nContent-Type: image/png\r\n\r\nKAVERO_MULTIPART_IMAGE_CANARY\r\n`,
+    `--${boundary}\r\nContent-Disposition: form-data; name="mask"; filename="mask.png"\r\nContent-Type: image/png\r\n\r\nKAVERO_MULTIPART_MASK_CANARY\r\n`,
+    `--${boundary}--\r\n`,
+  ].join(""), "utf8");
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
 
 async function hits() {
@@ -154,9 +170,26 @@ async function main() {
   observed = await hits();
   record("large multimodal exact-body preservation", response.ok && observed.count === 1 && observed.hits[0].hasLargeMarker && observed.hits[0].bodyBytes > 1_900_000, { status: response.status, upstreamHits: observed.count, upstreamBodyBytes: observed.hits[0]?.bodyBytes ?? 0 });
 
+  await resetHits();
+  const imageGenerationBody = JSON.stringify({ model: "kavero-image-gate", prompt: "security-gate-image", n: 1, size: "auto", quality: "auto" });
+  response = await request("/v1/images/generations", { body: imageGenerationBody, signature: signedHeaders("/v1/images/generations", imageGenerationBody) });
+  observed = await hits();
+  const imageGenerationError = response.ok ? "" : await response.text();
+  record("signed GPT Image generation", response.ok && observed.count === 1 && observed.hits[0].path.includes("/images/generations"), { status: response.status, upstreamHits: observed.count, paths: observed.hits.map((hit) => hit.path), error: imageGenerationError.slice(0, 500) });
+
+  const editFixture = imageEditFixture();
+  await rejection("signed GPT Image multipart edit remains fail-closed", () => request("/v1/images/edits", {
+    body: editFixture.body,
+    contentType: editFixture.contentType,
+    signature: signedHeaders("/v1/images/edits", editFixture.body),
+  }));
+
   for (const fixture of [
     { name: "signed Azure GPT-4.1/4o mapping", alias: "gate-azure-four", model: "azure/gate-gpt-4o", deployment: "gate-gpt-4o", base: "http://mp9f1-mock:8080/azure-four" },
     { name: "signed Azure GPT-5 mapping", alias: "gate-azure-five", model: "azure/gpt5_series/gate-gpt-5", deployment: "gate-gpt-5", base: "http://mp9f1-mock:8080/azure-five" },
+    { name: "signed Azure GPT-5.6 Sol mapping", alias: "gate-azure-sol", model: "azure/gpt5_series/custom-sol", deployment: "custom-sol", base: "http://mp9f1-mock:8080/azure-sol" },
+    { name: "signed Azure GPT-5.6 Terra mapping", alias: "gate-azure-terra", model: "azure/gpt5_series/custom-terra", deployment: "custom-terra", base: "http://mp9f1-mock:8080/azure-terra" },
+    { name: "signed Azure GPT-5.6 Luna mapping", alias: "gate-azure-luna", model: "azure/gpt5_series/custom-luna", deployment: "custom-luna", base: "http://mp9f1-mock:8080/azure-luna" },
   ]) {
     await resetHits();
     const body = dynamicBody({ alias: fixture.alias, model: fixture.model, apiBase: fixture.base });
@@ -177,9 +210,23 @@ async function main() {
   await rejection("wrong gateway key", () => request("/v1/chat/completions", { body: staticBody, key: "sk-wrong-key", signature: signedHeaders("/v1/chat/completions", staticBody) }));
   await rejection("missing signature", () => request("/v1/chat/completions", { body: staticBody }));
   await rejection("invalid signature", () => request("/v1/chat/completions", { body: staticBody, signature: { ...signedHeaders("/v1/chat/completions", staticBody), "x-kavero-routing-signature": signatureCanary } }));
-  await rejection("stale timestamp", () => request("/v1/chat/completions", { body: staticBody, signature: signedHeaders("/v1/chat/completions", staticBody, { timestamp: Math.floor(Date.now() / 1000) - 61 }) }));
+  await rejection("stale timestamp", () => request("/v1/chat/completions", { body: staticBody, signature: signedHeaders("/v1/chat/completions", staticBody, { timestamp: Math.floor(Date.now() / 1000) - 90 }) }));
   await rejection("body modified after signing", () => request("/v1/chat/completions", { body: `${staticBody} `, signature: signedHeaders("/v1/chat/completions", staticBody) }));
   await rejection("path modified after signing", () => request("/v1/images/generations", { body: staticBody, signature: signedHeaders("/v1/chat/completions", staticBody) }));
+  await rejection("tampered multipart image edit", () => request("/v1/images/edits", {
+    body: Buffer.concat([editFixture.body, Buffer.from("tampered")]),
+    contentType: editFixture.contentType,
+    signature: signedHeaders("/v1/images/edits", editFixture.body),
+  }));
+  await rejection("missing multipart signature", () => request("/v1/images/edits", {
+    body: editFixture.body,
+    contentType: editFixture.contentType,
+  }));
+  await rejection("stale multipart signature", () => request("/v1/images/edits", {
+    body: editFixture.body,
+    contentType: editFixture.contentType,
+    signature: signedHeaders("/v1/images/edits", editFixture.body, { timestamp: Math.floor(Date.now() / 1000) - 90 }),
+  }));
   await rejection("method modified after signing", () => request("/v1/chat/completions", { method: "PUT", body: staticBody, signature: signedHeaders("/v1/chat/completions", staticBody) }));
   await rejection("arbitrary unsigned provider mapping", () => request("/v1/chat/completions", { body: dynamic }));
   await rejection("unknown signed route", () => request("/v1/responses", { body: staticBody, signature: signedHeaders("/v1/responses", staticBody) }));

@@ -41,7 +41,9 @@ describe("ProviderSettingsPanel", () => {
     expect(screen.queryByText("sk-secret")).not.toBeInTheDocument();
 
     expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-azure-openai");
+    expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-openai-gpt-5-6");
     expect(Array.from(imageSelect!.options, (option) => option.value)).not.toContain("kavero-chat-azure-openai");
+    expect(Array.from(imageSelect!.options, (option) => option.value)).not.toContain("kavero-image-openai-gpt-image-2");
 
     const azureButton = screen.getByRole("button", { name: "Azure OpenAI provider settings" });
     expect(azureButton.querySelector("img")).toHaveAttribute("src", "/llm-providers/Microsoft_Azure.svg");
@@ -189,13 +191,13 @@ describe("ProviderSettingsPanel", () => {
     const user = userEvent.setup();
     render(<ProviderSettingsPanel />);
     const selectors = await screen.findAllByRole("combobox");
-    await user.selectOptions(selectors[0]!, "kavero-chat-openai-example");
+    await user.selectOptions(selectors[0]!, "kavero-chat-openai-gpt-5-6");
     await user.click(screen.getByRole("button", { name: "Save models" }));
     await screen.findByText("Model settings saved.");
     await user.click(screen.getByRole("button", { name: "Check connectivity" }));
 
     expect(requestBodies("/api/model-providers")).toContainEqual({
-      chatOrchestrationModelAlias: "kavero-chat-openai-example",
+      chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
       imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
     });
     await waitFor(() => {
@@ -280,6 +282,9 @@ const providerCatalog = [
         { value: "gpt-4o", label: "GPT-4o family" },
         { value: "gpt-4.1", label: "GPT-4.1 family" },
         { value: "gpt-5", label: "GPT-5 family" },
+        { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+        { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+        { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
       ],
     },
   ]),
@@ -306,7 +311,7 @@ function field(id: string, label: string, required: boolean, secret: boolean) {
 const modelCatalog = [
   model("gemini", "Google Gemini", "google-gemini", DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS, "Gemini 3.1 Pro Preview", "chatOrchestration"),
   model("gemini", "Google Gemini", "google-gemini", DEFAULT_IMAGE_GENERATION_MODEL_ALIAS, "Nano Banana 2", "imageGeneration"),
-  model("openai", "OpenAI", "openai", "kavero-chat-openai-example", "OpenAI GPT-4o Mini", "chatOrchestration"),
+  model("openai", "OpenAI", "openai", "kavero-chat-openai-gpt-5-6", "GPT-5.6", "chatOrchestration"),
   model("azure-openai", "Azure OpenAI", "azure-openai", "kavero-chat-azure-openai", "Azure OpenAI deployment", "chatOrchestration"),
 ];
 

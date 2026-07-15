@@ -82,6 +82,18 @@ export class LiteLlmClient {
     });
   }
 
+  async editImage<TData = unknown>(
+    body: Uint8Array,
+    contentType: string,
+    context: RequestContext = {},
+  ): Promise<LiteLlmJsonResponse<TData>> {
+    return this.request<TData>("/v1/images/edits", {
+      method: "POST",
+      rawBody: { bytes: body, contentType },
+      context,
+    });
+  }
+
   async getModelInfo<TData = unknown>(model?: string): Promise<LiteLlmJsonResponse<TData>> {
     return this.request<TData>(appendQuery("/model/info", { model }), { method: "GET" });
   }
@@ -95,15 +107,16 @@ export class LiteLlmClient {
     options: {
       method: "GET" | "POST";
       body?: Record<string, unknown>;
+      rawBody?: { bytes: Uint8Array; contentType: string };
       context?: RequestContext;
     },
   ): Promise<LiteLlmJsonResponse<TData>> {
     const url = `${this.baseUrl}${path}`;
     const pathname = new URL(url).pathname;
-    const serializedBody = options.body ? JSON.stringify(options.body) : undefined;
+    const serializedBody = options.rawBody?.bytes ?? (options.body ? JSON.stringify(options.body) : undefined);
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
-      "Content-Type": "application/json",
+      "Content-Type": options.rawBody?.contentType ?? "application/json",
     };
 
     if (serializedBody !== undefined) {
@@ -124,7 +137,7 @@ export class LiteLlmClient {
       response = await this.fetchImpl(url, {
         method: options.method,
         headers,
-        body: serializedBody,
+        body: serializedBody as BodyInit | undefined,
       });
     } catch (error) {
       throw createNetworkModelGatewayError(error, options.context);
