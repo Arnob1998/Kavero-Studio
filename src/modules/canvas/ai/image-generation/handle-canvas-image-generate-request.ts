@@ -1,5 +1,4 @@
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import type { GenerateContentConfig } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { getCanvasAdmin, getCanvasUser, jsonError, requireCanvasAccess } from "@/lib/canvas/api";
 import { getUserProviderApiKey } from "@/lib/provider-keys";
@@ -21,80 +20,64 @@ import {
   prepareLiteLlmImageRuntimeRequest,
   resolveImageGenerationRuntimeCredentials,
 } from "@/modules/model-providers/server";
+import { createGeminiGenerateContentConfig } from "@/modules/model-providers/image-adapters";
+import { getBrowserImageModelByLegacyId } from "@/modules/model-providers/image-browser";
+import { DEFAULT_IMAGE_MODEL_LEGACY_ID, getImageModelCapabilities, getImageModelCapabilitiesByLegacyModel, validateLegacyImageRequest, type ImageGenerationIntent, type SelectableLegacyImageModelId } from "@/modules/model-providers/image-capabilities";
 
-const imageModelIds = [
-  "gemini-3.1-flash-image-preview",
-  "gemini-3-pro-image-preview",
-  "gemini-2.5-flash-image",
-] as const;
-
-const referenceImageLimits: Record<(typeof imageModelIds)[number], number> = {
-  "gemini-3.1-flash-image-preview": 14,
-  "gemini-3-pro-image-preview": 14,
-  "gemini-2.5-flash-image": 3,
-};
-
-const aspectRatios = [
-  "auto",
-  "1:1",
-  "9:16",
-  "16:9",
-  "3:4",
-  "4:3",
-  "3:2",
-  "2:3",
-  "5:4",
-  "4:5",
-  "21:9",
-  "4:1",
-  "1:4",
-  "8:1",
-  "1:8",
-] as const;
-
-type ModelId = (typeof imageModelIds)[number];
-
-const modelLabels: Record<ModelId, string> = {
-  "gemini-3.1-flash-image-preview": "Nano Banana 2",
-  "gemini-3-pro-image-preview": "Nano Banana Pro",
-  "gemini-2.5-flash-image": "Nano Banana",
-};
+type ModelId = SelectableLegacyImageModelId;
 
 const referenceImageSchema = z.object({
   dataUrl: z.string().min(1).max(8 * 1024 * 1024),
-  mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"]),
+  mimeType: z.string().min(1),
   name: z.string().optional(),
 });
 
-const generateRequestSchema = z
+const generateRequestStructure = z
   .object({
     prompt: z.string().trim().min(1).max(12000),
-    model: z.enum(imageModelIds).default("gemini-3.1-flash-image-preview"),
-    count: z.coerce.number().int().refine((value) => [4, 8, 12, 16].includes(value), "Batch size must be 4, 8, 12, or 16."),
-    thinking: z.enum(["fast", "balanced", "deep"]).default("balanced"),
-    aspectRatio: z.enum(aspectRatios).default("auto"),
-    imageSize: z.enum(["1K", "2K", "4K"]).default("1K"),
+    model: z.string().default(DEFAULT_IMAGE_MODEL_LEGACY_ID),
+    count: z.coerce.number().int(),
+    thinking: z.string().default("balanced"),
+    aspectRatio: z.string().default("auto"),
+    imageSize: z.string().default("1K"),
+    quality: z.string().default("auto"),
+    background: z.enum(["auto", "opaque", "transparent"]).default("auto"),
     transparentBackground: z.boolean().default(false),
     backgroundPreference: z.enum(["auto", "white", "black"]).default("auto"),
     referenceImages: z.array(referenceImageSchema).nullish(),
-  })
-  .superRefine((input, context) => {
-    const referenceImages = input.referenceImages ?? [];
-    const limit = referenceImageLimits[input.model];
-
-    if (referenceImages.length > limit) {
-      context.addIssue({
-        code: z.ZodIssueCode.too_big,
-        type: "array",
-        maximum: limit,
-        inclusive: true,
-        path: ["referenceImages"],
-        message: `${modelLabels[input.model]} supports up to ${limit} reference images.`,
-      });
-    }
+    mask: z.unknown().optional(),
   });
 
-type GenerateRequestInput = z.infer<typeof generateRequestSchema>;
+type GenerateRequestInput = Omit<z.infer<typeof generateRequestStructure>, "model" | "thinking" | "backgroundPreference"> & {
+  model: ModelId;
+  thinking: "fast" | "balanced" | "deep" | "provider-managed";
+  backgroundPreference: "auto" | "white" | "black";
+};
+
+const generateRequestSchema = generateRequestStructure
+  .superRefine((input, context) => {
+    if (input.mask !== undefined) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["mask"], message: "Mask-based image editing is not available." });
+    }
+    const referenceImages = input.referenceImages ?? [];
+    const issues = validateLegacyImageRequest({
+      feature: "canvas-generation",
+      model: input.model,
+      count: input.count,
+      thinking: input.thinking,
+      aspectRatio: input.aspectRatio,
+      imageSize: input.imageSize,
+      referenceImages,
+    });
+    for (const issue of issues) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: issue.field === "modelAlias" ? ["model"] : issue.field === "outputSize" ? ["imageSize"] : issue.field === "reasoning" ? ["thinking"] : issue.field === "referenceImages.mimeType" ? ["referenceImages"] : [issue.field],
+        message: issue.message,
+      });
+    }
+  })
+  .transform((input) => input as GenerateRequestInput);
 type ReferenceImage = NonNullable<GenerateRequestInput["referenceImages"]>[number];
 type ParsedReference = {
   source: ReferenceImage;
@@ -118,10 +101,6 @@ function parseDataUrl(dataUrl: string) {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!match) return null;
   return { mimeType: match[1], data: match[2] };
-}
-
-function thinkingLevel(value: "fast" | "balanced" | "deep") {
-  return value === "deep" ? ThinkingLevel.HIGH : ThinkingLevel.MINIMAL;
 }
 
 function getParts(response: Awaited<ReturnType<GoogleGenAI["models"]["generateContent"]>>) {
@@ -193,9 +172,8 @@ async function parseCanvasGenerateInput(request: Request): Promise<ParsedCanvasG
 
 function createWarnings(input: GenerateRequestInput) {
   const warnings: string[] = [];
-  if (input.model === "gemini-2.5-flash-image") {
-    warnings.push("Gemini 2.5 Flash Image ignores imageSize and generates at its fixed model resolution.");
-  }
+  const fixedResolutionWarning = getBrowserImageModelByLegacyId(input.model)?.fixedResolutionWarning;
+  if (fixedResolutionWarning) warnings.push(fixedResolutionWarning);
   if (input.transparentBackground) {
     warnings.push("Transparent images are generated on a high-contrast solid background and cleaned in the canvas editor.");
   }
@@ -208,6 +186,8 @@ function responseSettings(input: GenerateRequestInput) {
     thinking: input.thinking,
     aspectRatio: input.aspectRatio,
     imageSize: input.imageSize,
+    quality: input.quality,
+    background: input.background,
     transparentBackground: input.transparentBackground,
     backgroundPreference: input.backgroundPreference,
   };
@@ -364,6 +344,9 @@ async function handleDirectGeminiCanvasGeneration(request: Request, userId: stri
   if ("response" in parsed) return parsed.response;
 
   const { input, references } = parsed;
+  if (getImageModelCapabilitiesByLegacyModel(input.model)?.provider !== "gemini") {
+    return jsonError("The selected image model requires the configured model gateway.", 503);
+  }
   const ai = new GoogleGenAI({ apiKey });
   const warnings = createWarnings(input);
 
@@ -377,23 +360,12 @@ async function handleDirectGeminiCanvasGeneration(request: Request, userId: stri
       contents.push({ inlineData: { mimeType: parsed.mimeType, data: parsed.data } });
     }
 
-    const imageConfig =
-      input.aspectRatio === "auto"
-        ? input.model === "gemini-2.5-flash-image"
-          ? undefined
-          : { imageSize: input.imageSize }
-        : input.model === "gemini-2.5-flash-image"
-          ? { aspectRatio: input.aspectRatio }
-          : { aspectRatio: input.aspectRatio, imageSize: input.imageSize };
-
-    const config: GenerateContentConfig = {
-      responseModalities: ["Image"],
-      imageConfig,
-      thinkingConfig:
-        input.model === "gemini-3.1-flash-image-preview"
-          ? { thinkingLevel: thinkingLevel(input.thinking) }
-          : undefined,
-    };
+    const config = createGeminiGenerateContentConfig({
+      model: input.model,
+      aspectRatio: input.aspectRatio,
+      imageSize: input.imageSize,
+      thinking: input.thinking,
+    });
 
     const response = await ai.models.generateContent({
       model: input.model,
@@ -434,7 +406,7 @@ async function handleDirectGeminiCanvasGeneration(request: Request, userId: stri
 
   return Response.json({
     model: input.model,
-    modelLabel: modelLabels[input.model],
+    modelLabel: getBrowserImageModelByLegacyId(input.model)?.displayLabel ?? input.model,
     kind: "image",
     images,
     text,
@@ -460,6 +432,12 @@ async function handleGatewayCanvasGeneration({
   if (!selectionResult.ok) return selectionResult.response;
 
   const selection = selectionResult.selection;
+  const requestCapability = getImageModelCapabilitiesByLegacyModel(input.model);
+  const selectedCapability = getImageModelCapabilities(selection.modelAlias);
+  if (!requestCapability || !selectedCapability || requestCapability.provider !== selectedCapability.provider) {
+    return jsonError("The requested image model does not match the image provider selected in Settings.", 400);
+  }
+  const runtimeCapability = selectedCapability;
   const credentials = await resolveImageGenerationRuntimeCredentials({
     userId,
     modelAlias: selection.modelAlias,
@@ -478,12 +456,25 @@ async function handleGatewayCanvasGeneration({
   async function generateOne(variant: number) {
     const startedAt = Date.now();
     try {
+      const intent: ImageGenerationIntent = {
+        modelAlias: selection.modelAlias,
+        feature: "canvas-generation",
+        prompt,
+        count: 1,
+        aspectRatio: input.aspectRatio,
+        outputSize: input.imageSize,
+        quality: runtimeCapability.quality.values.length > 0 ? input.quality : undefined,
+        background: input.background,
+        referenceImages: inputReferenceImages.map((image) => ({ dataUrl: image.dataUrl, mimeType: image.mimeType, name: image.name })),
+        reasoning: runtimeCapability.reasoning.values.length > 0 ? input.thinking : undefined,
+      };
       const result = await generateLiteLlmImage({
         config,
         modelAlias: selection.modelAlias,
         provider: selection.provider,
         model: selection.model,
         prompt,
+        intent,
         settings: {
           legacyModel: input.model,
           count: input.count,

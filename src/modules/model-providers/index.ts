@@ -3,6 +3,8 @@ export * from "./catalog";
 export * from "./connectivity";
 export * from "./errors";
 export * from "./gateway-config";
+export * from "./image-browser";
+export * from "./image-capabilities";
 export * from "./litellm-image-generation";
 export * from "./litellm-client";
 export * from "./monitoring";

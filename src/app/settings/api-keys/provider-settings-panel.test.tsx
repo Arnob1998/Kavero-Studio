@@ -43,7 +43,7 @@ describe("ProviderSettingsPanel", () => {
     expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-azure-openai");
     expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-openai-gpt-5-6");
     expect(Array.from(imageSelect!.options, (option) => option.value)).not.toContain("kavero-chat-azure-openai");
-    expect(Array.from(imageSelect!.options, (option) => option.value)).not.toContain("kavero-image-openai-gpt-image-2");
+    expect(Array.from(imageSelect!.options, (option) => option.value)).toContain("kavero-image-openai-gpt-image-2");
 
     const azureButton = screen.getByRole("button", { name: "Azure OpenAI provider settings" });
     expect(azureButton.querySelector("img")).toHaveAttribute("src", "/llm-providers/Microsoft_Azure.svg");
@@ -207,6 +207,20 @@ describe("ProviderSettingsPanel", () => {
       );
     });
   });
+
+  it("saves GPT Image 2 independently from the orchestration model", async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettingsPanel />);
+    const selectors = await screen.findAllByRole("combobox");
+    await user.selectOptions(selectors[0]!, "kavero-chat-azure-openai");
+    await user.selectOptions(selectors[1]!, "kavero-image-openai-gpt-image-2");
+    await user.click(screen.getByRole("button", { name: "Save models" }));
+
+    expect(requestBodies("/api/model-providers")).toContainEqual({
+      chatOrchestrationModelAlias: "kavero-chat-azure-openai",
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    });
+  });
 });
 
 async function fetchMock(input: string | URL | Request, init?: RequestInit) {
@@ -312,6 +326,7 @@ const modelCatalog = [
   model("gemini", "Google Gemini", "google-gemini", DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS, "Gemini 3.1 Pro Preview", "chatOrchestration"),
   model("gemini", "Google Gemini", "google-gemini", DEFAULT_IMAGE_GENERATION_MODEL_ALIAS, "Nano Banana 2", "imageGeneration"),
   model("openai", "OpenAI", "openai", "kavero-chat-openai-gpt-5-6", "GPT-5.6", "chatOrchestration"),
+  model("openai", "OpenAI", "openai", "kavero-image-openai-gpt-image-2", "GPT Image 2", "imageGeneration"),
   model("azure-openai", "Azure OpenAI", "azure-openai", "kavero-chat-azure-openai", "Azure OpenAI deployment", "chatOrchestration"),
 ];
 

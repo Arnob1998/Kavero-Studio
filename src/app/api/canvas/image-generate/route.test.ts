@@ -178,6 +178,66 @@ describe("canvas image generation API", () => {
     expect(body.model).toBe(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
   });
 
+  it("generates GPT Image 2 canvas candidates through the selected image slot", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      chatOrchestrationModelAlias: "kavero-chat-azure-openai",
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } }));
+    mocks.getUserProviderCredentials.mockResolvedValue({ apiKey: "canvas-openai-key-0123456789" });
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => new Response(JSON.stringify({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }],
+    }), { headers: { "Content-Type": "application/json" } })));
+
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      count: 4,
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "medium",
+      background: "transparent",
+    })));
+    const body = await response.json();
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(outbound).toMatchObject({
+      model: "kavero-image-openai-gpt-image-2",
+      size: "1024x1024",
+      quality: "medium",
+      background: "transparent",
+    });
+    expect(body).toMatchObject({ model: "kavero-image-openai-gpt-image-2", modelLabel: "GPT Image 2" });
+    expect(body.images).toHaveLength(4);
+  });
+
+  it("rejects GPT Image 2 canvas references before upstream traffic", async () => {
+    configureGateway();
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      count: 4,
+      imageSize: "auto",
+      referenceImages: [{ dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" }],
+    })));
+
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for GPT Image 2 canvas mask requests before upstream traffic", async () => {
+    configureGateway();
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      count: 4,
+      imageSize: "auto",
+      mask: { dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" },
+    })));
+
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("preserves direct Gemini behavior and metadata when the gateway is disabled", async () => {
     const response = await POST(request(validBody({ model: "gemini-2.5-flash-image", count: 4 })));
     const body = await response.json();

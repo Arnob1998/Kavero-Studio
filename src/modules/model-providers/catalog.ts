@@ -1,4 +1,5 @@
 import type { ModelCatalogEntry, ModelCapabilitySlot } from "./types";
+import { OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 
 export const DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS = "kavero-chat-orchestration-default";
 export const DEFAULT_IMAGE_GENERATION_MODEL_ALIAS = "kavero-image-generation-default";
@@ -72,6 +73,21 @@ export const modelCatalog = [
       supportsStructuredJson: true,
       supportsMultimodalImageInput: false,
       supportsImageOutput: false,
+      supportsStreaming: true,
+      requirements: ["provider-key"],
+    },
+  },
+  {
+    provider: "openai",
+    model: "gpt-image-2",
+    modelAlias: OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+    displayLabel: "GPT Image 2",
+    capabilities: {
+      slots: ["imageGeneration"],
+      supportsTools: false,
+      supportsStructuredJson: false,
+      supportsMultimodalImageInput: false,
+      supportsImageOutput: true,
       supportsStreaming: true,
       requirements: ["provider-key"],
     },

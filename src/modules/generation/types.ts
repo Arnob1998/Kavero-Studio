@@ -24,10 +24,7 @@ export interface PromptTemplateRecord {
   updated_at: string;
 }
 
-export type ModelId =
-  | "gemini-3.1-flash-image-preview"
-  | "gemini-3-pro-image-preview"
-  | "gemini-2.5-flash-image";
+export type { SelectableLegacyImageModelId as ModelId } from "@/modules/model-providers/image-capabilities";
 
 export interface ReferenceImage {
   dataUrl: string;
@@ -52,7 +49,7 @@ export interface GeneratedImage {
   variant: number;
 }
 
-export type SettingKey = "model" | "count" | "thinking" | "aspect" | "quality";
+export type SettingKey = "model" | "count" | "thinking" | "aspect" | "quality" | "providerQuality" | "background";
 
 export interface GenerationRun {
   id: string;
@@ -80,6 +77,8 @@ export interface GenerateApiResponse {
     thinking: string;
     aspectRatio: string;
     imageSize: string;
+    quality: string;
+    background: "auto" | "opaque" | "transparent";
     schema: string;
   };
 }

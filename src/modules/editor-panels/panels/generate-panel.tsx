@@ -5,19 +5,34 @@ import type {
   CanvasImageGenerationSettings,
   CanvasImageModel,
   CanvasImageQuality,
+  CanvasImageProviderBackground,
+  CanvasImageProviderQuality,
   GeneratedCanvasImage,
 } from "../types";
+import { getBrowserImageModels } from "@/modules/model-providers/image-browser";
 
-export const canvasImageModelOptions: Array<{ value: CanvasImageModel; label: string }> = [
-  { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2" },
-  { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro" },
-  { value: "gemini-2.5-flash-image", label: "Nano Banana" },
-];
+const canvasImageModels = getBrowserImageModels("canvas-generation");
+export const canvasImageModelOptions: Array<{ value: CanvasImageModel; label: string }> = canvasImageModels.map((model) => ({
+  value: model.legacyModelId as CanvasImageModel,
+  label: model.displayLabel,
+}));
 
-export const canvasImageBatchOptions: CanvasImageBatchSize[] = [4, 8, 12, 16];
-export const canvasImageThinkingOptions = ["balanced", "fast", "deep"] as const;
-export const canvasImageAspectOptions = ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5"];
-export const canvasImageQualityOptions: CanvasImageQuality[] = ["1K", "2K", "4K"];
+export const canvasImageBatchOptions = [...canvasImageModels[0].featureCountPresets["canvas-generation"]] as CanvasImageBatchSize[];
+export const canvasImageThinkingOptions = [...canvasImageModels[0].reasoning.values] as Array<"balanced" | "fast" | "deep">;
+export const canvasImageAspectOptions = canvasImageModels[0].featureAspectRatios["canvas-generation"];
+export const canvasImageQualityOptions = canvasImageModels[0].size.presets.map((preset) => preset.value) as CanvasImageQuality[];
+
+export function getCanvasImageControlOptions(modelId: CanvasImageModel) {
+  const model = canvasImageModels.find((entry) => entry.legacyModelId === modelId) ?? canvasImageModels[0];
+  return {
+    batches: [...model.featureCountPresets["canvas-generation"]] as CanvasImageBatchSize[],
+    thinking: [...(model.reasoning.values.length ? model.reasoning.values : ["provider-managed"])],
+    aspects: [...model.featureAspectRatios["canvas-generation"]],
+    sizes: model.size.presets.map((preset) => ({ value: preset.value, label: preset.label })),
+    qualities: [...(model.quality.values.length ? model.quality.values : ["auto"])],
+    backgrounds: [...model.background.values],
+  };
+}
 
 export function GeneratePanel({
   prompt,
@@ -48,6 +63,7 @@ export function GeneratePanel({
   onTransparentChange: (value: boolean) => void;
   onSettingsChange: (settings: CanvasImageGenerationSettings) => void;
 }) {
+  const controls = getCanvasImageControlOptions(settings.model);
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[linear-gradient(180deg,rgb(255_255_255_/_0.035),transparent_30%)]">
       <div className="shrink-0 border-b border-white/[0.07] px-4 pb-3">
@@ -158,7 +174,7 @@ export function GeneratePanel({
           <SettingsSelect
             label="Batch"
             value={String(settings.batchSize)}
-            options={canvasImageBatchOptions.map((value) => ({ value: String(value), label: `${value}x` }))}
+            options={controls.batches.map((value) => ({ value: String(value), label: `${value}x` }))}
             onChange={(batchSize) => onSettingsChange({ ...settings, batchSize: Number(batchSize) as CanvasImageBatchSize })}
           />
           <SettingsSelect
@@ -170,14 +186,26 @@ export function GeneratePanel({
           <SettingsSelect
             label="Aspect"
             value={settings.aspectRatio}
-            options={canvasImageAspectOptions.map((value) => ({ value, label: value }))}
+            options={controls.aspects.map((value) => ({ value, label: value }))}
             onChange={(aspectRatio) => onSettingsChange({ ...settings, aspectRatio })}
           />
           <SettingsSelect
-            label="Quality"
+            label="Size"
             value={settings.imageSize}
-            options={canvasImageQualityOptions.map((value) => ({ value, label: value }))}
+            options={controls.sizes}
             onChange={(imageSize) => onSettingsChange({ ...settings, imageSize: imageSize as CanvasImageQuality })}
+          />
+          <SettingsSelect
+            label="Quality"
+            value={settings.quality}
+            options={controls.qualities.map((value) => ({ value, label: value }))}
+            onChange={(quality) => onSettingsChange({ ...settings, quality: quality as CanvasImageProviderQuality })}
+          />
+          <SettingsSelect
+            label="Background"
+            value={settings.background}
+            options={controls.backgrounds.map((value) => ({ value, label: value }))}
+            onChange={(background) => onSettingsChange({ ...settings, background: background as CanvasImageProviderBackground })}
           />
         </div>
       </div>

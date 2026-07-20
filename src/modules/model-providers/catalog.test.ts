@@ -9,6 +9,7 @@ import {
   getModelsForCapability,
   modelCatalog,
 } from "./catalog";
+import { OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 
 describe("model provider catalog", () => {
   it("keeps separate defaults for orchestration/chat and image generation", () => {
@@ -52,7 +53,10 @@ describe("model provider catalog", () => {
     expect(chatModels).toContain(DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS);
     expect(chatModels).toContain(AZURE_OPENAI_CHAT_MODEL_ALIAS);
     expect(chatModels).not.toContain(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
-    expect(imageModels).toEqual([DEFAULT_IMAGE_GENERATION_MODEL_ALIAS]);
+    expect(imageModels).toEqual([
+      DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+    ]);
     expect(imageModels).not.toContain(AZURE_OPENAI_CHAT_MODEL_ALIAS);
     expect(modelCatalog.find((entry) => entry.provider === "groq")?.capabilities.supportsImageOutput).toBe(false);
     expect(modelCatalog.find((entry) => entry.provider === "ollama")?.capabilities.requirements).toContain("local-runtime");

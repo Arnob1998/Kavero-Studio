@@ -1,5 +1,4 @@
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import type { GenerateContentConfig } from "@google/genai";
 import { z } from "zod";
 import { getGoogleDriveAccessTokenForUser, markGoogleDriveReconnectRequired } from "@/lib/google-drive";
 import { getCanvasUser, jsonError, requireCanvasAccess, requireCanvasAdmin } from "@/lib/canvas/api";
@@ -37,14 +36,10 @@ import {
   resolveChatOrchestrationRuntimeCredentials,
   resolveImageGenerationRuntimeCredentials,
 } from "@/modules/model-providers/server";
+import { createGeminiGenerateContentConfig } from "@/modules/model-providers/image-adapters";
+import { DEFAULT_IMAGE_MODEL_LEGACY_ID, getImageModelCapabilities, validateLegacyImageRequest, type SelectableLegacyImageModelId } from "@/modules/model-providers/image-capabilities";
 
 const categoryKeys = ["background", "people", "products", "objects", "text_graphics", "other"] as const;
-const imageModelIds = [
-  "gemini-3.1-flash-image-preview",
-  "gemini-3-pro-image-preview",
-  "gemini-2.5-flash-image",
-] as const;
-
 type CategoryKey = (typeof categoryKeys)[number];
 type SegmentPlan = z.infer<typeof segmentPlanSchema>;
 type PlannedSegment = SegmentPlan["segments"][number];
@@ -76,12 +71,31 @@ const categoryLabels: Record<CategoryKey, string> = {
   other: "Other",
 };
 
-const autoSegmentRequestSchema = z.object({
+const autoSegmentRequestStructure = z.object({
   assetId: z.string().trim().regex(/^[a-zA-Z0-9_-]+$/),
   sourceName: z.string().trim().max(160).optional(),
-  model: z.enum(imageModelIds).default("gemini-3.1-flash-image-preview"),
-  imageSize: z.enum(["1K", "2K", "4K"]).default("1K"),
+  model: z.string().default(DEFAULT_IMAGE_MODEL_LEGACY_ID),
+  imageSize: z.string().default("1K"),
 });
+
+type AutoSegmentRequestInput = Omit<z.infer<typeof autoSegmentRequestStructure>, "model"> & { model: SelectableLegacyImageModelId };
+
+const autoSegmentRequestSchema = autoSegmentRequestStructure
+  .superRefine((input, context) => {
+    const issues = validateLegacyImageRequest({
+      feature: "auto-segment-isolation",
+      model: input.model,
+      count: 1,
+      aspectRatio: "auto",
+      imageSize: input.imageSize,
+      thinking: "balanced",
+      referenceImages: [],
+    });
+    for (const issue of issues) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: issue.field === "modelAlias" || issue.field === "feature" ? ["model"] : issue.field === "outputSize" ? ["imageSize"] : [issue.field], message: issue.message });
+    }
+  })
+  .transform((input) => input as AutoSegmentRequestInput);
 
 const segmentPlanSchema = z.object({
   segments: z
@@ -260,14 +274,18 @@ export async function handleAutoSegmentRequest(request: Request): Promise<Respon
     });
   }
 
+  const selectionResult = await loadImageModelSelection({ userId: user.id, admin });
+  if (!selectionResult.ok) return selectionResult.response;
+  const selectedCapability = getImageModelCapabilities(selectionResult.selection.modelAlias);
+  if (!selectedCapability?.compatibility["auto-segment-isolation"]) {
+    return jsonError(`${selectionResult.selection.modelLabel} is not compatible with Auto Segment.`, 400);
+  }
+
   const sourceRead = await readSourceImageBytes({ userId: user.id, storageRef });
   if ("response" in sourceRead) return sourceRead.response;
 
   const sourceBase64 = sourceRead.sourceBase64;
   const sourceName = input.sourceName || asset.original_name || "source image";
-
-  const selectionResult = await loadImageModelSelection({ userId: user.id, admin });
-  if (!selectionResult.ok) return selectionResult.response;
   const imageCredentials = await resolveImageGenerationRuntimeCredentials({
     userId: user.id,
     modelAlias: selectionResult.selection.modelAlias,
@@ -327,7 +345,7 @@ async function handleDirectGeminiAutoSegment({
   };
   sourceName: string;
   storageRef: NonNullable<ReturnType<typeof getCanvasAssetStorageRef>>;
-  input: z.infer<typeof autoSegmentRequestSchema>;
+  input: AutoSegmentRequestInput;
 }): Promise<Response> {
   let apiKey: string | null;
   try {
@@ -421,13 +439,17 @@ async function isolateSegmentWithDirectGemini({
 }: {
   ai: GoogleGenAI;
   segment: PlannedSegment;
-  input: z.infer<typeof autoSegmentRequestSchema>;
+  input: AutoSegmentRequestInput;
   sourceBase64: string;
   mimeType: string;
   warnings: string[];
 }): Promise<GeneratedSegment> {
-  const imageConfig: GenerateContentConfig["imageConfig"] =
-    input.model === "gemini-2.5-flash-image" ? undefined : { imageSize: input.imageSize };
+  const config = createGeminiGenerateContentConfig({
+    model: input.model,
+    aspectRatio: "auto",
+    imageSize: input.imageSize,
+    thinking: "fast",
+  });
   try {
     const isolateResponse = await ai.models.generateContent({
       model: input.model,
@@ -440,11 +462,7 @@ async function isolateSegmentWithDirectGemini({
           ],
         },
       ],
-      config: {
-        responseModalities: ["Image"],
-        imageConfig,
-        thinkingConfig: input.model === "gemini-3.1-flash-image-preview" ? { thinkingLevel: ThinkingLevel.MINIMAL } : undefined,
-      },
+      config,
     });
     const imagePart = getParts(isolateResponse).find((part) => !part.thought && part.inlineData?.data);
     if (!imagePart?.inlineData?.data) throw new Error(collectText(getParts(isolateResponse)) || "No image returned.");

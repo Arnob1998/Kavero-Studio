@@ -24,6 +24,11 @@ import {
   type ModelProviderId,
 } from "@/modules/model-providers";
 import {
+  getImageModelCapabilities,
+  getImageModelCapabilitiesByLegacyModel,
+  type ImageGenerationIntent,
+} from "@/modules/model-providers/image-capabilities";
+import {
   createSafeRuntimeCredentialFailureResponse,
   prepareLiteLlmImageRuntimeRequest,
   resolveImageGenerationRuntimeCredentials,
@@ -245,6 +250,9 @@ async function handleDirectGeminiGeneration(request: Request, userId: string): P
   if ("response" in parsed) return parsed.response;
 
   const { input, inputReferenceImages, references } = parsed;
+  if (getImageModelCapabilitiesByLegacyModel(input.model)?.provider !== "gemini") {
+    return jsonError("The selected image model requires the configured model gateway.", 503);
+  }
   const ai = new GoogleGenAI({ apiKey });
 
   const warnings: string[] = [];
@@ -399,6 +407,12 @@ async function handleGatewayGeneration({
     return jsonError("Unable to load image generation model settings.", 500);
   }
   const selection: ImageModelSelection = loadedSelection;
+  const requestCapability = getImageModelCapabilitiesByLegacyModel(input.model);
+  const selectedCapability = getImageModelCapabilities(selection.modelAlias);
+  if (!requestCapability || !selectedCapability || requestCapability.provider !== selectedCapability.provider) {
+    return jsonError("The requested image model does not match the image provider selected in Settings.", 400);
+  }
+  const runtimeCapability = selectedCapability;
 
   const credentials = await resolveImageGenerationRuntimeCredentials({
     userId,
@@ -419,12 +433,25 @@ async function handleGatewayGeneration({
   async function generateOne(variant: number) {
     const startedAt = Date.now();
     try {
+      const intent: ImageGenerationIntent = {
+        modelAlias: selection.modelAlias,
+        feature: "standalone-generate",
+        prompt: input.prompt,
+        count: 1,
+        aspectRatio: input.aspectRatio,
+        outputSize: input.imageSize,
+        quality: runtimeCapability.quality.values.length > 0 ? input.quality : undefined,
+        background: input.background,
+        referenceImages: inputReferenceImages.map((image) => ({ dataUrl: image.dataUrl, mimeType: image.mimeType, name: image.name })),
+        reasoning: runtimeCapability.reasoning.values.length > 0 ? input.thinking : undefined,
+      };
       const result = await generateLiteLlmImage({
         config,
         modelAlias: selection.modelAlias,
         provider: selection.provider,
         model: selection.model,
         prompt: input.prompt,
+        intent,
         settings: {
           legacyModel: input.model,
           count: runCount,
@@ -522,11 +549,13 @@ async function handleGatewayGeneration({
       images,
       text,
       referenceImages: inputReferenceImages,
-      settings: {
+        settings: {
         count: runCount,
         thinking: input.thinking,
         aspectRatio: input.aspectRatio,
         imageSize: input.imageSize,
+        quality: input.quality,
+        background: input.background,
         schema: input.schema,
       },
     });
@@ -555,6 +584,8 @@ async function handleGatewayGeneration({
       thinking: input.thinking,
       aspectRatio: input.aspectRatio,
       imageSize: input.imageSize,
+      quality: input.quality,
+      background: input.background,
       schema: input.schema,
     },
   });

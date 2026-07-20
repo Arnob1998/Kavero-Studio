@@ -32,11 +32,8 @@ import { AutoSegmentPanel } from "@/modules/editor-panels/panels/auto-segment-pa
 import { AssetsPanel } from "@/modules/editor-panels/panels/assets-panel";
 import { CopilotPanel } from "@/modules/editor-panels/panels/copilot-panel";
 import {
-  canvasImageAspectOptions,
-  canvasImageBatchOptions,
   canvasImageModelOptions,
-  canvasImageQualityOptions,
-  canvasImageThinkingOptions,
+  getCanvasImageControlOptions,
   GeneratePanel,
   labelize,
   SettingsSelect,
@@ -46,6 +43,7 @@ import { RelationsPanel } from "@/modules/editor-panels/panels/relations-panel";
 import { ShapesPanel } from "@/modules/editor-panels/panels/shapes-panel";
 import { TextPanel } from "@/modules/editor-panels/panels/text-panel";
 import { useEditor } from "@/modules/canvas/state/context";
+import { getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings } from "@/modules/model-providers/image-browser";
 import { uploadCanvasAsset, type CanvasAsset, type CanvasAssetsResponse } from "@/modules/assets/canvas-assets";
 import {
   CANVAS_TOOL_REGISTRY,
@@ -123,15 +121,41 @@ const autoSegmentCategoryLabels: Record<AutoSegmentCategoryKey, string> = {
   other: "Other",
 };
 
+const defaultCanvasImageModel = getBrowserImageModels("canvas-generation")[0];
+
 const defaultCanvasImageSettings: CanvasImageGenerationSettings = {
   enabled: true,
-  model: "gemini-3.1-flash-image-preview",
-  batchSize: 4,
-  thinking: "balanced",
-  aspectRatio: "auto",
-  imageSize: "1K",
+  model: defaultCanvasImageModel.legacyModelId as CanvasImageModel,
+  batchSize: defaultCanvasImageModel.featureCountPresets["canvas-generation"][0] as CanvasImageBatchSize,
+  thinking: (defaultCanvasImageModel.reasoning.default ?? "balanced") as CanvasImageThinking,
+  aspectRatio: defaultCanvasImageModel.size.defaultAspectRatio,
+  imageSize: defaultCanvasImageModel.size.defaultSize as CanvasImageQuality,
+  quality: (defaultCanvasImageModel.quality.default ?? "auto") as CanvasImageGenerationSettings["quality"],
+  background: defaultCanvasImageModel.background.default,
   transparentBackgroundDefault: true,
 };
+
+function switchCanvasImageModel(current: CanvasImageGenerationSettings, model: CanvasImageModel): CanvasImageGenerationSettings {
+  const normalized = normalizeBrowserImageUiSettings({
+    model: current.model,
+    count: current.batchSize,
+    aspectRatio: current.aspectRatio,
+    imageSize: current.imageSize,
+    reasoning: current.thinking,
+    quality: current.quality,
+    background: current.background,
+  }, model, "canvas-generation");
+  return {
+    ...current,
+    model: normalized.model as CanvasImageModel,
+    batchSize: normalized.count as CanvasImageBatchSize,
+    aspectRatio: normalized.aspectRatio,
+    imageSize: normalized.imageSize as CanvasImageQuality,
+    thinking: normalized.reasoning as CanvasImageThinking,
+    quality: (normalized.quality ?? "auto") as CanvasImageGenerationSettings["quality"],
+    background: normalized.background ?? "auto",
+  };
+}
 
 export function LeftSidebar() {
   const {
@@ -168,6 +192,7 @@ export function LeftSidebar() {
   const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
   const [imageGenerationWarnings, setImageGenerationWarnings] = useState<string[]>([]);
   const [imageGenerationSettings, setImageGenerationSettings] = useState<CanvasImageGenerationSettings>(defaultCanvasImageSettings);
+  const canvasImageControls = getCanvasImageControlOptions(imageGenerationSettings.model);
   const [imageTransparent, setImageTransparent] = useState(defaultCanvasImageSettings.transparentBackgroundDefault);
   const [addingGeneratedImageId, setAddingGeneratedImageId] = useState<string | null>(null);
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
@@ -493,6 +518,7 @@ export function LeftSidebar() {
       const preview = safeGetVisualPreview(getCanvasVisualPreview) as
         | { status: "available"; mimeType: "image/png" | "image/jpeg" | "image/webp"; dataUrl: string; pageId: string }
         | null;
+      const supportsReferences = getBrowserImageModelByLegacyId(settings.model)?.supportsReferenceEditing ?? false;
       const response = await fetch("/api/canvas/image-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -503,9 +529,11 @@ export function LeftSidebar() {
           thinking: settings.thinking,
           aspectRatio: settings.aspectRatio,
           imageSize: settings.imageSize,
+          quality: settings.quality,
+          background: settings.background,
           transparentBackground,
           backgroundPreference,
-          referenceImages: preview
+          referenceImages: preview && supportsReferences
             ? [{ dataUrl: preview.dataUrl, mimeType: preview.mimeType, name: "Current canvas preview" }]
             : [],
         }),
@@ -921,7 +949,9 @@ export function LeftSidebar() {
                       showError(error instanceof Error ? error.message : "Unable to add generated image.");
                     })}
                     onTransparentChange={setImageTransparent}
-                    onSettingsChange={setImageGenerationSettings}
+                    onSettingsChange={(settings) => setImageGenerationSettings((current) =>
+                      settings.model === current.model ? settings : switchCanvasImageModel(current, settings.model)
+                    )}
                   />
                 )}
 
@@ -1241,31 +1271,43 @@ export function LeftSidebar() {
                         label="Model"
                         value={imageGenerationSettings.model}
                         options={canvasImageModelOptions.map((option) => ({ value: option.value, label: option.label }))}
-                        onChange={(model) => setImageGenerationSettings((current) => ({ ...current, model: model as CanvasImageModel }))}
+                        onChange={(model) => setImageGenerationSettings((current) => switchCanvasImageModel(current, model as CanvasImageModel))}
                       />
                       <SettingsSelect
                         label="Batch"
                         value={String(imageGenerationSettings.batchSize)}
-                        options={canvasImageBatchOptions.map((value) => ({ value: String(value), label: `${value}x` }))}
+                        options={canvasImageControls.batches.map((value) => ({ value: String(value), label: `${value}x` }))}
                         onChange={(batchSize) => setImageGenerationSettings((current) => ({ ...current, batchSize: Number(batchSize) as CanvasImageBatchSize }))}
                       />
                       <SettingsSelect
                         label="Thinking"
                         value={imageGenerationSettings.thinking}
-                        options={canvasImageThinkingOptions.map((value) => ({ value, label: labelize(value) }))}
+                        options={canvasImageControls.thinking.map((value) => ({ value, label: labelize(value) }))}
                         onChange={(thinking) => setImageGenerationSettings((current) => ({ ...current, thinking: thinking as CanvasImageThinking }))}
                       />
                       <SettingsSelect
                         label="Aspect"
                         value={imageGenerationSettings.aspectRatio}
-                        options={canvasImageAspectOptions.map((value) => ({ value, label: value }))}
+                        options={canvasImageControls.aspects.map((value) => ({ value, label: value }))}
                         onChange={(aspectRatio) => setImageGenerationSettings((current) => ({ ...current, aspectRatio }))}
                       />
                       <SettingsSelect
-                        label="Quality"
+                        label="Size"
                         value={imageGenerationSettings.imageSize}
-                        options={canvasImageQualityOptions.map((value) => ({ value, label: value }))}
+                        options={canvasImageControls.sizes}
                         onChange={(imageSize) => setImageGenerationSettings((current) => ({ ...current, imageSize: imageSize as CanvasImageQuality }))}
+                      />
+                      <SettingsSelect
+                        label="Quality"
+                        value={imageGenerationSettings.quality}
+                        options={canvasImageControls.qualities.map((value) => ({ value, label: labelize(value) }))}
+                        onChange={(quality) => setImageGenerationSettings((current) => ({ ...current, quality: quality as CanvasImageGenerationSettings["quality"] }))}
+                      />
+                      <SettingsSelect
+                        label="Background"
+                        value={imageGenerationSettings.background}
+                        options={canvasImageControls.backgrounds.map((value) => ({ value, label: labelize(value) }))}
+                        onChange={(background) => setImageGenerationSettings((current) => ({ ...current, background: background as CanvasImageGenerationSettings["background"] }))}
                       />
                     </div>
 

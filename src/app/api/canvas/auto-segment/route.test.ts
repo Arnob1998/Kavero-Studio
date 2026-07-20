@@ -467,6 +467,23 @@ describe("canvas auto segment API", () => {
     expect(mocks.generateContent).not.toHaveBeenCalled();
   });
 
+  it("rejects GPT Image 2 as Auto Segment incompatible before upstream traffic", async () => {
+    configureGateway();
+    const admin = adminForAsset(asset({ storage_ref: googleDriveRef() }), {
+      modelProviders: { imageGenerationModelAlias: "kavero-image-openai-gpt-image-2" },
+    });
+    mocks.requireCanvasAdmin.mockReturnValueOnce({ admin, response: null });
+
+    const response = await POST(request({ assetId: "asset-1" }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "GPT Image 2 is not compatible with Auto Segment.",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
   it("returns a safe gateway configuration error without model fallback", async () => {
     vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
     vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
