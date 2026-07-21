@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { FeatureKey } from "@/modules/features/features";
 import type { CanvasToolName, CanvasToolResult, CanvasToolRisk } from "@/modules/canvas/actions/canvas-tool-registry";
+import type { SelectableLegacyImageModelId } from "@/modules/model-providers/image-capabilities";
 
 export type EditorPanelId = "text" | "shapes" | "generate" | "images" | "autoSegment" | "layers" | "relations" | "copilot";
 
@@ -36,19 +37,24 @@ export type PendingAssistantToolCall = Omit<AssistantToolCall, "riskLevel" | "re
   forceConfirmation?: boolean;
 };
 
-export type CanvasImageModel = "gemini-3.1-flash-image-preview" | "gemini-3-pro-image-preview" | "gemini-2.5-flash-image";
+export type CanvasImageModel = SelectableLegacyImageModelId;
 export type CanvasImageBatchSize = 4 | 8 | 12 | 16;
-export type CanvasImageThinking = "fast" | "balanced" | "deep";
-export type CanvasImageQuality = "1K" | "2K" | "4K";
+export type CanvasImageThinking = "fast" | "balanced" | "deep" | "provider-managed";
+export type CanvasImageQuality = "1K" | "2K" | "4K" | "auto" | "1024x1024" | "1536x1024" | "1024x1536";
+export type CanvasImageProviderQuality = "auto" | "low" | "medium" | "high";
+export type CanvasImageProviderBackground = "auto" | "opaque" | "transparent";
 export type CanvasImageBackgroundPreference = "auto" | "white" | "black";
 
 export type CanvasImageGenerationSettings = {
   enabled: boolean;
+  modelAlias: string;
   model: CanvasImageModel;
   batchSize: CanvasImageBatchSize;
   thinking: CanvasImageThinking;
   aspectRatio: string;
   imageSize: CanvasImageQuality;
+  quality: CanvasImageProviderQuality;
+  background: CanvasImageProviderBackground;
   transparentBackgroundDefault: boolean;
 };
 

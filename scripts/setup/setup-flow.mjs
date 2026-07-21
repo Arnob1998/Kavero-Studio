@@ -10,6 +10,35 @@ import { createDockerSecrets } from "./jwt.mjs";
 import { writeEnvFileSafely } from "./env-file.mjs";
 import { runLocalDockerStack } from "./run.mjs";
 
+const localLiteLlmBaseUrl = "http://litellm:4000";
+
+export const setupGatewayProviders = [
+  { value: "gemini", label: "Google Gemini", hint: "Chat orchestration and image generation" },
+  { value: "openai", label: "OpenAI", hint: "Chat orchestration and GPT Image 2" },
+  { value: "groq", label: "Groq", hint: "Chat orchestration" },
+  { value: "azure-openai", label: "Azure OpenAI", hint: "Chat orchestration" },
+  { value: "azure-openai-image", label: "Azure OpenAI (image)", hint: "Independent GPT Image 2 deployment" },
+];
+
+function gatewayProviderEnv(inputs = {}) {
+  return {
+    OPENAI_API_KEY: inputs.OPENAI_API_KEY ?? "",
+    GEMINI_API_KEY: inputs.GEMINI_API_KEY ?? "",
+    GROQ_API_KEY: inputs.GROQ_API_KEY ?? "",
+    AZURE_API_KEY: inputs.AZURE_API_KEY ?? "",
+    AZURE_API_BASE: inputs.AZURE_API_BASE ?? "",
+    AZURE_API_VERSION: inputs.AZURE_API_VERSION ?? "",
+    AZURE_DEPLOYMENT_NAME: inputs.AZURE_DEPLOYMENT_NAME ?? "",
+    AZURE_BASE_MODEL: inputs.AZURE_BASE_MODEL ?? "",
+    AZURE_IMAGE_API_KEY: inputs.AZURE_IMAGE_API_KEY ?? "",
+    AZURE_IMAGE_API_BASE: inputs.AZURE_IMAGE_API_BASE ?? "",
+    AZURE_IMAGE_API_VERSION: inputs.AZURE_IMAGE_API_VERSION ?? "",
+    AZURE_IMAGE_DEPLOYMENT_NAME: inputs.AZURE_IMAGE_DEPLOYMENT_NAME ?? "",
+    AZURE_IMAGE_BASE_MODEL: inputs.AZURE_IMAGE_BASE_MODEL ?? "",
+    OLLAMA_BASE_URL: inputs.OLLAMA_BASE_URL ?? "",
+  };
+}
+
 export function buildSetupValues({
   profileId,
   authMode,
@@ -46,6 +75,12 @@ export function buildSetupValues({
       KAVERO_STORAGE_PROVIDER: "kavero-managed",
       KAVERO_MANAGED_STORAGE_BACKEND: "local-filesystem",
       KAVERO_LOCAL_STORAGE_ROOT: "/data/kavero-storage",
+      KAVERO_MODEL_GATEWAY: "litellm",
+      KAVERO_LITELLM_BASE_URL: localLiteLlmBaseUrl,
+      KAVERO_LITELLM_API_KEY: secrets.KAVERO_LITELLM_API_KEY,
+      KAVERO_LITELLM_ROUTING_SECRET: secrets.KAVERO_LITELLM_ROUTING_SECRET,
+      LITELLM_MASTER_KEY: secrets.LITELLM_MASTER_KEY,
+      ...gatewayProviderEnv(inputs),
     };
   }
 
@@ -61,6 +96,12 @@ export function buildSetupValues({
     ...(storageChoiceId === "kavero-managed-local-filesystem"
       ? { KAVERO_LOCAL_STORAGE_ROOT: inputs.KAVERO_LOCAL_STORAGE_ROOT ?? "" }
       : {}),
+    KAVERO_MODEL_GATEWAY: inputs.KAVERO_MODEL_GATEWAY ?? "",
+    KAVERO_LITELLM_BASE_URL: inputs.KAVERO_LITELLM_BASE_URL ?? "",
+    KAVERO_LITELLM_API_KEY: inputs.KAVERO_LITELLM_API_KEY ?? "",
+    KAVERO_LITELLM_ROUTING_SECRET: inputs.KAVERO_LITELLM_ROUTING_SECRET ?? "",
+    LITELLM_MASTER_KEY: inputs.LITELLM_MASTER_KEY ?? "",
+    ...gatewayProviderEnv(inputs),
     GOOGLE_DRIVE_CLIENT_ID: inputs.GOOGLE_DRIVE_CLIENT_ID ?? "",
     GOOGLE_DRIVE_CLIENT_SECRET: inputs.GOOGLE_DRIVE_CLIENT_SECRET ?? "",
   };
@@ -72,6 +113,93 @@ function assertNotCanceled(value, prompts) {
     process.exit(0);
   }
   return value;
+}
+
+export async function promptForGatewayProviders({ prompts, inputs, target = "gateway" }) {
+  const selectedProviders = assertNotCanceled(
+    await prompts.multiselect({
+      message: "Choose model providers to configure",
+      options: setupGatewayProviders,
+      required: false,
+    }),
+    prompts,
+  );
+
+  if (selectedProviders.includes("gemini")) {
+    inputs.GEMINI_API_KEY = assertNotCanceled(
+      await prompts.password({ message: `Gemini API key for the ${target}` }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("openai")) {
+    inputs.OPENAI_API_KEY = assertNotCanceled(
+      await prompts.password({ message: `OpenAI API key for the ${target}` }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("groq")) {
+    inputs.GROQ_API_KEY = assertNotCanceled(
+      await prompts.password({ message: `Groq API key for the ${target}` }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("azure-openai")) {
+    inputs.AZURE_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Azure OpenAI API key" }),
+      prompts,
+    );
+    inputs.AZURE_API_BASE = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI endpoint", placeholder: "https://resource.openai.azure.com" }),
+      prompts,
+    );
+    inputs.AZURE_API_VERSION = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI API version", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.AZURE_DEPLOYMENT_NAME = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI deployment name" }),
+      prompts,
+    );
+    inputs.AZURE_BASE_MODEL = assertNotCanceled(
+      await prompts.select({
+        message: "Azure OpenAI model family",
+        options: [
+          { value: "gpt-4o", label: "GPT-4o family" },
+          { value: "gpt-4.1", label: "GPT-4.1 family" },
+          { value: "gpt-5", label: "GPT-5 family" },
+          { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+          { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+          { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+        ],
+      }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("azure-openai-image")) {
+    inputs.AZURE_IMAGE_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Azure image-slot API key" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_API_BASE = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot endpoint", placeholder: "https://resource.openai.azure.com" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_API_VERSION = assertNotCanceled(
+      await prompts.text({
+        message: "Azure image-slot API version",
+        initialValue: "2024-02-01",
+        placeholder: "2024-02-01",
+      }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_DEPLOYMENT_NAME = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot deployment name" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_BASE_MODEL = "gpt-image-2";
+  }
+
+  return selectedProviders;
 }
 
 export async function runSetupWizard({
@@ -147,6 +275,11 @@ export async function runSetupWizard({
       }),
       prompts,
     );
+    prompts.note(
+      "Select only the providers you want on the bundled gateway. The in-app API key screen remains unchanged.",
+      "Model gateway",
+    );
+    await promptForGatewayProviders({ prompts, inputs });
   } else {
     inputs.NEXT_PUBLIC_SUPABASE_URL = assertNotCanceled(
       await prompts.text({ message: "Supabase public URL", placeholder: "https://project.supabase.co" }),
@@ -195,6 +328,34 @@ export async function runSetupWizard({
         }),
         prompts,
       );
+    }
+
+    const configureLiteLlm = assertNotCanceled(
+      await prompts.confirm({
+        message: "Configure a server-side LiteLLM gateway?",
+        initialValue: false,
+      }),
+      prompts,
+    );
+
+    if (configureLiteLlm) {
+      inputs.KAVERO_MODEL_GATEWAY = "litellm";
+      inputs.KAVERO_LITELLM_BASE_URL = assertNotCanceled(
+        await prompts.text({
+          message: "LiteLLM base URL",
+          placeholder: "https://litellm.example.com",
+        }),
+        prompts,
+      );
+      inputs.KAVERO_LITELLM_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "Kavero-to-LiteLLM API key" }),
+        prompts,
+      );
+      inputs.KAVERO_LITELLM_ROUTING_SECRET = assertNotCanceled(
+        await prompts.password({ message: "Matching LiteLLM routing secret" }),
+        prompts,
+      );
+      await promptForGatewayProviders({ prompts, inputs, target: "server" });
     }
   }
 

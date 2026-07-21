@@ -18,6 +18,8 @@ export function AutoSegmentPanel({
   onRun,
   onAddSegment,
   onAddAll,
+  modelAvailable = true,
+  modelUnavailableMessage,
 }: {
   source: AutoSegmentSource | null;
   selectedImageSource: AutoSegmentSource | null;
@@ -34,6 +36,8 @@ export function AutoSegmentPanel({
   onRun: () => void;
   onAddSegment: (segment: AutoSegmentAsset) => void;
   onAddAll: () => void;
+  modelAvailable?: boolean;
+  modelUnavailableMessage?: string;
 }) {
   const busy = status === "analyzing" || status === "isolating" || status === "uploading";
   const unsupportedSelection = selectedObject && !selectedImageSource;
@@ -79,6 +83,11 @@ export function AutoSegmentPanel({
             Select an uploaded image object. Shapes, text, groups, and missing images cannot be segmented.
           </div>
         ) : null}
+        {!modelAvailable ? (
+          <div className="mt-3 rounded-lg border border-amber-300/16 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold text-amber-50/70">
+            {modelUnavailableMessage ?? "The selected image model does not support Auto Segment. Choose a compatible image model in Settings."}
+          </div>
+        ) : null}
         <div className="mt-3 grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
           <button
             className="inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.045] px-2 text-[11px] font-black text-white/58 transition hover:border-accent/45 hover:bg-accent/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
@@ -111,7 +120,7 @@ export function AutoSegmentPanel({
         ) : null}
         <button
           className="mt-3 inline-flex h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-xl bg-accent px-3 text-[11px] font-black text-white shadow-[0_12px_26px_rgb(59_130_246_/_0.24)] transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!source || busy}
+          disabled={!source || busy || !modelAvailable}
           onClick={onRun}
         >
           {busy ? <LoaderCircle size={13} className="shrink-0 animate-spin" /> : <ScanSearch size={13} className="shrink-0" />}

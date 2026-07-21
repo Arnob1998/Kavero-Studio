@@ -1,0 +1,602 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_IMAGE_GENERATION_MODEL_ALIAS } from "@/modules/model-providers";
+
+const mocks = vi.hoisted(() => ({
+  getCanvasUser: vi.fn(),
+  getCanvasAdmin: vi.fn(),
+  requireCanvasAccess: vi.fn(),
+  getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
+  generateContent: vi.fn(),
+}));
+
+vi.mock("@/lib/canvas/api", () => ({
+  getCanvasUser: mocks.getCanvasUser,
+  getCanvasAdmin: mocks.getCanvasAdmin,
+  requireCanvasAccess: mocks.requireCanvasAccess,
+  jsonError: (message: string, status = 400, details?: unknown) =>
+    Response.json(details === undefined ? { error: message } : { error: message, details }, { status }),
+}));
+
+vi.mock("@/lib/provider-keys", () => ({
+  getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
+}));
+
+vi.mock("@google/genai", () => ({
+  ThinkingLevel: { HIGH: "HIGH", MINIMAL: "MINIMAL" },
+  GoogleGenAI: vi.fn(function () {
+    return { models: { generateContent: mocks.generateContent } };
+  }),
+}));
+
+import { POST } from "./route";
+
+type FetchMock = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+describe("canvas image generation API", () => {
+  let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    mocks.getCanvasUser.mockResolvedValue({ id: "user-1" });
+    mocks.requireCanvasAccess.mockResolvedValue({ response: null });
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({}));
+    mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
+    mocks.generateContent.mockResolvedValue(geminiImageResponse("DIRECT"));
+    vi.stubGlobal("fetch", vi.fn<FetchMock>());
+    consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    consoleInfoSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("uses the selected image-generation alias through LiteLLM when the gateway is configured", async () => {
+    configureGateway();
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("GATEWAY")));
+
+    const response = await POST(request(validBody({ count: 4 })));
+    const body = await response.json();
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(outboundBody).toMatchObject({
+      model: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      modalities: ["image", "text"],
+    });
+    expect(outboundBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "google-gemini");
+    expect(JSON.stringify(outboundBody.messages)).toContain("canvas-image-generation");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(body).toMatchObject({
+      model: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      modelLabel: "Nano Banana 2",
+      kind: "image",
+      settings: {
+        count: 4,
+        thinking: "balanced",
+        aspectRatio: "auto",
+        imageSize: "1K",
+        transparentBackground: false,
+        backgroundPreference: "auto",
+      },
+    });
+    expect(body.text).toContain("Gateway text");
+    expect(body.images).toHaveLength(4);
+    expect(body.warnings).toEqual([]);
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"credentialSource\\":\\"gateway-env\\"');
+  });
+
+  it("injects trusted BYOK credentials, strips reserved fields, and does not persist history", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "canvas-user-key-0123456789" });
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("BYOK")));
+
+    const response = await POST(request(validBody({
+      api_key: "browser-key",
+      api_base: "https://browser.invalid",
+      base_url: "https://browser.invalid",
+      api_version: "browser-version",
+      user_config: { api_key: "nested-browser-key" },
+    })));
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(outbound.api_key).toBe("canvas-user-key-0123456789");
+    expect(outbound).not.toHaveProperty("api_base");
+    expect(outbound).not.toHaveProperty("base_url");
+    expect(outbound).not.toHaveProperty("api_version");
+    expect(outbound).not.toHaveProperty("user_config");
+    expect(mocks.getCanvasAdmin).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain('\\"credentialSource\\":\\"user-byok\\"');
+  });
+
+  it("rejects missing required image credentials before provider calls", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+
+    const response = await POST(request(validBody()));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ details: { code: "provider-credentials-required" } });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses env-only without loading or injecting user credentials", async () => {
+    configureGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("ENV")));
+
+    const response = await POST(request(validBody()));
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+    expect(outbound).not.toHaveProperty("api_key");
+  });
+
+  it("fails safely when the credential store is unavailable", async () => {
+    configureGateway();
+    mocks.getUserProviderCredentials.mockRejectedValueOnce(new Error("vault secret payload"));
+
+    const response = await POST(request(validBody()));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({ details: { code: "provider-credentials-unavailable" } });
+    expect(JSON.stringify(body)).not.toContain("vault secret payload");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", {}],
+    ["unknown", { modelProviders: { imageGenerationModelAlias: "unknown-image-alias" } }],
+    ["wrong-slot", { modelProviders: { imageGenerationModelAlias: "kavero-chat-orchestration-default" } }],
+  ])("falls back to the default image alias when the stored preference is %s", async (_label, preferences) => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences(preferences));
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("FALLBACK")));
+
+    const response = await POST(request(validBody()));
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(outboundBody.model).toBe(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
+    expect(body.model).toBe(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
+  });
+
+  it("generates GPT Image 2 canvas candidates through the selected image slot", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      chatOrchestrationModelAlias: "kavero-chat-azure-openai",
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } }));
+    mocks.getUserProviderCredentials.mockResolvedValue({ apiKey: "canvas-openai-key-0123456789" });
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => new Response(JSON.stringify({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }],
+    }), { headers: { "Content-Type": "application/json" } })));
+
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      count: 4,
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "medium",
+      background: "transparent",
+    })));
+    const body = await response.json();
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(outbound).toMatchObject({
+      model: "kavero-image-openai-gpt-image-2",
+      size: "1024x1024",
+      quality: "medium",
+      background: "transparent",
+    });
+    expect(body).toMatchObject({ model: "kavero-image-openai-gpt-image-2", modelLabel: "GPT Image 2" });
+    expect(body.images).toHaveLength(4);
+  });
+
+  it("returns a structured stale-selection conflict before canvas upstream traffic", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } }));
+
+    const response = await POST(request(validBody({ modelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS })));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      details: { code: "model-selection-stale", selectedModelAlias: "kavero-image-openai-gpt-image-2" },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+  });
+
+  it("generates Azure GPT Image 2 canvas candidates through the independent image slot", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } }));
+    const credentials = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://images.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    mocks.getUserProviderCredentials.mockResolvedValue(credentials);
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => new Response(JSON.stringify({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }],
+    }), { headers: { "Content-Type": "application/json" } })));
+
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      count: 4,
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "medium",
+    })));
+    const body = await response.json();
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "azure-openai-image");
+    expect(outbound).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      user_config: { model_list: [{ litellm_params: {
+        model: "azure/image-deployment",
+        api_version: "2024-02-01",
+      } }] },
+    });
+    expect(body).toMatchObject({ model: "kavero-image-azure-gpt-image-2", modelLabel: "Azure GPT Image 2" });
+    expect(body.images).toHaveLength(4);
+  });
+
+  it("rejects Azure image canvas references before upstream traffic", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } }));
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      count: 4,
+      imageSize: "auto",
+      referenceImages: [{ dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" }],
+    })));
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+  });
+
+  it("rejects GPT Image 2 canvas references before upstream traffic", async () => {
+    configureGateway();
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      count: 4,
+      imageSize: "auto",
+      referenceImages: [{ dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" }],
+    })));
+
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for GPT Image 2 canvas mask requests before upstream traffic", async () => {
+    configureGateway();
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      count: 4,
+      imageSize: "auto",
+      mask: { dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" },
+    })));
+
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves direct Gemini behavior and metadata when the gateway is disabled", async () => {
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-2-5-flash" } }));
+    const response = await POST(request(validBody({ model: "gemini-2.5-flash-image", count: 4 })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUserProviderApiKey).toHaveBeenCalledWith("user-1", "google-gemini");
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+    expect(mocks.generateContent).toHaveBeenCalledTimes(4);
+    expect(mocks.generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gemini-2.5-flash-image",
+      }),
+    );
+    expect(body).toMatchObject({
+      model: "gemini-2.5-flash-image",
+      modelLabel: "Nano Banana",
+      kind: "image",
+    });
+    expect(body.warnings).toEqual([
+      "Gemini 2.5 Flash Image ignores imageSize and generates at its fixed model resolution.",
+    ]);
+  });
+
+  it("preserves direct Gemini missing-key and load-error messages when the gateway is disabled", async () => {
+    mocks.getUserProviderApiKey.mockResolvedValueOnce(null);
+    const missingKeyResponse = await POST(request(validBody()));
+    expect(missingKeyResponse.status).toBe(403);
+    await expect(missingKeyResponse.json()).resolves.toEqual({
+      error: "Add your Gemini API key in Settings before generating.",
+    });
+
+    mocks.getUserProviderApiKey.mockRejectedValueOnce(new Error("vault unavailable"));
+    const loadErrorResponse = await POST(request(validBody()));
+    expect(loadErrorResponse.status).toBe(500);
+    await expect(loadErrorResponse.json()).resolves.toEqual({
+      error: "Unable to load your Gemini API key.",
+    });
+
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe gateway configuration error without direct Gemini fallback", async () => {
+    vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+    vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+    vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
+
+    const response = await POST(request(validBody()));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      error: "Canvas image generation model gateway is not configured correctly.",
+      details: { code: "model-gateway-configuration" },
+    });
+    expect(JSON.stringify(body)).not.toContain("KAVERO_LITELLM");
+    expect(JSON.stringify(body)).not.toContain("sk-secret");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves transparent-background prompt shaping and warning in gateway mode", async () => {
+    configureGateway();
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponse("TRANSPARENT")));
+
+    const response = await POST(
+      request(
+        validBody({
+          transparentBackground: true,
+          backgroundPreference: "black",
+        }),
+      ),
+    );
+    const body = await response.json();
+    const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+    const serializedOutbound = JSON.stringify(outboundBody);
+
+    expect(response.status).toBe(200);
+    expect(serializedOutbound).toContain("pure black (#000000)");
+    expect(serializedOutbound).toContain("clean edges");
+    expect(body.warnings).toEqual([
+      "Transparent images are generated on a high-contrast solid background and cleaned in the canvas editor.",
+    ]);
+  });
+
+  it("preserves reference image data URL and MIME validation", async () => {
+    configureGateway();
+
+    const invalidDataUrlResponse = await POST(
+      request(
+        validBody({
+          referenceImages: [{ dataUrl: "not-a-data-url", mimeType: "image/png", name: "bad.png" }],
+        }),
+      ),
+    );
+    expect(invalidDataUrlResponse.status).toBe(400);
+    await expect(invalidDataUrlResponse.json()).resolves.toEqual({
+      error: "bad.png must be a base64 data URL.",
+    });
+
+    const mismatchResponse = await POST(
+      request(
+        validBody({
+          referenceImages: [{ dataUrl: "data:image/jpeg;base64,AAAA", mimeType: "image/png", name: "mismatch.png" }],
+        }),
+      ),
+    );
+    expect(mismatchResponse.status).toBe(400);
+    await expect(mismatchResponse.json()).resolves.toEqual({
+      error: "mismatch.png mimeType does not match the data URL.",
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns successful gateway images plus a warning when some generations fail", async () => {
+    configureGateway();
+    const fetchImpl = vi
+      .fn<FetchMock>()
+      .mockResolvedValueOnce(gatewayResponse("A"))
+      .mockResolvedValueOnce(gatewayResponse("B"))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce(gatewayResponse("C"));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({ count: 4 })));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.images).toHaveLength(3);
+    expect(body.warnings).toEqual(["One or more generations failed. Please try again."]);
+    expect(JSON.stringify(consoleErrorSpy.mock.calls)).not.toContain("network down");
+  });
+
+  it("maps invalid gateway image responses safely without exposing payloads or secrets", async () => {
+    configureGateway();
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayResponseWithoutImages()));
+
+    const response = await POST(
+      request(
+        validBody({
+          referenceImages: [{ dataUrl: "data:image/png;base64,REFERENCEPAYLOAD", mimeType: "image/png", name: "reference.png" }],
+        }),
+      ),
+    );
+    const body = await response.json();
+    const serializedLogsAndBody = JSON.stringify([consoleErrorSpy.mock.calls, body]);
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      error: "Canvas image generation returned an invalid response.",
+      details: { warnings: ["One or more generations failed. Please try again."] },
+    });
+    expect(serializedLogsAndBody).not.toContain("REFERENCEPAYLOAD");
+    expect(serializedLogsAndBody).not.toContain("sk-secret");
+    expect(serializedLogsAndBody).not.toContain("litellm:4000");
+  });
+
+  it("keeps auth and canvas access gates before provider work", async () => {
+    mocks.getCanvasUser.mockResolvedValueOnce(null);
+    const authResponse = await POST(request(validBody()));
+    expect(authResponse.status).toBe(401);
+    await expect(authResponse.json()).resolves.toEqual({ error: "Unauthorized" });
+
+    mocks.getCanvasUser.mockResolvedValueOnce({ id: "user-1" });
+    mocks.requireCanvasAccess.mockResolvedValueOnce({
+      response: Response.json({ error: "Connect Google Drive to use Canvas." }, { status: 403 }),
+    });
+    const accessResponse = await POST(request(validBody()));
+    expect(accessResponse.status).toBe(403);
+    await expect(accessResponse.json()).resolves.toEqual({ error: "Connect Google Drive to use Canvas." });
+
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+function configureGateway() {
+  vi.stubEnv("KAVERO_MODEL_GATEWAY", "litellm");
+  vi.stubEnv("KAVERO_LITELLM_BASE_URL", "http://litellm:4000");
+  vi.stubEnv("KAVERO_LITELLM_API_KEY", "sk-secret");
+  vi.stubEnv("KAVERO_LITELLM_ROUTING_SECRET", "routingSecret_0123456789012345678901234567890123456789");
+}
+
+function validBody(overrides: Record<string, unknown> = {}) {
+  const model = String(overrides.model ?? "gemini-3.1-flash-image-preview");
+  const modelAlias = String(overrides.modelAlias ?? ({
+    "gemini-3.1-flash-image-preview": "kavero-image-generation-default",
+    "gemini-3-pro-image-preview": "kavero-image-gemini-3-pro",
+    "gemini-2.5-flash-image": "kavero-image-gemini-2-5-flash",
+    "gpt-image-2": "kavero-image-openai-gpt-image-2",
+    "azure-gpt-image-2": "kavero-image-azure-gpt-image-2",
+  }[model] ?? "kavero-image-generation-default"));
+  return {
+    prompt: "Create a clean app icon.",
+    model,
+    modelAlias,
+    count: 4,
+    thinking: "balanced",
+    aspectRatio: "auto",
+    imageSize: "1K",
+    transparentBackground: false,
+    backgroundPreference: "auto",
+    referenceImages: [],
+    ...overrides,
+  };
+}
+
+function request(body: Record<string, unknown>) {
+  return new Request("http://localhost/api/canvas/image-generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function geminiImageResponse(data: string) {
+  return {
+    candidates: [
+      {
+        content: {
+          parts: [
+            { text: "Direct text" },
+            { inlineData: { mimeType: "image/png", data } },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+function gatewayResponse(data: string) {
+  return new Response(
+    JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: "Gateway text",
+            images: [{ image_url: { url: `data:image/png;base64,${data}` } }],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-image-1",
+        "x-litellm-call-id": "call-image-1",
+      },
+    },
+  );
+}
+
+function gatewayResponseWithoutImages() {
+  return new Response(
+    JSON.stringify({
+      choices: [{ message: { content: "No image", images: [] } }],
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "x-request-id": "req-image-empty",
+        "x-litellm-call-id": "call-image-empty",
+      },
+    },
+  );
+}
+
+function adminWithPreferences(preferences: unknown) {
+  return {
+    from(table: string) {
+      if (table !== "user_metadata") throw new Error(`Unexpected table: ${table}`);
+      const query = {
+        select: vi.fn(() => query),
+        eq: vi.fn(() => query),
+        maybeSingle: vi.fn(async () => ({ data: { preferences }, error: null })),
+      };
+      return query;
+    },
+  };
+}

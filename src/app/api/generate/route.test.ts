@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_IMAGE_GENERATION_MODEL_ALIAS } from "@/modules/model-providers";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   createAdminClient: vi.fn(),
   getUserProviderApiKey: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
   normalizeUserPlan: vi.fn(),
   getGenerationLimit: vi.fn(),
   getGoogleDriveConnection: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock("@google/genai", () => ({
 
 vi.mock("@/lib/provider-keys", () => ({
   getUserProviderApiKey: mocks.getUserProviderApiKey,
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -77,6 +80,7 @@ vi.mock("@/modules/storage/backends/local-filesystem/local-filesystem-backend", 
 import { POST } from "./route";
 
 type TableName = "user_metadata" | "generation_runs" | "generated_images";
+type FetchMock = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 function okImageResponse(data = "AAAA", text = "Generated text") {
   return {
@@ -116,6 +120,45 @@ function textOnlyResponse(text = "Only text") {
   };
 }
 
+function gatewayImageResponse(data = "BBBB", text = "Gateway generated text") {
+  return {
+    choices: [
+      {
+        message: {
+          content: text,
+          images: [
+            {
+              image_url: {
+                url: `data:image/png;base64,${data}`,
+              },
+            },
+          ],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
+  };
+}
+
+function gatewayJsonResponse(body: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(body), {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "x-request-id": "req-generate-1",
+      "x-litellm-call-id": "call-generate-1",
+      ...init.headers,
+    },
+  });
+}
+
+function enableGateway() {
+  process.env.KAVERO_MODEL_GATEWAY = "litellm";
+  process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
+  process.env.KAVERO_LITELLM_API_KEY = "sk-test-secret";
+  process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingTestSecret_012345678901234567890123456789012345";
+}
+
 function rawRequest(body: string) {
   return new Request("http://localhost/api/generate", {
     method: "POST",
@@ -141,9 +184,18 @@ function referenceImage(index: number, mimeType = "image/png") {
 }
 
 function validBody(overrides: Record<string, unknown> = {}) {
+  const model = String(overrides.model ?? "gemini-3.1-flash-image-preview");
+  const modelAlias = String(overrides.modelAlias ?? ({
+    "gemini-3.1-flash-image-preview": "kavero-image-generation-default",
+    "gemini-3-pro-image-preview": "kavero-image-gemini-3-pro",
+    "gemini-2.5-flash-image": "kavero-image-gemini-2-5-flash",
+    "gpt-image-2": "kavero-image-openai-gpt-image-2",
+    "azure-gpt-image-2": "kavero-image-azure-gpt-image-2",
+  }[model] ?? "kavero-image-generation-default"));
   return {
     prompt: "Generate a polished product image.",
-    model: "gemini-3.1-flash-image-preview",
+    model,
+    modelAlias,
     count: 1,
     thinking: "balanced",
     aspectRatio: "auto",
@@ -158,14 +210,14 @@ function createSupabaseClient(
   options: {
     user?: { id: string } | null;
     userError?: Error | null;
-    metadataResult?: { data: { plan?: string } | null; error: unknown | null };
+    metadataResult?: { data: { plan?: string; preferences?: unknown } | null; error: unknown | null };
     countResult?: { count: number | null; error: unknown | null };
   } = {},
 ) {
   const user = options.user === undefined ? { id: "user-1" } : options.user;
   const userError = options.userError ?? null;
   const countResult = options.countResult ?? { count: 0, error: null };
-  const metadataResult = options.metadataResult ?? { data: { plan: "premium" }, error: null };
+  const metadataResult = options.metadataResult ?? { data: { plan: "premium", preferences: {} }, error: null };
 
   const from = vi.fn((table: TableName) => {
     if (table === "user_metadata") {
@@ -272,7 +324,9 @@ describe("/api/generate POST", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
 
     supabase = createSupabaseClient();
     admin = createAdminClient();
@@ -280,6 +334,7 @@ describe("/api/generate POST", () => {
     mocks.createClient.mockResolvedValue(supabase);
     mocks.createAdminClient.mockReturnValue(admin);
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
+    mocks.getUserProviderCredentials.mockResolvedValue(null);
     mocks.normalizeUserPlan.mockReturnValue("premium");
     mocks.getGenerationLimit.mockReturnValue(null);
     mocks.getGoogleDriveConnection.mockResolvedValue({
@@ -338,6 +393,11 @@ describe("/api/generate POST", () => {
     });
     delete process.env.KAVERO_STORAGE_PROVIDER;
     delete process.env.KAVERO_MANAGED_STORAGE_BACKEND;
+    delete process.env.KAVERO_MODEL_GATEWAY;
+    delete process.env.KAVERO_LITELLM_BASE_URL;
+    delete process.env.KAVERO_LITELLM_API_KEY;
+    delete process.env.KAVERO_LITELLM_ROUTING_SECRET;
+    delete process.env.KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE;
   });
 
   it("returns the current auth error for unauthenticated users", async () => {
@@ -501,6 +561,7 @@ describe("/api/generate POST", () => {
     const body = await json(response);
 
     expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
     expect(body).toMatchObject({
       model: "gemini-3.1-flash-image-preview",
       modelLabel: "Nano Banana 2",
@@ -523,6 +584,438 @@ describe("/api/generate POST", () => {
       }),
     ]);
     expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+  });
+
+  it("uses the selected image-generation alias through LiteLLM when the gateway is configured", async () => {
+    enableGateway();
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse(gatewayImageResponse()));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({ count: 1 })));
+    const body = await json(response);
+    const requestBody = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as {
+      model: string;
+      modalities: string[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(requestBody.model).toBe("kavero-image-generation-default");
+    expect(requestBody.modalities).toEqual(["image", "text"]);
+    expect(requestBody).not.toHaveProperty("api_key");
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "google-gemini");
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(body).toMatchObject({
+      model: "kavero-image-generation-default",
+      modelLabel: "Nano Banana 2",
+      kind: "image",
+      text: "Gateway generated text",
+    });
+    expect(body.images).toEqual([
+      expect.objectContaining({
+        variant: 1,
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,BBBB",
+        text: "Gateway generated text",
+      }),
+    ]);
+    expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).toContain('\\"credentialSource\\":\\"gateway-env\\"');
+  });
+
+  it("generates and persists GPT Image 2 text-to-image output through the selected image slot", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({
+      metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+        chatOrchestrationModelAlias: "kavero-chat-orchestration-default",
+        imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+      } } }, error: null },
+    });
+    mocks.createClient.mockResolvedValue(supabase);
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "openai-user-key-0123456789" });
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==", revised_prompt: "Revised product image" }],
+    }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "high",
+      background: "opaque",
+    })));
+    const body = await json(response);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    const outbound = JSON.parse(String(init?.body));
+
+    expect(response.status).toBe(200);
+    expect(String(url)).toBe("http://litellm:4000/v1/images/generations");
+    expect(init?.headers).toEqual(expect.objectContaining({ "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/) }));
+    expect(outbound).toMatchObject({
+      model: "kavero-image-openai-gpt-image-2",
+      n: 1,
+      size: "1024x1024",
+      quality: "high",
+      background: "opaque",
+      api_key: "openai-user-key-0123456789",
+    });
+    expect(body).toMatchObject({
+      model: "kavero-image-openai-gpt-image-2",
+      modelLabel: "GPT Image 2",
+      images: [{ dataUrl: "data:image/png;base64,R0lGODlhAQABAIAAAAUEBA==", mimeType: "image/png" }],
+    });
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      model_id: "kavero-image-openai-gpt-image-2",
+      model_label: "GPT Image 2",
+    }));
+  });
+
+  it("generates and persists Azure GPT Image 2 through its independent signed route", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({
+      metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+        chatOrchestrationModelAlias: "kavero-chat-orchestration-default",
+        imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+      } } }, error: null },
+    });
+    mocks.createClient.mockResolvedValue(supabase);
+    const credentials = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://images.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    mocks.getUserProviderCredentials.mockResolvedValueOnce(credentials);
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }],
+    }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "low",
+    })));
+    const body = await json(response);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    const outbound = JSON.parse(String(init?.body));
+
+    expect(response.status).toBe(200);
+    expect(String(url)).toBe("http://litellm:4000/v1/images/generations");
+    expect(init?.headers).toEqual(expect.objectContaining({ "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/) }));
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "azure-openai-image");
+    expect(outbound).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      user_config: { model_list: [{
+        model_name: "kavero-image-azure-gpt-image-2",
+        litellm_params: {
+          model: "azure/image-deployment",
+          api_key: credentials.apiKey,
+          api_base: credentials.apiBase,
+          api_version: "2024-02-01",
+        },
+      }] },
+    });
+    expect(body).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      modelLabel: "Azure GPT Image 2",
+    });
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      model_id: "kavero-image-azure-gpt-image-2",
+      model_label: "Azure GPT Image 2",
+    }));
+  });
+
+  it("rejects Azure image references before upstream traffic and persistence", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      imageSize: "auto",
+      referenceImages: [referenceImage(1)],
+    })));
+    expect(response.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+  });
+
+  it("creates no persistence side effects for malformed Azure image responses", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://images.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    });
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayJsonResponse({ data: [] })));
+    const response = await POST(request(validBody({ model: "azure-gpt-image-2", imageSize: "auto" })));
+    expect(response.status).toBe(502);
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+    expect(admin.__mocks.generatedImageInsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects GPT Image 2 references before upstream traffic and persists nothing", async () => {
+    enableGateway();
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      imageSize: "auto",
+      referenceImages: [referenceImage(1)],
+    })));
+
+    expect(response.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for GPT Image 2 mask requests before upstream traffic", async () => {
+    enableGateway();
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      model: "gpt-image-2",
+      imageSize: "auto",
+      mask: { dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" },
+    })));
+
+    expect(response.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("creates no persistence side effects for malformed GPT Image 2 responses", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayJsonResponse({ data: [{ b64_json: "not valid base64!" }] })));
+
+    const response = await POST(request(validBody({ model: "gpt-image-2", imageSize: "auto" })));
+
+    expect(response.status).toBe(502);
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+    expect(admin.__mocks.generatedImageInsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a structured stale-selection conflict before upstream traffic", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({ modelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS })));
+
+    expect(response.status).toBe(409);
+    await expect(json(response)).resolves.toMatchObject({
+      details: { code: "model-selection-stale", selectedModelAlias: "kavero-image-openai-gpt-image-2" },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+  });
+
+  it("injects only trusted image credentials and strips reserved caller fields", async () => {
+    enableGateway();
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "user-gemini-key-0123456789" });
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse(gatewayImageResponse()));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      api_key: "browser-key",
+      api_base: "https://browser.invalid",
+      base_url: "https://browser.invalid",
+      api_version: "browser-version",
+      user_config: { api_key: "nested-browser-key" },
+    })));
+    const outbound = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(outbound.api_key).toBe("user-gemini-key-0123456789");
+    expect(outbound).not.toHaveProperty("api_base");
+    expect(outbound).not.toHaveProperty("base_url");
+    expect(outbound).not.toHaveProperty("api_version");
+    expect(outbound).not.toHaveProperty("user_config");
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).toContain('\\"credentialSource\\":\\"user-byok\\"');
+  });
+
+  it("rejects missing required image credentials before any provider call", async () => {
+    enableGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "user-required");
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+
+    expect(response.status).toBe(403);
+    await expect(json(response)).resolves.toMatchObject({ details: { code: "provider-credentials-required" } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("uses env-only without loading user credentials", async () => {
+    enableGateway();
+    vi.stubEnv("KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE", "env-only");
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse(gatewayImageResponse()));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+    const outbound = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+    expect(outbound).not.toHaveProperty("api_key");
+  });
+
+  it("fails safely when the image credential store is unavailable", async () => {
+    enableGateway();
+    mocks.getUserProviderCredentials.mockRejectedValueOnce(new Error("vault secret payload"));
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+    const body = await json(response);
+
+    expect(response.status).toBe(500);
+    expect(body).toMatchObject({ details: { code: "provider-credentials-unavailable" } });
+    expect(JSON.stringify(body)).not.toContain("vault secret payload");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the image-generation default when the stored alias is for the wrong slot", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({
+      metadataResult: {
+        data: {
+          plan: "premium",
+          preferences: {
+            modelProviders: {
+              imageGenerationModelAlias: "kavero-chat-orchestration-default",
+            },
+          },
+        },
+        error: null,
+      },
+    });
+    mocks.createClient.mockResolvedValue(supabase);
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse(gatewayImageResponse()));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody()));
+    const requestBody = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as { model: string };
+
+    expect(response.status).toBe(200);
+    expect(requestBody.model).toBe("kavero-image-generation-default");
+  });
+
+  it("persists gateway generations with generic alias and label metadata", async () => {
+    enableGateway();
+    vi.stubGlobal("fetch", vi.fn(async () => gatewayJsonResponse(gatewayImageResponse("CCCC"))));
+
+    const response = await POST(request(validBody({ prompt: "Gateway product image" })));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(body.model).toBe("kavero-image-generation-default");
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: "user-1",
+        prompt: "Gateway product image",
+        model_id: "kavero-image-generation-default",
+        model_label: "Nano Banana 2",
+        storage_provider: "google-drive",
+      }),
+    );
+    expect(admin.__mocks.generatedImageInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mime_type: "image/png",
+        storage_provider: "google-drive",
+      }),
+    );
+  });
+
+  it("preserves partial generation warning behavior on the gateway path", async () => {
+    enableGateway();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(gatewayJsonResponse(gatewayImageResponse("DDDD", "First gateway result")))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "contains data:image/png;base64,SECRET" } }), {
+          status: 503,
+          headers: { "x-litellm-call-id": "call-failed" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({ count: 2 })));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(body.text).toBe("First gateway result");
+    expect(body.warnings).toEqual([
+      "One or more generations failed. Please try again.",
+      "Saved 1 image to Google Drive.",
+    ]);
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+  });
+
+  it("returns a safe error for empty gateway image responses", async () => {
+    enableGateway();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        gatewayJsonResponse({
+          choices: [{ message: { content: "No image", images: [] } }],
+        }),
+      ),
+    );
+
+    const response = await POST(request(validBody()));
+    const body = await json(response);
+
+    expect(response.status).toBe(502);
+    expect(body).toMatchObject({
+      error: "Image generation returned an invalid response.",
+      details: { warnings: ["One or more generations failed. Please try again."] },
+    });
+    expect(JSON.stringify(body)).not.toContain("data:image");
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe gateway configuration error without falling back to Gemini", async () => {
+    process.env.KAVERO_MODEL_GATEWAY = "litellm";
+    delete process.env.KAVERO_LITELLM_BASE_URL;
+    process.env.KAVERO_LITELLM_API_KEY = "sk-test-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingTestSecret_012345678901234567890123456789012345";
+
+    const response = await POST(request(validBody()));
+
+    expect(response.status).toBe(503);
+    await expect(json(response)).resolves.toMatchObject({
+      error: "Image generation model gateway is not configured correctly.",
+      details: { code: "model-gateway-configuration" },
+    });
+    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
+    expect(mocks.generateContent).not.toHaveBeenCalled();
   });
 
   it("preserves current partial Gemini failure warning behavior", async () => {
@@ -556,6 +1049,8 @@ describe("/api/generate POST", () => {
   });
 
   it("keeps current imageSize behavior for gemini-2.5-flash-image", async () => {
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-2-5-flash" } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
     const response = await POST(
       request(validBody({ model: "gemini-2.5-flash-image", aspectRatio: "auto", imageSize: "4K" })),
     );
@@ -577,6 +1072,8 @@ describe("/api/generate POST", () => {
   });
 
   it("keeps current imageSize and aspectRatio behavior for Gemini 3 image models", async () => {
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-3-pro" } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
     const response = await POST(
       request(
         validBody({
@@ -609,6 +1106,8 @@ describe("/api/generate POST", () => {
     );
 
     mocks.generateContent.mockClear();
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-3-pro" } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
     await POST(request(validBody({ model: "gemini-3-pro-image-preview", thinking: "deep" })));
 
     expect(mocks.generateContent).toHaveBeenLastCalledWith(

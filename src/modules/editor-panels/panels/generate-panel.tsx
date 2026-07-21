@@ -5,19 +5,34 @@ import type {
   CanvasImageGenerationSettings,
   CanvasImageModel,
   CanvasImageQuality,
+  CanvasImageProviderBackground,
+  CanvasImageProviderQuality,
   GeneratedCanvasImage,
 } from "../types";
+import { getBrowserImageModels } from "@/modules/model-providers/image-browser";
 
-export const canvasImageModelOptions: Array<{ value: CanvasImageModel; label: string }> = [
-  { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2" },
-  { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro" },
-  { value: "gemini-2.5-flash-image", label: "Nano Banana" },
-];
+const canvasImageModels = getBrowserImageModels("canvas-generation");
+export const canvasImageModelOptions: Array<{ value: CanvasImageModel; label: string }> = canvasImageModels.map((model) => ({
+  value: model.legacyModelId as CanvasImageModel,
+  label: model.displayLabel,
+}));
 
-export const canvasImageBatchOptions: CanvasImageBatchSize[] = [4, 8, 12, 16];
-export const canvasImageThinkingOptions = ["balanced", "fast", "deep"] as const;
-export const canvasImageAspectOptions = ["auto", "1:1", "9:16", "16:9", "3:4", "4:3", "3:2", "2:3", "5:4", "4:5"];
-export const canvasImageQualityOptions: CanvasImageQuality[] = ["1K", "2K", "4K"];
+export const canvasImageBatchOptions = [...canvasImageModels[0].featureCountPresets["canvas-generation"]] as CanvasImageBatchSize[];
+export const canvasImageThinkingOptions = [...canvasImageModels[0].reasoning.values] as Array<"balanced" | "fast" | "deep">;
+export const canvasImageAspectOptions = canvasImageModels[0].featureAspectRatios["canvas-generation"];
+export const canvasImageQualityOptions = canvasImageModels[0].size.presets.map((preset) => preset.value) as CanvasImageQuality[];
+
+export function getCanvasImageControlOptions(modelId: CanvasImageModel) {
+  const model = canvasImageModels.find((entry) => entry.legacyModelId === modelId) ?? canvasImageModels[0];
+  return {
+    batches: [...model.featureCountPresets["canvas-generation"]] as CanvasImageBatchSize[],
+    thinking: [...(model.reasoning.values.length ? model.reasoning.values : ["provider-managed"])],
+    aspects: [...model.featureAspectRatios["canvas-generation"]],
+    sizes: model.size.presets.map((preset) => ({ value: preset.value, label: preset.label })),
+    qualities: [...(model.quality.values.length ? model.quality.values : ["auto"])],
+    backgrounds: [...model.background.values],
+  };
+}
 
 export function GeneratePanel({
   prompt,
@@ -33,6 +48,7 @@ export function GeneratePanel({
   onAddImage,
   onTransparentChange,
   onSettingsChange,
+  modelOptions = canvasImageModelOptions,
 }: {
   prompt: string;
   images: GeneratedCanvasImage[];
@@ -47,7 +63,9 @@ export function GeneratePanel({
   onAddImage: (image: GeneratedCanvasImage) => void;
   onTransparentChange: (value: boolean) => void;
   onSettingsChange: (settings: CanvasImageGenerationSettings) => void;
+  modelOptions?: Array<{ value: CanvasImageModel; label: string }>;
 }) {
+  const controls = getCanvasImageControlOptions(settings.model);
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[linear-gradient(180deg,rgb(255_255_255_/_0.035),transparent_30%)]">
       <div className="shrink-0 border-b border-white/[0.07] px-4 pb-3">
@@ -87,7 +105,7 @@ export function GeneratePanel({
             </button>
             <button
               className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-accent px-3 text-[11px] font-black text-white shadow-[0_12px_26px_rgb(59_130_246_/_0.24)] transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={generating || !prompt.trim()}
+              disabled={generating || !prompt.trim() || modelOptions.length === 0}
               type="submit"
             >
               {generating ? <LoaderCircle size={12} className="animate-spin" /> : <Sparkles size={12} />}
@@ -158,26 +176,38 @@ export function GeneratePanel({
           <SettingsSelect
             label="Batch"
             value={String(settings.batchSize)}
-            options={canvasImageBatchOptions.map((value) => ({ value: String(value), label: `${value}x` }))}
+            options={controls.batches.map((value) => ({ value: String(value), label: `${value}x` }))}
             onChange={(batchSize) => onSettingsChange({ ...settings, batchSize: Number(batchSize) as CanvasImageBatchSize })}
           />
           <SettingsSelect
             label="Model"
             value={settings.model}
-            options={canvasImageModelOptions.map((option) => ({ value: option.value, label: option.label }))}
+            options={modelOptions.map((option) => ({ value: option.value, label: option.label }))}
             onChange={(model) => onSettingsChange({ ...settings, model: model as CanvasImageModel })}
           />
           <SettingsSelect
             label="Aspect"
             value={settings.aspectRatio}
-            options={canvasImageAspectOptions.map((value) => ({ value, label: value }))}
+            options={controls.aspects.map((value) => ({ value, label: value }))}
             onChange={(aspectRatio) => onSettingsChange({ ...settings, aspectRatio })}
           />
           <SettingsSelect
-            label="Quality"
+            label="Size"
             value={settings.imageSize}
-            options={canvasImageQualityOptions.map((value) => ({ value, label: value }))}
+            options={controls.sizes}
             onChange={(imageSize) => onSettingsChange({ ...settings, imageSize: imageSize as CanvasImageQuality })}
+          />
+          <SettingsSelect
+            label="Quality"
+            value={settings.quality}
+            options={controls.qualities.map((value) => ({ value, label: value }))}
+            onChange={(quality) => onSettingsChange({ ...settings, quality: quality as CanvasImageProviderQuality })}
+          />
+          <SettingsSelect
+            label="Background"
+            value={settings.background}
+            options={controls.backgrounds.map((value) => ({ value, label: value }))}
+            onChange={(background) => onSettingsChange({ ...settings, background: background as CanvasImageProviderBackground })}
           />
         </div>
       </div>
@@ -200,6 +230,7 @@ export function SettingsSelect({
   const [placement, setPlacement] = useState<"top" | "bottom">("bottom");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const selected = options.find((option) => option.value === value) ?? options[0];
+  const unavailable = options.length === 0;
   const menuPlacementClass = placement === "top" ? "bottom-full mb-1 max-h-64" : "top-full mt-1 max-h-56";
 
   const toggleOpen = () => {
@@ -224,12 +255,13 @@ export function SettingsSelect({
               : "border-white/[0.09] bg-white/[0.055] text-white/72 hover:border-white/[0.16] hover:bg-white/[0.075]"
           }`}
           type="button"
+          disabled={unavailable}
           onClick={toggleOpen}
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <span className="truncate">{selected?.label ?? value}</span>
+          <span className="truncate">{selected?.label ?? (unavailable ? "No active models" : value)}</span>
           <ChevronDown size={13} className={`shrink-0 text-white/36 transition ${open ? "rotate-180 text-accent/90" : ""}`} />
         </button>
         {open ? (

@@ -1,43 +1,64 @@
 import { z } from "zod";
 import {
-  aspectRatios,
-  imageModelIds,
-  modelLabels,
-  referenceImageLimits,
+  type GenerateAspectRatio,
+  type GenerateImageModelId,
+  type GenerateImageSize,
+  type GenerateThinking,
 } from "./generate-models";
+import { DEFAULT_IMAGE_MODEL_LEGACY_ID, validateLegacyImageRequest } from "@/modules/model-providers/image-capabilities";
 
 export const referenceImageSchema = z.object({
   dataUrl: z.string().min(1),
-  mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"]),
+  mimeType: z.string().min(1),
   name: z.string().optional(),
 });
 
-export const generateRequestSchema = z
+const generateRequestStructure = z
   .object({
     prompt: z.string().trim().min(1).max(12000),
-    model: z.enum(imageModelIds).default("gemini-3.1-flash-image-preview"),
+    modelAlias: z.string().trim().min(1).max(200),
+    model: z.string().default(DEFAULT_IMAGE_MODEL_LEGACY_ID),
     count: z.coerce.number().int().min(1).max(16).default(1),
-    thinking: z.enum(["fast", "balanced", "deep"]).default("balanced"),
-    aspectRatio: z.enum(aspectRatios).default("auto"),
-    imageSize: z.enum(["1K", "2K", "4K"]).default("1K"),
+    thinking: z.string().default("balanced"),
+    aspectRatio: z.string().default("auto"),
+    imageSize: z.string().default("1K"),
+    quality: z.string().default("auto"),
+    background: z.enum(["auto", "opaque", "transparent"]).default("auto"),
     schema: z.enum(["none", "magier-ai"]).default("none"),
     referenceImage: referenceImageSchema.nullish(),
     referenceImages: z.array(referenceImageSchema).nullish(),
-  })
-  .superRefine((input, context) => {
-    const referenceImages = input.referenceImages ?? (input.referenceImage ? [input.referenceImage] : []);
-    const limit = referenceImageLimits[input.model];
-
-    if (referenceImages.length > limit) {
-      context.addIssue({
-        code: z.ZodIssueCode.too_big,
-        type: "array",
-        maximum: limit,
-        inclusive: true,
-        path: ["referenceImages"],
-        message: `${modelLabels[input.model]} supports up to ${limit} reference images.`,
-      });
-    }
+    mask: z.unknown().optional(),
   });
 
-export type GenerateRequestInput = z.infer<typeof generateRequestSchema>;
+export type GenerateRequestInput = Omit<z.infer<typeof generateRequestStructure>, "model" | "thinking" | "aspectRatio" | "imageSize"> & {
+  model: GenerateImageModelId;
+  thinking: GenerateThinking;
+  aspectRatio: GenerateAspectRatio;
+  imageSize: GenerateImageSize;
+};
+
+export const generateRequestSchema = generateRequestStructure
+  .superRefine((input, context) => {
+    if (input.mask !== undefined) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["mask"], message: "Mask-based image editing is not available." });
+    }
+    const referenceImages = input.referenceImages ?? (input.referenceImage ? [input.referenceImage] : []);
+    const issues = validateLegacyImageRequest({
+      feature: "standalone-generate",
+      model: input.model,
+      count: input.count,
+      thinking: input.thinking,
+      aspectRatio: input.aspectRatio,
+      imageSize: input.imageSize,
+      referenceImages,
+    });
+    for (const issue of issues) {
+      const path = issue.field === "modelAlias" ? ["model"] : issue.field === "outputSize" ? ["imageSize"] : issue.field === "reasoning" ? ["thinking"] : issue.field === "referenceImages.mimeType" ? ["referenceImages"] : [issue.field];
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: issue.message,
+      });
+    }
+  })
+  .transform((input) => input as GenerateRequestInput);

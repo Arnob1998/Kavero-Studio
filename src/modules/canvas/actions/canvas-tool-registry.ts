@@ -14,12 +14,18 @@ export interface CanvasToolResult {
   data?: Record<string, unknown>;
 }
 
+export interface CanvasToolJsonSchema extends Record<string, unknown> {
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+}
+
 export interface CanvasToolDefinition<Input = unknown> {
   name: CanvasToolName;
   description: string;
   riskLevel: CanvasToolRisk;
   inputSchema: z.ZodTypeAny;
-  jsonSchema: Record<string, unknown>;
+  jsonSchema: CanvasToolJsonSchema;
   executor: (input: Input, context: CanvasToolExecutionContext) => Promise<CanvasToolResult> | CanvasToolResult;
 }
 
@@ -306,7 +312,7 @@ const toolSchemas = {
 export type CanvasToolName = keyof typeof toolSchemas;
 export type CanvasToolInput<Name extends CanvasToolName = CanvasToolName> = z.input<(typeof toolSchemas)[Name]>;
 
-const toolJsonSchemas: Record<keyof typeof toolSchemas, Record<string, unknown>> = {
+const toolJsonSchemas = {
   add_text: {
     type: "object",
     properties: {
@@ -363,19 +369,17 @@ const toolJsonSchemas: Record<keyof typeof toolSchemas, Record<string, unknown>>
     },
   },
   set_background: {
-    oneOf: [
-      { type: "object", required: ["type", "value"], properties: { type: { const: "color" }, value: { type: "string" } } },
-      { type: "object", required: ["type", "value"], properties: { type: { const: "gradient" }, value: { type: "string" } } },
-      {
-        type: "object",
-        required: ["type", "value"],
-        properties: {
-          type: { const: "image" },
-          value: { type: "string", pattern: "^/api/canvas/assets/[a-zA-Z0-9_-]+$" },
-          fit: { type: "string", enum: ["cover", "contain", "stretch", "overflow"] },
-        },
+    type: "object",
+    required: ["type", "value"],
+    properties: {
+      type: { type: "string", enum: ["color", "gradient", "image"] },
+      value: { type: "string" },
+      fit: {
+        type: "string",
+        enum: ["cover", "contain", "stretch", "overflow"],
+        description: "Used only for image backgrounds.",
       },
-    ],
+    },
   },
   set_image_as_background: {
     type: "object",
@@ -596,7 +600,7 @@ const toolJsonSchemas: Record<keyof typeof toolSchemas, Record<string, unknown>>
   undo: { type: "object", properties: {} },
   redo: { type: "object", properties: {} },
   save: { type: "object", properties: {} },
-};
+} satisfies Record<CanvasToolName, CanvasToolJsonSchema>;
 
 export const CANVAS_TOOL_REGISTRY: { [Name in CanvasToolName]: CanvasToolDefinition<any> } = {
   add_text: tool("add_text", "Add a text object to the active canvas.", "low", toolSchemas.add_text, (input, context) => context.addText(input)),

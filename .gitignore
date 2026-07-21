@@ -17,6 +17,7 @@ yarn-debug.log*
 .env.*
 !.env.example
 !.env.docker.local.example
+!.env.local.example
 
 AGENTS.md
 IMPLEMENTATION.md

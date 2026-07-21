@@ -12,6 +12,10 @@ export function randomSecret(byteLength = 48) {
   return randomBytes(byteLength).toString("base64url");
 }
 
+export function randomSkSecret(byteLength = 48) {
+  return `sk-${randomSecret(byteLength)}`;
+}
+
 export function signSupabaseJwt({ secret, role, now = Math.floor(Date.now() / 1000) }) {
   if (!secret || typeof secret !== "string") {
     throw new Error("A JWT secret is required.");
@@ -42,6 +46,8 @@ export function createDockerSecrets({ now } = {}) {
   const jwtSecret = randomSecret(48);
   const anonKey = signSupabaseJwt({ secret: jwtSecret, role: "anon", now });
   const serviceRoleKey = signSupabaseJwt({ secret: jwtSecret, role: "service_role", now });
+  const liteLlmKey = randomSkSecret(48);
+  const liteLlmRoutingSecret = randomSecret(48);
 
   return {
     POSTGRES_PASSWORD: postgresPassword,
@@ -49,5 +55,8 @@ export function createDockerSecrets({ now } = {}) {
     SUPABASE_ANON_KEY: anonKey,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonKey,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    LITELLM_MASTER_KEY: liteLlmKey,
+    KAVERO_LITELLM_API_KEY: liteLlmKey,
+    KAVERO_LITELLM_ROUTING_SECRET: liteLlmRoutingSecret,
   };
 }

@@ -1116,22 +1116,77 @@ declare
   next_secret_id uuid;
   next_provider_label text;
   next_secret_name text;
+  next_secret_description text;
+  credentials_json jsonb;
   saved_key public.user_provider_keys;
 begin
   if p_user_id is null then
     raise exception 'User is required';
   end if;
 
-  if p_provider_id <> 'google-gemini' then
+  if p_provider_id is null or p_provider_id not in (
+    'google-gemini',
+    'openai',
+    'groq',
+    'azure-openai',
+    'azure-openai-image',
+    'openai-compatible'
+  ) then
     raise exception 'Provider is not available yet';
   end if;
 
-  if p_secret is null or char_length(trim(p_secret)) < 20 then
+  if p_secret is null or char_length(trim(p_secret)) = 0 then
+    raise exception 'Provider credentials are required';
+  end if;
+
+  if p_provider_id in ('google-gemini', 'openai', 'groq')
+    and char_length(trim(p_secret)) < 20 then
     raise exception 'API key is too short';
   end if;
 
-  next_provider_label := 'Google Gemini';
+  if p_provider_id in ('azure-openai', 'azure-openai-image', 'openai-compatible') then
+    begin
+      credentials_json := p_secret::jsonb;
+    exception when others then
+      raise exception 'Provider credentials must be valid JSON';
+    end;
+
+    if jsonb_typeof(credentials_json) <> 'object'
+      or nullif(trim(credentials_json ->> 'apiBase'), '') is null then
+      raise exception 'Provider API base is required';
+    end if;
+
+    if p_provider_id in ('azure-openai', 'azure-openai-image') and (
+      nullif(trim(credentials_json ->> 'apiKey'), '') is null
+      or char_length(trim(credentials_json ->> 'apiKey')) < 20
+      or nullif(trim(credentials_json ->> 'apiVersion'), '') is null
+    ) then
+      raise exception 'Azure OpenAI credentials are incomplete';
+    end if;
+
+    if p_provider_id = 'openai-compatible'
+      and credentials_json ? 'apiKey'
+      and (
+        nullif(trim(credentials_json ->> 'apiKey'), '') is null
+        or char_length(trim(credentials_json ->> 'apiKey')) < 20
+      ) then
+      raise exception 'OpenAI-compatible API key is too short';
+    end if;
+  end if;
+
+  next_provider_label := case p_provider_id
+    when 'google-gemini' then 'Google Gemini'
+    when 'openai' then 'OpenAI'
+    when 'groq' then 'Groq'
+    when 'azure-openai' then 'Azure OpenAI'
+    when 'azure-openai-image' then 'Azure OpenAI (Image)'
+    when 'openai-compatible' then 'OpenAI-compatible'
+  end;
   next_secret_name := 'user:' || p_user_id::text || ':provider:' || p_provider_id;
+  next_secret_description := next_provider_label || case
+    when p_provider_id in ('azure-openai', 'azure-openai-image', 'openai-compatible') then ' credentials'
+    else ' API key'
+  end;
 
   select *
   into existing_key
@@ -1143,7 +1198,7 @@ begin
     select vault.create_secret(
       p_secret,
       next_secret_name,
-      next_provider_label || ' API key'
+      next_secret_description
     )
     into next_secret_id;
   else
@@ -1153,7 +1208,7 @@ begin
       next_secret_id,
       p_secret,
       next_secret_name,
-      next_provider_label || ' API key'
+      next_secret_description
     );
   end if;
 

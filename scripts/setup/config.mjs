@@ -98,6 +98,22 @@ export const sensitiveEnvKeys = new Set([
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
   "GOOGLE_DRIVE_CLIENT_SECRET",
+  "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
+  "LITELLM_MASTER_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "GROQ_API_KEY",
+  "AZURE_API_KEY",
+  "AZURE_API_BASE",
+  "AZURE_API_VERSION",
+  "AZURE_DEPLOYMENT_NAME",
+  "AZURE_BASE_MODEL",
+  "AZURE_IMAGE_API_KEY",
+  "AZURE_IMAGE_API_BASE",
+  "AZURE_IMAGE_API_VERSION",
+  "AZURE_IMAGE_DEPLOYMENT_NAME",
+  "AZURE_IMAGE_BASE_MODEL",
 ]);
 
 export const dockerGeneratedSecretKeys = [
@@ -106,6 +122,9 @@ export const dockerGeneratedSecretKeys = [
   "SUPABASE_ANON_KEY",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "LITELLM_MASTER_KEY",
+  "KAVERO_LITELLM_API_KEY",
+  "KAVERO_LITELLM_ROUTING_SECRET",
 ];
 
 export function getSetupProfile(profileId) {
@@ -134,6 +153,7 @@ export function isPlaceholderValue(value) {
   return (
     trimmed === "" ||
     trimmed.startsWith("replace-with-") ||
+    trimmed.includes("replace-with-") ||
     (trimmed.startsWith("<") && trimmed.endsWith(">"))
   );
 }
@@ -159,6 +179,11 @@ export function requiredEnvKeysForProfile(profileId) {
       "KAVERO_STORAGE_PROVIDER",
       "KAVERO_MANAGED_STORAGE_BACKEND",
       "KAVERO_LOCAL_STORAGE_ROOT",
+      "KAVERO_MODEL_GATEWAY",
+      "KAVERO_LITELLM_BASE_URL",
+      "KAVERO_LITELLM_API_KEY",
+      "KAVERO_LITELLM_ROUTING_SECRET",
+      "LITELLM_MASTER_KEY",
     ];
   }
 

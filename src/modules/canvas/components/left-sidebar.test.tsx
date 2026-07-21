@@ -9,6 +9,9 @@ import type { SceneRelationMap } from "@/modules/canvas/state/relation-map";
 const canvasAssetMocks = vi.hoisted(() => ({
   uploadCanvasAsset: vi.fn(),
 }));
+const modelProviderMocks = vi.hoisted(() => ({
+  useModelProviderSettings: vi.fn(),
+}));
 
 vi.mock("@/modules/canvas/state/context", () => ({
   useEditor: vi.fn(),
@@ -16,6 +19,10 @@ vi.mock("@/modules/canvas/state/context", () => ({
 
 vi.mock("@/modules/assets/canvas-assets", () => ({
   uploadCanvasAsset: canvasAssetMocks.uploadCanvasAsset,
+}));
+
+vi.mock("@/modules/model-providers/browser-settings", () => ({
+  useModelProviderSettings: modelProviderMocks.useModelProviderSettings,
 }));
 
 const relationMap: SceneRelationMap = {
@@ -208,6 +215,14 @@ function assistantResponse(toolCalls: unknown[] = [], message = "Assistant respo
 describe("LeftSidebar relations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    modelProviderMocks.useModelProviderSettings.mockReturnValue({
+      settings: null,
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      saveSelection: vi.fn(),
+      activeModels: () => [],
+    });
     canvasAssetMocks.uploadCanvasAsset.mockResolvedValue({
       id: "uploaded-segment",
       original_name: "segment.png",
@@ -218,6 +233,56 @@ describe("LeftSidebar relations", () => {
       created_at: "2026-05-21T00:00:00.000Z",
     });
     mockAssistantFetch(assistantResponse());
+  });
+
+  it("groups chat and image selections under Model and hides unsupported GPT-5.6 controls", async () => {
+    const user = userEvent.setup();
+    mockEditor();
+    const chatModel = {
+      modelAlias: "kavero-chat-azure-openai",
+      displayLabel: "Azure OpenAI deployment",
+      capabilities: {
+        slots: ["chatOrchestration"],
+        chatControls: {
+          temperature: { supported: false, minimum: 0, maximum: 1, step: 0.1, default: 0.2 },
+          extendedThinking: { supported: false, default: true },
+          toolReasoningEffort: null,
+        },
+      },
+    };
+    const imageModel = {
+      modelAlias: "kavero-image-azure-gpt-image-2",
+      displayLabel: "Azure GPT Image 2",
+      capabilities: { slots: ["imageGeneration"] },
+    };
+    modelProviderMocks.useModelProviderSettings.mockReturnValue({
+      settings: {
+        selected: {
+          chatOrchestrationModelAlias: chatModel.modelAlias,
+          imageGenerationModelAlias: imageModel.modelAlias,
+        },
+        catalog: [chatModel, imageModel],
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      saveSelection: vi.fn(),
+      activeModels: (slot: string) => slot === "chatOrchestration" ? [chatModel] : [imageModel],
+    });
+
+    render(<LeftSidebar />);
+    await user.click(screen.getByRole("button", { name: /Copilot/i }));
+    await user.click(screen.getByTitle("Copilot settings"));
+    await user.click(screen.getByRole("button", { name: "Model" }));
+
+    expect(screen.getByText("Copilot model")).toBeInTheDocument();
+    expect(screen.getByText("Image model")).toBeInTheDocument();
+    expect(screen.queryByText("Temperature")).not.toBeInTheDocument();
+    expect(screen.queryByText("Extended thinking")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Tools" }));
+    expect(screen.getByText("Image generation")).toBeInTheDocument();
+    expect(screen.queryByText("Image model")).not.toBeInTheDocument();
   });
 
   afterEach(() => {

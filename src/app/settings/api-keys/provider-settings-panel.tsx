@@ -1,132 +1,104 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
-  ChevronDown,
-  Eye,
-  EyeOff,
   KeyRound,
   LockKeyhole,
-  Plus,
-  Search,
+  RefreshCw,
+  Save,
   Server,
   ShieldCheck,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useModelProviderSettings, type BrowserAvailableModelCatalogEntry } from "@/modules/model-providers/browser-settings";
+import {
+  ProviderKeyManager,
+  type BrowserProviderKeyCatalogEntry,
+  type ProviderKeyMetadata,
+} from "./provider-key-manager";
 
-type Provider = {
-  id: string;
-  name: string;
-  label: string;
-  status: "available" | "coming-soon";
-  logo: string;
+type CapabilitySlot = "chatOrchestration" | "imageGeneration";
+
+type BrowserModelCatalogEntry = BrowserAvailableModelCatalogEntry;
+
+type GatewayStatus = {
+  status: "disabled" | "configured" | "error";
+  gateway: "litellm" | null;
+  configured: boolean;
+  issues: Array<{ code: string; message: string }>;
 };
 
-const providers: Provider[] = [
-  {
-    id: "google-gemini",
-    name: "Google Gemini",
-    label: "Available",
-    status: "available",
-    logo: "/llm-providers/google-gemini-icon.png",
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    label: "Coming later",
-    status: "coming-soon",
-    logo: "/llm-providers/openai.png",
-  },
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    label: "Coming later",
-    status: "coming-soon",
-    logo: "/llm-providers/claude-ai-icon.png",
-  },
-  {
-    id: "xai",
-    name: "xAI Grok",
-    label: "Coming later",
-    status: "coming-soon",
-    logo: "/llm-providers/grok-icon.png",
-  },
-  {
-    id: "huggingface",
-    name: "Hugging Face",
-    label: "Coming later",
-    status: "coming-soon",
-    logo: "/llm-providers/huggingface-icon.png",
-  },
-];
+type ConnectivityResult = GatewayStatus & {
+  checkedAt: string;
+  checkedBy: "configuration" | "model-info" | "model-list";
+};
 
-const availableProvider = providers[0];
-const minimumGeminiKeyLength = 30;
+type StatusTone = "idle" | "checking" | "passed" | "failed";
 
 export function ProviderSettingsPanel() {
-  const [search, setSearch] = useState("");
-  const [selectedProvider, setSelectedProvider] = useState(availableProvider);
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [checkStatus, setCheckStatus] = useState<"idle" | "checking" | "passed" | "failed">(
-    "idle",
-  );
-  const [checkMessage, setCheckMessage] = useState("Paste a complete Gemini API key to test it.");
-  const [savedKeyHint, setSavedKeyHint] = useState<string | null>(null);
-  const [isProviderLoading, setIsProviderLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-  const lastCheckedKeyRef = useRef<string | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const modelSettings = useModelProviderSettings();
+  const settings = modelSettings.settings;
+  const [providerCatalog, setProviderCatalog] = useState<BrowserProviderKeyCatalogEntry[]>([]);
+  const [savedProviderKeys, setSavedProviderKeys] = useState<ProviderKeyMetadata[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [chatAlias, setChatAlias] = useState("");
+  const [imageAlias, setImageAlias] = useState("");
+  const [modelSaveStatus, setModelSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [connectivity, setConnectivity] = useState<ConnectivityResult | null>(null);
+  const [connectivityStatus, setConnectivityStatus] = useState<"idle" | "checking" | "checked" | "failed">("idle");
 
-  const filteredProviders = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return query
-      ? providers.filter((provider) => provider.name.toLowerCase().includes(query))
-      : providers;
-  }, [search]);
+  const chatModels = useMemo(
+    () => settings?.catalog.filter((entry) => entry.capabilities.slots.includes("chatOrchestration")) ?? [],
+    [settings],
+  );
+  const imageModels = useMemo(
+    () => settings?.catalog.filter((entry) => entry.capabilities.slots.includes("imageGeneration")) ?? [],
+    [settings],
+  );
+  const providerStates = useMemo(() => Object.fromEntries(providerCatalog.map((provider) => {
+    const saved = savedProviderKeys.find((key) => key.provider_id === provider.id);
+    const providerModels = settings?.catalog.filter((model) => model.providerKeyId === provider.id) ?? [];
+    const managed = providerModels.some((model) => model.availability.source === "admin-environment");
+    const label = saved?.status === "disabled"
+      ? "Disabled"
+      : saved?.status === "active"
+        ? provider.checkMode === "validation-only" ? "Configured" : "Active"
+        : managed ? "Managed by admin" : "Setup required";
+    return [provider.id, label];
+  })), [providerCatalog, savedProviderKeys, settings]);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function loadSavedProvider() {
+    async function loadSettings() {
       try {
-        const response = await fetch("/api/provider-keys");
-        if (!response.ok) return;
+        const providerKeyResponse = await fetch("/api/provider-keys");
 
-        const payload = (await response.json()) as {
-          providerKeys?: Array<{
-            provider_id: string;
-            key_hint: string | null;
-            status: "active" | "disabled";
-            updated_at: string;
-          }>;
-        };
-        const geminiKey = payload.providerKeys?.find(
-          (providerKey) => providerKey.provider_id === "google-gemini",
-        );
-
-        if (isMounted && geminiKey?.status === "active") {
-          const keyHint = geminiKey.key_hint ?? "saved";
-          setSavedKeyHint(keyHint);
-          setCheckStatus("passed");
-          setCheckMessage(`Gemini is connected with key ${keyHint}.`);
+        if (providerKeyResponse.ok) {
+          const payload = (await providerKeyResponse.json()) as {
+            providerKeys?: ProviderKeyMetadata[];
+            providers?: BrowserProviderKeyCatalogEntry[];
+          };
+          if (isMounted) {
+            setSavedProviderKeys(payload.providerKeys ?? []);
+            setProviderCatalog(payload.providers ?? []);
+          }
+        } else if (isMounted) {
+          setLoadFailed(true);
         }
+
       } catch {
-        if (isMounted) {
-          setSaveStatus("failed");
-        }
+        if (isMounted) setLoadFailed(true);
       } finally {
-        if (isMounted) {
-          setIsProviderLoading(false);
-        }
+        if (isMounted) setIsLoading(false);
       }
     }
 
-    void loadSavedProvider();
+    void loadSettings();
 
     return () => {
       isMounted = false;
@@ -134,410 +106,360 @@ export function ProviderSettingsPanel() {
   }, []);
 
   useEffect(() => {
-    if (isProviderLoading) return;
+    if (!settings) return;
+    setChatAlias(settings.selected.chatOrchestrationModelAlias);
+    setImageAlias(settings.selected.imageGenerationModelAlias);
+  }, [settings]);
 
-    const key = apiKey.trim();
+  async function saveModelSettings() {
+    if (!chatAlias || !imageAlias) return;
 
-    abortControllerRef.current?.abort();
+    setModelSaveStatus("saving");
 
-    if (!key) {
-      setCheckStatus(savedKeyHint ? "passed" : "idle");
-      setCheckMessage(
-        savedKeyHint
-          ? `Saved key ${savedKeyHint} is connected. Paste a new key to replace it.`
-          : "Paste a complete Gemini API key to test it.",
-      );
-      return;
-    }
-
-    if (key.length < minimumGeminiKeyLength) {
-      setCheckStatus("idle");
-      setCheckMessage("Waiting for the full key.");
-      return;
-    }
-
-    if (lastCheckedKeyRef.current === key) {
-      return;
-    }
-
-    const timeout = window.setTimeout(async () => {
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      setCheckStatus("checking");
-      setCheckMessage("Checking key...");
-
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
-          { signal: controller.signal },
-        );
-
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        lastCheckedKeyRef.current = key;
-
-        if (response.ok) {
-          setCheckStatus("passed");
-          setCheckMessage("Check passed. This key is ready to save.");
-          return;
-        }
-
-        setCheckStatus("failed");
-        setCheckMessage("Check failed. Confirm the key is active and try again.");
-      } catch {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        setCheckStatus("failed");
-        setCheckMessage("Check failed. Confirm the key is active and try again.");
-      }
-    }, 900);
-
-    return () => {
-      window.clearTimeout(timeout);
-      abortControllerRef.current?.abort();
-    };
-  }, [apiKey, isProviderLoading, savedKeyHint]);
-
-  async function saveProvider() {
-    if (checkStatus !== "passed" || !apiKey.trim()) return;
-
-    setSaveStatus("saving");
-
-    const response = await fetch("/api/provider-keys", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        providerId: "google-gemini",
-        apiKey,
-      }),
+    const result = await modelSettings.saveSelection({
+      chatOrchestrationModelAlias: chatAlias,
+      imageGenerationModelAlias: imageAlias,
     });
+    if (!result.ok) {
+      setModelSaveStatus("failed");
+      return;
+    }
+    setChatAlias(result.settings.selected.chatOrchestrationModelAlias);
+    setImageAlias(result.settings.selected.imageGenerationModelAlias);
+    setModelSaveStatus("saved");
+  }
 
-    if (!response.ok) {
-      setSaveStatus("failed");
+  async function checkGatewayConnectivity() {
+    setConnectivityStatus("checking");
+
+    const response = await fetch("/api/model-providers/connectivity", { method: "POST" });
+    const payload = (await response.json().catch(() => null)) as ConnectivityResult | null;
+
+    if (!payload) {
+      setConnectivityStatus("failed");
       return;
     }
 
-    const payload = (await response.json()) as {
-      providerKey?: { keyHint?: string };
-    };
-
-    setSavedKeyHint(payload.providerKey?.keyHint ?? null);
-    setApiKey("");
-    setSaveStatus("saved");
-    setCheckStatus("passed");
-    setCheckMessage(
-      payload.providerKey?.keyHint
-        ? `Saved key ${payload.providerKey.keyHint} is connected.`
-        : "Provider saved.",
-    );
+    setConnectivity(payload);
+    setConnectivityStatus(response.ok && payload.status !== "error" ? "checked" : "failed");
   }
+
+  const gateway = connectivity ?? settings?.gateway ?? null;
+  const hasModelChanges =
+    settings &&
+    (chatAlias !== settings.selected.chatOrchestrationModelAlias ||
+      imageAlias !== settings.selected.imageGenerationModelAlias);
 
   return (
     <section
-      className="relative grid min-h-[620px] overflow-hidden rounded-2xl border border-white/[0.1] bg-white/[0.045] shadow-[0_24px_90px_rgb(0_0_0_/_0.36),inset_0_1px_0_rgb(255_255_255_/_0.055)] backdrop-blur-xl lg:grid-cols-[300px_minmax(0,1fr)]"
-      aria-busy={isProviderLoading}
+      className="grid gap-4 rounded-lg border border-white/[0.1] bg-white/[0.045] p-4 shadow-[0_18px_70px_rgb(0_0_0_/_0.28)] sm:p-5"
+      aria-busy={isLoading || modelSettings.loading}
     >
-      <aside className="border-b border-white/[0.08] bg-black/22 lg:border-b-0 lg:border-r">
-        <div className="flex h-14 items-center gap-3 border-b border-white/[0.08] px-4">
-          <Search size={16} className="text-white/36" />
-          <input
-            className="min-w-0 flex-1 bg-transparent text-[13px] font-medium text-white outline-none placeholder:text-white/34"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search providers..."
-            disabled={isProviderLoading}
+      <div className="flex flex-col gap-3 border-b border-white/[0.08] pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <img src="/llm-providers/google.svg" alt="Google" className="h-6 w-auto" />
+          <span className="h-5 w-px bg-white/[0.14]" aria-hidden="true" />
+          <img
+            src="/llm-providers/google-gemini-icon.png"
+            alt=""
+            className="h-7 w-7 rounded-md bg-white object-contain p-1"
+            aria-hidden="true"
           />
-          <button
-            className="grid h-8 w-8 place-items-center rounded-lg text-white/42 transition hover:bg-white/[0.07] hover:text-white"
-            type="button"
-            aria-label="Provider options"
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-
-        <div className="p-3">
-          <div className="mb-3 flex h-10 items-center gap-3 px-2 text-[13px] font-medium text-white/72">
-            <Server size={16} className="text-white/42" />
-            All providers
-          </div>
-
-          <div className="mb-2 flex items-center gap-1 px-2 text-[11px] font-medium uppercase tracking-[0.08em] text-white/34">
-            Available
-            <ChevronDown size={12} />
-          </div>
-
-          <div className="grid gap-1">
-            {filteredProviders.map((provider) => (
-              <ProviderRow
-                key={provider.id}
-                provider={provider}
-                selected={selectedProvider.id === provider.id}
-                savedKeyHint={provider.id === "google-gemini" ? savedKeyHint : null}
-                onSelect={() => {
-                  if (isProviderLoading) return;
-                  if (provider.status === "available") {
-                    setSelectedProvider(provider);
-                  }
-                }}
-              />
-            ))}
+          <div className="min-w-0">
+            <h2 className="m-0 truncate text-[18px] font-semibold text-white">Providers and models</h2>
+            <p className="m-0 mt-0.5 text-[12px] font-medium text-white/42">
+              Saved settings. Runtime stable.
+            </p>
           </div>
         </div>
-      </aside>
-
-      <div className="min-w-0 p-5 sm:p-7 lg:p-8">
-        <div className="mb-9 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-3">
-            <img src="/llm-providers/google.svg" alt="Google" className="h-7 w-auto" />
-            <span className="h-5 w-px bg-white/[0.14]" aria-hidden="true" />
-            <img
-              src="/llm-providers/google-gemini-icon.png"
-              alt=""
-              className="h-8 w-8 rounded-lg bg-white object-contain p-1"
-              aria-hidden="true"
-            />
-            <span className="text-[26px] font-medium leading-none text-white">Gemini</span>
-            {savedKeyHint ? (
-              <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-accent/35 bg-accent/12 px-3 text-[12px] font-medium text-blue-100">
-                <ShieldCheck size={14} className="text-accent" />
-                Connected
-              </span>
-            ) : null}
-            <span className="grid h-6 w-6 place-items-center rounded-full bg-white/[0.08] text-[12px] font-semibold text-white/44">
-              ?
-            </span>
-          </div>
-
-          <ProviderToggle checked />
-        </div>
-
-        <div className="grid gap-7">
-          <ProviderField
-            icon={KeyRound}
-            label="API Key"
-            description="Enter your Google Gemini API key."
-          >
-            <div className="relative">
-              <input
-                className="h-12 w-full rounded-xl border border-white/[0.08] bg-white/[0.065] px-4 pr-12 text-[14px] font-medium text-white outline-none transition placeholder:text-white/28 focus:border-accent/70"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                type={showKey ? "text" : "password"}
-                disabled={isProviderLoading}
-                placeholder={
-                  savedKeyHint ? `Saved ${savedKeyHint}. Paste a new key to replace it.` : "Paste your Gemini API key"
-                }
-              />
-              <button
-                className="absolute right-3 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-white/34 transition hover:bg-white/[0.08] hover:text-white"
-                type="button"
-                onClick={() => setShowKey((value) => !value)}
-                aria-label={showKey ? "Hide API key" : "Show API key"}
-                disabled={isProviderLoading}
-              >
-                {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </ProviderField>
-
-          <ProviderField
-            icon={CheckCircle2}
-            label="Connectivity Check"
-            description="Runs automatically after a complete key is entered."
-          >
-            <ConnectivityStatus status={checkStatus} message={checkMessage} />
-          </ProviderField>
-        </div>
-
-        <div className="mt-9 flex flex-col gap-3 border-t border-white/[0.08] pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="m-0 inline-flex items-center gap-2 text-[12px] font-medium text-white/42">
-            <LockKeyhole size={14} />
-            {saveStatus === "failed"
-              ? "Could not save. Try again."
-              : savedKeyHint
-                ? `Gemini key saved ${savedKeyHint}`
-                : "Keys are hidden after saving."}
-          </p>
-          <Button
-            className="h-11 rounded-xl bg-accent px-5 text-white hover:bg-accent-hover"
-            disabled={isProviderLoading || checkStatus !== "passed" || !apiKey.trim() || saveStatus === "saving"}
-            onClick={() => void saveProvider()}
-          >
-            {saveStatus === "saving" ? "Saving..." : savedKeyHint ? "Update provider" : "Save provider"}
-          </Button>
-        </div>
+        <GatewayBadge gateway={gateway} loading={isLoading || modelSettings.loading} />
       </div>
-      {isProviderLoading ? <ProviderLoadingOverlay /> : null}
+
+      {loadFailed ? (
+        <StatusLine status="failed" message="Settings could not be loaded. Refresh and try again." />
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="grid gap-4">
+          <ProviderKeyManager
+            providers={providerCatalog}
+            savedKeys={savedProviderKeys}
+            loading={isLoading}
+            providerStates={providerStates}
+            onSaved={(providerKey) => {
+              setSavedProviderKeys((current) => [
+                providerKey,
+                ...current.filter((key) => key.provider_id !== providerKey.provider_id),
+              ]);
+              void modelSettings.refresh();
+            }}
+          />
+
+          <PanelBlock icon={Server} title="Gateway status">
+            <div className="grid gap-3">
+              <StatusLine
+                status={gateway?.status === "configured" ? "passed" : gateway?.status === "error" ? "failed" : "idle"}
+                message={gatewayMessage(gateway)}
+              />
+              <Button
+                className="h-10 rounded-lg border border-white/[0.12] bg-white/[0.06] px-4 text-white hover:bg-white/[0.1]"
+                disabled={isLoading || connectivityStatus === "checking"}
+                onClick={() => void checkGatewayConnectivity()}
+              >
+                <RefreshCw size={15} className={cn(connectivityStatus === "checking" && "animate-spin")} />
+                {connectivityStatus === "checking" ? "Checking" : "Check connectivity"}
+              </Button>
+            </div>
+          </PanelBlock>
+        </div>
+
+        <PanelBlock icon={ShieldCheck} title="Default models">
+          <div className="grid gap-4">
+            <ModelSelector
+              label="Orchestration/chat model"
+              value={chatAlias}
+              models={chatModels}
+              disabled={isLoading || modelSettings.loading || !settings}
+              onChange={(value) => {
+                setChatAlias(value);
+                setModelSaveStatus("idle");
+              }}
+            />
+            <ModelCredentialAdvisory
+              model={chatModels.find((model) => model.modelAlias === chatAlias)}
+              credentialMode={settings?.credentialMode ?? "env-or-user"}
+              savedProviderKeys={savedProviderKeys}
+            />
+            <ModelSelector
+              label="Image-generation model"
+              value={imageAlias}
+              models={imageModels}
+              disabled={isLoading || modelSettings.loading || !settings}
+              onChange={(value) => {
+                setImageAlias(value);
+                setModelSaveStatus("idle");
+              }}
+            />
+            <ModelCredentialAdvisory
+              model={imageModels.find((model) => model.modelAlias === imageAlias)}
+              credentialMode={settings?.credentialMode ?? "env-or-user"}
+              savedProviderKeys={savedProviderKeys}
+            />
+
+            <div className="grid gap-2">
+              <div className="flex flex-col gap-2 border-t border-white/[0.08] pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <StatusText status={modelSaveStatus} hasChanges={Boolean(hasModelChanges)} />
+                <Button
+                  className="h-10 rounded-lg bg-accent px-4 text-white hover:bg-accent-hover"
+                  disabled={isLoading || !settings || !hasModelChanges || modelSaveStatus === "saving"}
+                  onClick={() => void saveModelSettings()}
+                >
+                  <Save size={15} />
+                  {modelSaveStatus === "saving" ? "Saving" : "Save models"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </PanelBlock>
+      </div>
     </section>
   );
 }
 
-function ProviderLoadingOverlay() {
+function PanelBlock({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: typeof KeyRound;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="absolute inset-0 z-20 grid place-items-center bg-black/38 px-6 backdrop-blur-md">
-      <div className="w-full max-w-[520px] rounded-2xl border border-white/[0.11] bg-black/58 p-5 shadow-[0_24px_90px_rgb(0_0_0_/_0.42)]">
-        <div className="mb-5 flex items-center gap-3">
-          <span className="relative grid h-11 w-11 place-items-center rounded-2xl border border-accent/25 bg-accent/10">
-            <span className="absolute inset-1 rounded-xl border border-accent/20" />
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent/25 border-t-accent" />
-          </span>
-          <span>
-            <span className="block text-[13px] font-semibold text-white">Loading providers</span>
-            <span className="mt-1 block text-[11px] font-medium text-white/42">
-              Checking saved keys before enabling controls.
+    <section className="rounded-lg border border-white/[0.08] bg-black/16 p-4">
+      <div className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-white">
+        <span className="grid h-8 w-8 place-items-center rounded-lg bg-white/[0.07] text-white/58">
+          <Icon size={16} />
+        </span>
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ModelSelector({
+  label,
+  value,
+  models,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  models: BrowserModelCatalogEntry[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const selected = models.find((model) => model.modelAlias === value);
+
+  return (
+    <label className="grid gap-2">
+      <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-white/38">{label}</span>
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_190px] sm:items-center">
+        <div className="flex min-h-11 items-center gap-3 rounded-lg border border-white/[0.08] bg-black/20 px-3">
+          {selected ? (
+            <img src={selected.providerLogoPath} alt="" className="h-6 w-6 rounded-md bg-white object-contain p-1" />
+          ) : null}
+          <span className="min-w-0">
+            <span className="block truncate text-[14px] font-medium text-white">
+              {selected?.displayLabel ?? "Select a model"}
+            </span>
+            <span className="block truncate text-[11px] font-medium text-white/36">
+              {selected?.providerLabel ?? "No model selected"}
             </span>
           </span>
         </div>
-        <div className="grid gap-3">
-          {[0, 1, 2].map((item) => (
-            <span
-              key={item}
-              className="h-12 overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.045] before:block before:h-full before:w-1/2 before:animate-[provider-shimmer_1.35s_ease-in-out_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/[0.12] before:to-transparent"
-            />
+        <select
+          className="h-11 rounded-lg border border-white/[0.08] bg-black/40 px-3 text-[13px] font-medium text-white outline-none transition focus:border-accent/70"
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          {models.map((model) => (
+            <option key={model.modelAlias} value={model.modelAlias} disabled={!model.availability.active}>
+              {model.providerLabel} - {model.displayLabel}{model.availability.active ? "" : " (Setup required)"}
+            </option>
           ))}
-        </div>
+        </select>
       </div>
+      {selected && !selected.availability.active ? (
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-100/70">
+          <LockKeyhole size={12} /> {selected.availability.message ?? "Set up this provider before selecting the model."}
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
+function ModelCredentialAdvisory({
+  model,
+  credentialMode,
+  savedProviderKeys,
+}: {
+  model?: BrowserModelCatalogEntry;
+  credentialMode: "env-or-user" | "user-required" | "env-only";
+  savedProviderKeys: ProviderKeyMetadata[];
+}) {
+  if (!model) return null;
+
+  const savedKey = model.providerKeyId
+    ? savedProviderKeys.find(
+        (key) => key.provider_id === model.providerKeyId && key.status === "active",
+      )
+    : null;
+  const keyState = model.providerKeyId
+    ? savedKey ? `Saved ${savedKey.key_hint ?? "Configured"}` : "No saved provider key"
+    : "Settings BYOK is not supported for this provider";
+  const message =
+    credentialMode === "env-only"
+      ? "Settings keys remain saved, but gateway runtime uses administrator/environment credentials."
+      : credentialMode === "user-required"
+        ? model.providerKeyId
+          ? savedKey
+            ? "The saved provider key will be used for required-key mode."
+            : `This selected model requires a saved ${model.providerLabel} key before it can run.`
+          : "This provider cannot satisfy required-key mode through Settings."
+        : model.providerKeyId
+          ? "A saved user key is used when available; otherwise gateway environment credentials are used."
+          : "This model uses gateway environment configuration because it has no Settings provider-key mapping.";
+
+  return (
+    <div className="-mt-2 rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[11px] font-medium text-white/44">
+      <span className={model.availability.active ? "text-emerald-200/72" : "text-amber-100/70"}>
+        {model.availability.active ? "Ready to use." : "Unavailable."}
+      </span>{" "}
+      <span className="text-white/68">{model.providerLabel}: {keyState}.</span>{" "}{message}
     </div>
   );
 }
 
-function ConnectivityStatus({
-  status,
-  message,
-}: {
-  status: "idle" | "checking" | "passed" | "failed";
-  message: string;
-}) {
+function GatewayBadge({ gateway, loading }: { gateway: GatewayStatus | null; loading: boolean }) {
+  const label = loading
+    ? "Loading"
+    : gateway?.status === "configured"
+      ? "Gateway configured"
+      : gateway?.status === "error"
+        ? "Gateway needs setup"
+        : "Gateway disabled";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex h-8 w-fit items-center gap-2 rounded-lg border px-3 text-[12px] font-semibold",
+        gateway?.status === "configured"
+          ? "border-accent/45 bg-accent/12 text-blue-100"
+          : gateway?.status === "error"
+            ? "border-red-400/30 bg-red-500/10 text-red-100"
+            : "border-white/[0.1] bg-white/[0.045] text-white/50",
+      )}
+    >
+      {gateway?.status === "configured" ? <CheckCircle2 size={14} /> : <Server size={14} />}
+      {label}
+    </span>
+  );
+}
+
+function StatusLine({ status, message }: { status: StatusTone; message: string }) {
   const statusClassName =
     status === "passed"
-      ? "border-accent/60 bg-accent/12 text-blue-100"
+      ? "border-accent/45 bg-accent/12 text-blue-100"
       : status === "failed"
         ? "border-red-400/30 bg-red-500/10 text-red-100"
         : status === "checking"
           ? "border-white/[0.14] bg-white/[0.07] text-white/72"
-          : "border-white/[0.1] bg-white/[0.045] text-white/44";
+          : "border-white/[0.08] bg-white/[0.035] text-white/44";
 
   return (
-    <div
-      className={cn(
-        "flex min-h-12 items-center gap-3 rounded-xl border px-4 text-[13px] font-medium",
-        statusClassName,
-      )}
-    >
+    <div className={cn("flex min-h-10 items-center gap-3 rounded-lg border px-3 text-[13px] font-medium", statusClassName)}>
       {status === "passed" ? (
-        <CheckCircle2 size={16} className="shrink-0 text-accent" />
+        <CheckCircle2 size={15} className="shrink-0 text-accent" />
       ) : status === "failed" ? (
-        <XCircle size={16} className="shrink-0 text-red-200" />
+        <XCircle size={15} className="shrink-0 text-red-200" />
       ) : status === "checking" ? (
         <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-white/24 border-t-white/80" />
       ) : (
-        <LockKeyhole size={16} className="shrink-0 text-white/34" />
+        <LockKeyhole size={15} className="shrink-0 text-white/34" />
       )}
       <span>{message}</span>
     </div>
   );
 }
 
-function ProviderRow({
-  provider,
-  selected,
-  savedKeyHint,
-  onSelect,
+function StatusText({
+  status,
+  hasChanges,
 }: {
-  provider: Provider;
-  selected: boolean;
-  savedKeyHint?: string | null;
-  onSelect: () => void;
+  status: "idle" | "saving" | "saved" | "failed";
+  hasChanges: boolean;
 }) {
-  const isAvailable = provider.status === "available";
+  const text =
+    status === "saving"
+      ? "Saving model settings."
+      : status === "saved"
+        ? "Model settings saved."
+        : status === "failed"
+          ? "Could not save model settings."
+          : hasChanges
+            ? "Unsaved model changes."
+            : "Model settings saved.";
 
-  return (
-    <button
-      className={cn(
-        "flex h-12 w-full items-center gap-3 rounded-xl px-3 text-left transition",
-        selected ? "bg-white/[0.1] text-white" : "text-white/58 hover:bg-white/[0.06] hover:text-white",
-        !isAvailable && "cursor-not-allowed opacity-55 hover:bg-transparent hover:text-white/58",
-      )}
-      type="button"
-      onClick={onSelect}
-      disabled={!isAvailable}
-    >
-      <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-lg bg-white">
-        <Image src={provider.logo} alt="" width={22} height={22} className="h-[22px] w-[22px] object-contain" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] font-medium">{provider.name}</span>
-        <span className="block truncate text-[11px] font-medium text-white/34">
-          {savedKeyHint ? `Connected ${savedKeyHint}` : provider.label}
-        </span>
-      </span>
-      {savedKeyHint ? (
-        <CheckCircle2 size={15} className="text-accent" />
-      ) : isAvailable ? (
-        <span className="h-2 w-2 rounded-full bg-accent" />
-      ) : null}
-    </button>
-  );
+  return <p className="m-0 text-[12px] font-medium text-white/42">{text}</p>;
 }
 
-function ProviderField({
-  icon: Icon,
-  label,
-  description,
-  children,
-}: {
-  icon: typeof KeyRound;
-  label: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(220px,0.72fr)_minmax(280px,1fr)] lg:items-center">
-      <div className="flex gap-3">
-        <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white/[0.07] text-white/58">
-          <Icon size={16} />
-        </div>
-        <div>
-          <p className="m-0 text-[15px] font-semibold text-white">{label}</p>
-          <p className="m-0 mt-1 max-w-[42ch] text-[12px] font-medium leading-5 text-white/42">
-            {description}
-          </p>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ProviderToggle({
-  checked,
-  onClick,
-}: {
-  checked: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      className={cn(
-        "relative h-7 w-12 rounded-full border border-white/[0.12] transition",
-        checked ? "bg-white" : "bg-white/[0.08]",
-      )}
-      type="button"
-      onClick={onClick}
-      aria-pressed={checked}
-    >
-      <span
-        className={cn(
-          "absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full transition",
-          checked ? "right-1 bg-black" : "left-1 bg-white/72",
-        )}
-      />
-    </button>
-  );
+function gatewayMessage(gateway: GatewayStatus | null) {
+  if (!gateway) return "Loading gateway status.";
+  if (gateway.status === "configured") return "Server-side model gateway is reachable for settings.";
+  if (gateway.status === "error") return gateway.issues[0]?.message ?? "Gateway needs setup.";
+  return "Gateway is disabled. Direct Gemini runtime remains available.";
 }

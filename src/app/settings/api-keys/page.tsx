@@ -13,7 +13,7 @@ export default function ApiKeysPage() {
     <SettingsShell
       active="API Keys"
       title="API Providers"
-      description="Connect your generation provider. Google Gemini is available now, with more providers coming later."
+      description="Manage provider keys and default model selections."
     >
       <ProviderSettingsPanel />
     </SettingsShell>

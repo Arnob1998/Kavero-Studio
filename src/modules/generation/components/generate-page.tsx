@@ -41,6 +41,8 @@ import { PromptComposer } from "@/components/headless/prompt-composer";
 import { SiteNav } from "@/components/site-nav";
 import { FloatingTooltip } from "@/components/unlumen-ui/floating-tooltip";
 import { brand } from "@/lib/brand";
+import { getBrowserImageModelByAlias, getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings, type BrowserImageModel } from "@/modules/model-providers/image-browser";
+import { useModelProviderSettings } from "@/modules/model-providers/browser-settings";
 import type {
   DrivePreflightResponse,
   GateDialog,
@@ -77,6 +79,12 @@ import {
   readFileAsDataUrl,
 } from "../utils/client-helpers";
 import { ensureGenerateStorageReady } from "../utils/generate-storage-policy";
+import {
+  shouldBlockImageGenerationForMissingGeminiKey,
+  shouldOpenImageGenerationGeminiKeyGate,
+  shouldOpenPromptRefinerGeminiKeyGate,
+} from "../utils/prompt-refiner-policy";
+import { ModelQuickPicker } from "./model-quick-picker";
 
 // TEMP: Hide the prompt chatbox/hover only on the generation workspace. Set this to false to restore it there.
 const hidePromptComposerDuringGeneration = true;
@@ -205,6 +213,36 @@ function PromptThumbnail({
 const glassPanelClass =
   "border border-white/[0.085] bg-white/[0.045] shadow-[0_26px_90px_rgb(0_0_0_/_0.58),inset_0_1px_0_rgb(255_255_255_/_0.06)] backdrop-blur-xl";
 
+const standaloneImageModels = getBrowserImageModels("standalone-generate");
+const imageCountDescriptions: Record<number, string> = {
+  1: "One image",
+  2: "Two images",
+  3: "Three images",
+  4: "Four images",
+  6: "Six images",
+  8: "Eight images",
+  10: "Ten images",
+  12: "Twelve images",
+  16: "Sixteen images",
+};
+const aspectDescriptions: Record<string, string> = {
+  auto: "Match the input image, or use the model default.",
+  "1:1": "Square social and product layout.",
+  "9:16": "Vertical mobile story format.",
+  "16:9": "Wide cinematic or presentation frame.",
+  "3:4": "Portrait editorial frame.",
+  "4:3": "Classic landscape frame.",
+  "3:2": "Landscape photo frame.",
+  "2:3": "Portrait print and editorial layout.",
+  "5:4": "Compact landscape frame.",
+  "4:5": "Compact portrait frame.",
+  "21:9": "Ultra-wide cinematic composition.",
+  "4:1": "Wide banner frame.",
+  "1:4": "Tall banner frame.",
+  "8:1": "Panoramic strip frame.",
+  "1:8": "Vertical strip frame.",
+};
+
 interface SettingOption {
   label: string;
   value: string;
@@ -221,30 +259,25 @@ interface SettingDefinition {
   options: SettingOption[];
 }
 
-const settingDefinitions: SettingDefinition[] = [
+function createSettingDefinitions(activeModelId: string, models: readonly BrowserImageModel[] = standaloneImageModels): SettingDefinition[] {
+  const selectableModels = models;
+  const activeModel = selectableModels.find((model) => model.legacyModelId === activeModelId)
+    ?? standaloneImageModels.find((model) => model.legacyModelId === activeModelId)
+    ?? standaloneImageModels[0];
+  return [
   {
     key: "model",
     label: "Model",
     tooltip: "Generation model",
-    description: "Choose the Gemini image generation model for this run.",
+    description: "Choose the image generation model for this run.",
     icon: Sparkles,
-    options: [
-      {
-        label: "Nano Banana 2",
-        value: "gemini-3.1-flash-image-preview",
-        description: "Default image model for fast, high-efficiency generation and editing.",
-      },
-      {
-        label: "Nano Banana Pro",
-        value: "gemini-3-pro-image-preview",
-        description: "Higher-end image model for complex layouts and precise text rendering.",
-      },
-      {
-        label: "Nano Banana",
-        value: "gemini-2.5-flash-image",
-        description: "Fast image model with fixed output resolution.",
-      },
-    ],
+    options: selectableModels.length
+      ? selectableModels.map((model) => ({
+          label: model.displayLabel,
+          value: model.legacyModelId,
+          description: model.description,
+        }))
+      : [{ label: "No active image models", value: "", description: "Add or enable provider credentials in Settings." }],
   },
   {
     key: "count",
@@ -252,29 +285,23 @@ const settingDefinitions: SettingDefinition[] = [
     tooltip: "Images per run",
     description: `How many variations ${brand.name} should generate from one prompt.`,
     icon: Images,
-    options: [
-      { label: "1x", value: "1", description: "One image" },
-      { label: "2x", value: "2", description: "Two images" },
-      { label: "3x", value: "3", description: "Three images" },
-      { label: "4x", value: "4", description: "Four images" },
-      { label: "6x", value: "6", description: "Six images" },
-      { label: "8x", value: "8", description: "Eight images" },
-      { label: "10x", value: "10", description: "Ten images" },
-      { label: "12x", value: "12", description: "Twelve images" },
-      { label: "16x", value: "16", description: "Sixteen images" },
-    ],
+    options: activeModel.featureCountPresets["standalone-generate"].map((count) => ({
+      label: `${count}x`,
+      value: String(count),
+      description: imageCountDescriptions[count] ?? `${count} images`,
+    })),
   },
   {
     key: "thinking",
     label: "Thinking",
-    tooltip: "Gemini thinking mode",
+    tooltip: "Image reasoning mode",
     description: "Controls how much reasoning the model uses before generating.",
     icon: BrainCircuit,
-    options: [
-      { label: "Balanced", value: "balanced", description: "Good default for quality and speed." },
-      { label: "Fast", value: "fast", description: "Lower latency for quick drafts." },
-      { label: "Deep", value: "deep", description: "More planning for complex brand directions." },
-    ],
+    options: (activeModel.reasoning.values.length ? activeModel.reasoning.values : ["provider-managed"]).map((value) => ({
+      label: value.slice(0, 1).toUpperCase() + value.slice(1),
+      value,
+      description: value === "balanced" ? "Good default for quality and speed." : value === "fast" ? "Lower latency for quick drafts." : "More planning for complex brand directions.",
+    })),
   },
   {
     key: "aspect",
@@ -282,52 +309,64 @@ const settingDefinitions: SettingDefinition[] = [
     tooltip: "Canvas aspect ratio",
     description: "Choose the frame shape for generated images.",
     icon: RectangleHorizontal,
-    options: [
-      { label: "Auto", value: "auto", description: "Match the input image, or use the model default.", preview: "1 / 1" },
-      { label: "1:1", value: "1:1", description: "Square social and product layout.", preview: "1 / 1" },
-      { label: "9:16", value: "9:16", description: "Vertical mobile story format.", preview: "9 / 16" },
-      { label: "16:9", value: "16:9", description: "Wide cinematic or presentation frame.", preview: "16 / 9" },
-      { label: "3:4", value: "3:4", description: "Portrait editorial frame.", preview: "3 / 4" },
-      { label: "4:3", value: "4:3", description: "Classic landscape frame.", preview: "4 / 3" },
-      { label: "3:2", value: "3:2", description: "Landscape photo frame.", preview: "3 / 2" },
-      { label: "2:3", value: "2:3", description: "Portrait print and editorial layout.", preview: "2 / 3" },
-      { label: "5:4", value: "5:4", description: "Compact landscape frame.", preview: "5 / 4" },
-      { label: "4:5", value: "4:5", description: "Compact portrait frame.", preview: "4 / 5" },
-      { label: "21:9", value: "21:9", description: "Ultra-wide cinematic composition.", preview: "21 / 9" },
-      { label: "4:1", value: "4:1", description: "Wide banner frame.", preview: "4 / 1" },
-      { label: "1:4", value: "1:4", description: "Tall banner frame.", preview: "1 / 4" },
-      { label: "8:1", value: "8:1", description: "Panoramic strip frame.", preview: "8 / 1" },
-      { label: "1:8", value: "1:8", description: "Vertical strip frame.", preview: "1 / 8" },
-    ],
+    options: activeModel.featureAspectRatios["standalone-generate"].map((value) => ({
+      label: value === "auto" ? "Auto" : value,
+      value,
+      description: aspectDescriptions[value] ?? `Generate with a ${value} frame.`,
+      preview: value === "auto" ? "1 / 1" : value.replace(":", " / "),
+    })),
   },
   {
     key: "quality",
-    label: "Quality",
-    tooltip: "Output quality",
-    description: "Human-readable quality targets mapped later to provider-specific sizes.",
+    label: "Size",
+    tooltip: "Output size",
+    description: "Choose a model-supported output size.",
     icon: SlidersHorizontal,
-    options: [
-      { label: "Standard", value: "1K", description: "Balanced everyday generation size." },
-      { label: "High", value: "2K", description: "Sharper output for design handoff." },
-      { label: "Ultra", value: "4K", description: "Highest detail target where supported." },
-    ],
+    options: activeModel.size.presets.map((preset) => ({
+      label: preset.value === "1K" ? "Standard" : preset.value === "2K" ? "High" : preset.value === "4K" ? "Ultra" : preset.label,
+      value: preset.value,
+      description: preset.value === "1K" ? "Balanced everyday generation size." : preset.value === "2K" ? "Sharper output for design handoff." : "Highest detail target where supported.",
+    })),
   },
-];
+  {
+    key: "providerQuality",
+    label: "Quality",
+    tooltip: "Provider quality",
+    description: "Choose a quality level supported by the selected model.",
+    icon: SlidersHorizontal,
+    options: (activeModel.quality.values.length ? activeModel.quality.values : ["auto"]).map((value) => ({
+      label: value.slice(0, 1).toUpperCase() + value.slice(1),
+      value,
+      description: value === "auto" ? "Let the provider choose the quality level." : `${value} provider quality.`,
+    })),
+  },
+  {
+    key: "background",
+    label: "Background",
+    tooltip: "Image background",
+    description: "Choose a background mode supported by the selected model.",
+    icon: ImageIcon,
+    options: activeModel.background.values.map((value) => ({
+      label: value.slice(0, 1).toUpperCase() + value.slice(1),
+      value,
+      description: value === "auto" ? "Let the model choose." : `Request a ${value} background.`,
+    })),
+  },
+  ];
+}
 
 const defaultSettings: Record<SettingKey, string> = {
-  model: "gemini-3.1-flash-image-preview",
-  count: "2",
-  thinking: "balanced",
-  aspect: "auto",
-  quality: "1K",
+  model: standaloneImageModels[0].legacyModelId,
+  count: String(standaloneImageModels[0].count.default),
+  thinking: standaloneImageModels[0].reasoning.default ?? "balanced",
+  aspect: standaloneImageModels[0].size.defaultAspectRatio,
+  quality: standaloneImageModels[0].size.defaultSize,
+  providerQuality: standaloneImageModels[0].quality.default ?? "auto",
+  background: standaloneImageModels[0].background.default,
 };
 
 const settingBadges: Record<SettingKey, Record<string, string>> = {
-  model: {
-    "gemini-3.1-flash-image-preview": "NB2",
-    "gemini-3-pro-image-preview": "NBP",
-    "gemini-2.5-flash-image": "NB",
-  },
+  model: Object.fromEntries(standaloneImageModels.map((model) => [model.legacyModelId, model.badge])),
   count: {
     "1": "1x",
     "2": "2x",
@@ -343,6 +382,7 @@ const settingBadges: Record<SettingKey, Record<string, string>> = {
     balanced: "B",
     fast: "F",
     deep: "D",
+    "provider-managed": "Auto",
   },
   aspect: {
     auto: "Auto",
@@ -366,6 +406,8 @@ const settingBadges: Record<SettingKey, Record<string, string>> = {
     "2K": "2K",
     "4K": "4K",
   },
+  providerQuality: { auto: "Auto", low: "Low", medium: "Med", high: "High" },
+  background: { auto: "Auto", opaque: "Solid", transparent: "Alpha" },
 };
 
 const railButtonClass =
@@ -382,12 +424,6 @@ const loadingPhrases = [
   "Composing variation",
   "Rendering image",
 ];
-
-const referenceImageLimits: Record<ModelId, number> = {
-  "gemini-3.1-flash-image-preview": 14,
-  "gemini-3-pro-image-preview": 14,
-  "gemini-2.5-flash-image": 3,
-};
 
 function GenerationLoading({ phrase }: { phrase: string }) {
   return (
@@ -873,6 +909,7 @@ function PromptLibrarySkeleton() {
 }
 
 export function GeneratePage() {
+  const modelProvider = useModelProviderSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSetting, setActiveSetting] = useState<SettingKey>("aspect");
   const [settings, setSettings] = useState<Record<SettingKey, string>>(defaultSettings);
@@ -911,6 +948,12 @@ export function GeneratePage() {
   const gateDialogResolverRef = useRef<((value: boolean) => void) | null>(null);
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
 
+  const activeImageModels = modelProvider.activeModels("imageGeneration")
+    .map((model) => getBrowserImageModelByAlias(model.modelAlias))
+    .filter((model): model is BrowserImageModel => Boolean(model));
+  const activeChatModels = modelProvider.activeModels("chatOrchestration");
+  const settingDefinitions = createSettingDefinitions(settings.model, activeImageModels);
+  const railSettingDefinitions = settingDefinitions.filter((definition) => definition.key !== "model");
   const currentDefinition =
     settingDefinitions.find((definition) => definition.key === activeSetting) ?? settingDefinitions[0];
   const CurrentSettingIcon = currentDefinition.icon;
@@ -941,7 +984,9 @@ export function GeneratePage() {
   const loadingPhrase = loadingPhrases[loadingStep % loadingPhrases.length];
   const generationActive = Boolean(activeRun || isGenerating || generationError);
   const activeModel = settings.model as ModelId;
-  const referenceImageLimit = referenceImageLimits[activeModel];
+  const activeModelMetadata = getBrowserImageModelByLegacyId(activeModel);
+  const referenceImageLimit = activeModelMetadata?.maximumReferenceImages ?? 0;
+  const supportsReferenceImages = activeModelMetadata?.supportsReferenceEditing ?? false;
   const hasReferencePanel = referenceImages.length > 0 || Boolean(uploadMessage);
   const hasPromptRefinerPanel = promptRefiner.status !== "idle";
   const hasComposerTopPanel = hasReferencePanel || hasPromptRefinerPanel;
@@ -987,9 +1032,15 @@ export function GeneratePage() {
   }
 
   async function requireGeminiKey(status = workspaceStatus) {
-    if (status?.hasGeminiKey) return true;
+    if (!shouldBlockImageGenerationForMissingGeminiKey(status)) return true;
 
-    await openGateDialog({
+    await openImageModelKeyDialog();
+
+    return false;
+  }
+
+  function openImageModelKeyDialog() {
+    return openGateDialog({
       title: "Connect image model",
       description: "Add your image generation model API key before generating images.",
       confirmLabel: "Add API key",
@@ -997,8 +1048,6 @@ export function GeneratePage() {
       cancelLabel: "Cancel",
       icon: "model",
     });
-
-    return false;
   }
 
   const handlePromptTextChange = (value: string) => {
@@ -1025,6 +1074,24 @@ export function GeneratePage() {
   useEffect(() => {
     void loadWorkspaceStatus();
   }, []);
+
+  useEffect(() => {
+    const alias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    const selected = alias ? getBrowserImageModelByAlias(alias) : null;
+    if (!selected || selected.legacyModelId === settings.model) return;
+    setSettings((current) => {
+      const normalized = normalizeBrowserImageUiSettings({
+        model: current.model,
+        count: Number(current.count),
+        aspectRatio: current.aspect,
+        imageSize: current.quality,
+        reasoning: current.thinking,
+        quality: current.providerQuality,
+        background: current.background as "auto" | "opaque" | "transparent",
+      }, selected.legacyModelId, "standalone-generate");
+      return { ...current, model: normalized.model, count: String(normalized.count), aspect: normalized.aspectRatio, quality: normalized.imageSize, thinking: normalized.reasoning, providerQuality: normalized.quality ?? "auto", background: normalized.background ?? "auto" };
+    });
+  }, [modelProvider.settings?.selected?.imageGenerationModelAlias, settings.model]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1079,6 +1146,14 @@ export function GeneratePage() {
     setUploadStatus("error");
     setUploadMessage(`${activeModelOption.label} allows ${referenceImageLimit} reference images; extra images were removed.`);
   }, [activeModelOption.label, referenceImageLimit, referenceImages.length]);
+
+  useEffect(() => {
+    if (supportsReferenceImages || (referenceImages.length === 0 && !uploadMessage)) return;
+    setReferenceImages([]);
+    setPreviewReference(null);
+    setUploadStatus("error");
+    setUploadMessage(`${activeModelOption.label} is text-to-image only and does not accept reference images.`);
+  }, [activeModelOption.label, referenceImages.length, supportsReferenceImages, uploadMessage]);
 
   const openCreatePrompt = () => {
     if (!workspaceStatus?.authenticated) {
@@ -1387,6 +1462,7 @@ export function GeneratePage() {
   };
 
   const handleReferenceDragEnter = (event: DragEvent<HTMLFormElement>) => {
+    if (!supportsReferenceImages) return;
     if (!Array.from(event.dataTransfer.types).includes("Files")) {
       return;
     }
@@ -1395,6 +1471,7 @@ export function GeneratePage() {
   };
 
   const handleReferenceDragOver = (event: DragEvent<HTMLFormElement>) => {
+    if (!supportsReferenceImages) return;
     if (!Array.from(event.dataTransfer.types).includes("Files")) {
       return;
     }
@@ -1413,6 +1490,11 @@ export function GeneratePage() {
   const handleReferenceDrop = async (event: DragEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsDraggingReference(false);
+    if (!supportsReferenceImages) {
+      setUploadStatus("error");
+      setUploadMessage(`${activeModelOption.label} is text-to-image only and does not accept reference images.`);
+      return;
+    }
     await addReferenceImages(Array.from(event.dataTransfer.files));
   };
 
@@ -1458,7 +1540,7 @@ export function GeneratePage() {
         throw new Error("Sign in to refine prompts.");
       }
 
-      if (response.status === 403) {
+      if (shouldOpenPromptRefinerGeminiKeyGate(response.status, payload.error)) {
         await requireGeminiKey();
         throw new Error("Add your Gemini API key before refining prompts.");
       }
@@ -1528,10 +1610,15 @@ export function GeneratePage() {
   const handleGenerate = async (value: string) => {
     const prompt = value.trim();
     if (!prompt || isGenerating) return;
+    const selectedImageAlias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    if (!selectedImageAlias || !activeImageModels.some((model) => model.modelAlias === selectedImageAlias)) {
+      setGenerationError("No active image model is selected. Add provider credentials or choose an active model in Settings.");
+      return;
+    }
 
     const status = await loadWorkspaceStatus();
     if (!(await requireSignedIn(status))) return;
-    if (!(await requireGeminiKey(status))) return;
+    if (activeModelMetadata?.provider === "gemini" && !(await requireGeminiKey(status))) return;
     const storageReady = await ensureGenerateStorageReady({
       workspaceStatus: status,
       loadDrivePreflight,
@@ -1574,11 +1661,14 @@ export function GeneratePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
+          modelAlias: selectedImageAlias,
           model,
           count: Number(settings.count),
           thinking: settings.thinking,
           aspectRatio: settings.aspect,
           imageSize: settings.quality,
+          quality: settings.providerQuality,
+          background: settings.background,
           schema: "none",
           referenceImages: submittedReferenceImages,
         }),
@@ -1587,6 +1677,21 @@ export function GeneratePage() {
       const payload = (await response.json()) as Partial<GenerateApiResponse> & GenerateApiError;
 
       if (!response.ok) {
+        if (response.status === 409 && (payload.details as { code?: string } | undefined)?.code === "model-selection-stale") {
+          setActiveRun(null);
+          setPromptText(prompt);
+          setReferenceImages(submittedReferenceImages);
+          await modelProvider.refresh();
+          throw new Error(payload.error || "Your default image model changed. Review it and try again.");
+        }
+        if (shouldOpenImageGenerationGeminiKeyGate(response.status, payload.error)) {
+          setActiveRun(null);
+          setPromptText(prompt);
+          setReferenceImages(submittedReferenceImages);
+          await openImageModelKeyDialog();
+          return;
+        }
+
         const fieldErrors = payload.details?.fieldErrors
           ? Object.entries(payload.details.fieldErrors)
               .filter(([, messages]) => messages.length > 0)
@@ -1873,9 +1978,8 @@ export function GeneratePage() {
         </label>
       </motion.aside>
 
-      <motion.button
-        className="fixed bottom-5 left-1.5 z-30 hidden h-12 w-[212px] items-center gap-1.5 rounded-xl px-3 text-[13px] text-white transition hover:bg-white/[0.06] min-[920px]:flex min-[920px]:bottom-8 xl:w-[236px]"
-        type="button"
+      <motion.div
+        className="fixed bottom-5 left-1.5 z-30 hidden w-[172px] grid-cols-1 gap-1.5 rounded-xl px-1.5 py-1.5 text-white min-[920px]:grid min-[920px]:bottom-8 xl:w-[248px]"
         initial={false}
         animate={{
           x: generationActive ? -280 : 0,
@@ -1884,15 +1988,24 @@ export function GeneratePage() {
           pointerEvents: generationActive ? "none" : "auto",
         }}
         transition={generationTransition}
-        onClick={() => {
-          setActiveSetting("model");
-          setSettingsOpen(true);
-        }}
       >
-        <span className="font-bold text-white/52">Model</span>
-        <strong className="truncate font-extrabold">{activeModelOption.label}</strong>
-        <ChevronDown aria-hidden="true" size={15} />
-      </motion.button>
+        <ModelQuickPicker
+          label="Image model"
+          icon={Images}
+          value={modelProvider.settings?.selected?.imageGenerationModelAlias ?? ""}
+          options={activeImageModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel, description: model.description }))}
+          emptyLabel="No active models"
+          onSelect={(imageGenerationModelAlias) => void modelProvider.saveSelection({ imageGenerationModelAlias })}
+        />
+        <ModelQuickPicker
+          label="Prompt model"
+          icon={BrainCircuit}
+          value={modelProvider.settings?.selected?.chatOrchestrationModelAlias ?? ""}
+          options={activeChatModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel, description: model.providerLabel }))}
+          emptyLabel="No active models"
+          onSelect={(chatOrchestrationModelAlias) => void modelProvider.saveSelection({ chatOrchestrationModelAlias })}
+        />
+      </motion.div>
 
       <motion.aside
         className={`${glassPanelClass} fixed right-0 top-1/2 z-30 hidden w-16 flex-col items-center gap-2 rounded-l-2xl bg-black/35 px-2 py-3 min-[760px]:flex`}
@@ -1915,7 +2028,7 @@ export function GeneratePage() {
           </button>
         </FloatingTooltip.Trigger>
         <div className="my-1 h-px w-8 bg-white/[0.08]" />
-        {settingDefinitions.map((definition) => {
+        {railSettingDefinitions.map((definition) => {
           const Icon = definition.icon;
           const selected = getSelectedOption(definition);
           const active = settingsOpen && activeSetting === definition.key;
@@ -2036,12 +2149,30 @@ export function GeneratePage() {
                             : "border-white/[0.07] bg-white/[0.035] text-white/64 hover:bg-white/[0.07] hover:text-white"
                         }`}
                         type="button"
-                        onClick={() =>
-                          setSettings((current) => ({
+                        onClick={() => setSettings((current) => {
+                          if (currentDefinition.key !== "model") return { ...current, [currentDefinition.key]: option.value };
+                          const selectedModel = getBrowserImageModelByLegacyId(option.value);
+                          if (selectedModel) void modelProvider.saveSelection({ imageGenerationModelAlias: selectedModel.modelAlias });
+                          const normalized = normalizeBrowserImageUiSettings({
+                            model: current.model,
+                            count: Number(current.count),
+                            aspectRatio: current.aspect,
+                            imageSize: current.quality,
+                            reasoning: current.thinking,
+                            quality: current.providerQuality,
+                            background: current.background as "auto" | "opaque" | "transparent",
+                          }, option.value, "standalone-generate");
+                          return {
                             ...current,
-                            [currentDefinition.key]: option.value,
-                          }))
-                        }
+                            model: normalized.model,
+                            count: String(normalized.count),
+                            aspect: normalized.aspectRatio,
+                            quality: normalized.imageSize,
+                            thinking: normalized.reasoning,
+                            providerQuality: normalized.quality ?? "auto",
+                            background: normalized.background ?? "auto",
+                          };
+                        })}
                       >
                         <span>
                           <span className="block text-[12px] font-extrabold">{option.label}</span>
@@ -2528,6 +2659,7 @@ export function GeneratePage() {
             type="file"
             accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
             multiple
+            disabled={!supportsReferenceImages}
             tabIndex={-1}
             onChange={(event) => void handleReferenceInputChange(event)}
           />
@@ -2695,9 +2827,11 @@ export function GeneratePage() {
               mobileSubmitIcon: "sm:hidden",
             }}
             leadingAction={{
-              label: "Upload reference images",
+              label: supportsReferenceImages ? "Upload reference images" : `${activeModelOption.label} is text-to-image only`,
               icon: <ImageIcon size={17} />,
-              onClick: () => referenceFileInputRef.current?.click(),
+              onClick: () => supportsReferenceImages
+                ? referenceFileInputRef.current?.click()
+                : setUploadMessage(`${activeModelOption.label} is text-to-image only and does not accept reference images.`),
             }}
             actions={
               hasPromptRefinerPanel

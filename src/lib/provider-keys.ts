@@ -1,8 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  deserializeProviderCredentials,
+  type ProviderCredentialsMap,
+  type SupportedProviderId,
+} from "@/lib/provider-key-registry";
 
-export type SupportedProviderId = "google-gemini";
+export type { ProviderCredentialsMap, SupportedProviderId } from "@/lib/provider-key-registry";
 
-export async function getUserProviderApiKey(userId: string, providerId: SupportedProviderId) {
+async function getUserProviderSecret(userId: string, providerId: SupportedProviderId) {
   const admin = createAdminClient();
 
   const { data: providerKey, error: providerKeyError } = await admin
@@ -36,4 +41,17 @@ export async function getUserProviderApiKey(userId: string, providerId: Supporte
   }
 
   return typeof data === "string" && data.trim() ? data : null;
+}
+
+export async function getUserProviderCredentials<T extends SupportedProviderId>(
+  userId: string,
+  providerId: T,
+): Promise<ProviderCredentialsMap[T] | null> {
+  const secret = await getUserProviderSecret(userId, providerId);
+  return secret ? deserializeProviderCredentials(providerId, secret) : null;
+}
+
+export async function getUserProviderApiKey(userId: string, providerId: "google-gemini") {
+  const secret = await getUserProviderSecret(userId, providerId);
+  return secret;
 }

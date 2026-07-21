@@ -92,6 +92,25 @@ describe("canvas tool registry", () => {
     expect(CANVAS_TOOL_REGISTRY.add_text.description).toContain("text");
   });
 
+  it("advertises OpenAI-compatible object parameters for every assistant tool", () => {
+    for (const definition of Object.values(CANVAS_TOOL_REGISTRY)) {
+      expect(definition.jsonSchema, definition.name).toMatchObject({
+        type: "object",
+        properties: expect.any(Object),
+      });
+    }
+
+    expect(CANVAS_TOOL_REGISTRY.set_background.jsonSchema).toMatchObject({
+      type: "object",
+      required: ["type", "value"],
+      properties: {
+        type: { enum: ["color", "gradient", "image"] },
+        value: { type: "string" },
+        fit: { enum: ["cover", "contain", "stretch", "overflow"] },
+      },
+    });
+  });
+
   it.each([
     ["add_text", { preset: "heading", text: "Hello" }, "addText"],
     ["add_shape", { type: "rect" }, "addShape"],

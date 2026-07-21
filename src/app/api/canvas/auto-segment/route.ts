@@ -3,6 +3,6 @@ import { handleAutoSegmentRequest } from "@/modules/canvas/ai/auto-segment/handl
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<Response> {
   return handleAutoSegmentRequest(request);
 }
