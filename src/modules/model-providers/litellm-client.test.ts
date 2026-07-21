@@ -126,4 +126,20 @@ describe("LiteLLM client", () => {
       return true;
     });
   });
+
+  it("classifies upstream request rejections as provider errors, not invalid responses", async () => {
+    const fetchImpl = vi.fn<LiteLlmFetch>(async () => jsonResponse(
+      { error: { message: "unsupported parameter", secret: "must-not-leak" } },
+      { status: 400 },
+    ));
+    const client = createLiteLlmClient({ config, fetchImpl });
+
+    await expect(client.chatCompletions({ model: "x" })).rejects.toSatisfy((error: unknown) => {
+      if (!isModelGatewayError(error)) return false;
+      expect(error.details).toMatchObject({ status: 400, errorCode: "provider_error", retryable: false });
+      expect(JSON.stringify(error)).not.toContain("unsupported parameter");
+      expect(JSON.stringify(error)).not.toContain("must-not-leak");
+      return true;
+    });
+  });
 });

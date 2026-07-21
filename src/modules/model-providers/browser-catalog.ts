@@ -3,6 +3,7 @@ import { getProviderKeyIdForModelProvider } from "./provider-key-mapping";
 import type { SupportedProviderId } from "@/lib/provider-key-registry";
 import type { ModelCatalogEntry, ModelCapabilitySlot, ModelProviderId } from "./types";
 import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
+import type { ChatControlCapabilities } from "./chat-request-policy";
 
 const providerDisplay: Record<ModelProviderId, { label: string; logoPath: string }> = {
   gemini: {
@@ -42,6 +43,7 @@ export type BrowserModelCatalogEntry = {
     supportsImageOutput: boolean;
     supportsStreaming: boolean;
     requirements: readonly string[];
+    chatControls?: ChatControlCapabilities;
   };
 };
 

@@ -12,6 +12,16 @@ import { buildAzureOpenAiImageLiteLlmRequest, buildAzureOpenAiLiteLlmRequest } f
 
 export type ResolvedModelCredentials = Extract<ModelCredentialResolution, { ok: true }>;
 
+export function getResolvedChatPolicyModel(
+  resolution: ResolvedModelCredentials,
+  fallbackModel: string | null | undefined,
+) {
+  if (resolution.providerKeyId === "azure-openai" && resolution.credentials && "baseModel" in resolution.credentials) {
+    return resolution.credentials.baseModel;
+  }
+  return fallbackModel ?? resolution.modelAlias;
+}
+
 export type RuntimeCredentialFailure =
   | FailedCredentialResolution
   | {

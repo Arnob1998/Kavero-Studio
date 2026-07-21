@@ -13,6 +13,8 @@ import { getModelGatewayCredentialMode } from "@/modules/model-providers/server/
 import { getAvailableBrowserModelCatalog } from "@/modules/model-providers/server/model-availability";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { SupportedProviderId } from "@/lib/provider-key-registry";
+import { getUserProviderCredentials } from "@/lib/provider-keys";
+import type { AzureOpenAiBaseModel } from "@/lib/provider-key-registry";
 
 const modelProviderSettingsSchema = z
   .object({
@@ -28,7 +30,11 @@ type UserMetadataRow = {
   preferences: unknown;
 };
 
-function settingsPayload(preferences: unknown, activeProviderKeyIds: ReadonlySet<SupportedProviderId>) {
+function settingsPayload(
+  preferences: unknown,
+  activeProviderKeyIds: ReadonlySet<SupportedProviderId>,
+  azureChatBaseModel: AzureOpenAiBaseModel | null,
+) {
   const selection = getResolvedModelProviderPreferences(preferences);
   const gatewayConfig = getModelGatewayConfig();
   const credentialMode = getModelGatewayCredentialMode();
@@ -36,7 +42,7 @@ function settingsPayload(preferences: unknown, activeProviderKeyIds: ReadonlySet
   return {
     gateway: getSafeGatewayStatus(gatewayConfig),
     credentialMode,
-    catalog: getAvailableBrowserModelCatalog({ gateway: gatewayConfig, credentialMode, activeProviderKeyIds }),
+    catalog: getAvailableBrowserModelCatalog({ gateway: gatewayConfig, credentialMode, activeProviderKeyIds, azureChatBaseModel }),
     defaults: {
       chatOrchestrationModelAlias: DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
       imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
@@ -44,6 +50,16 @@ function settingsPayload(preferences: unknown, activeProviderKeyIds: ReadonlySet
     selected: selection,
     ...selection,
   };
+}
+
+async function loadSafeAzureChatBaseModel(
+  userId: string,
+  activeProviderKeyIds: ReadonlySet<SupportedProviderId>,
+) {
+  const credentialMode = getModelGatewayCredentialMode();
+  if (credentialMode === "env-only" || !activeProviderKeyIds.has("azure-openai")) return null;
+  const credentials = await getUserProviderCredentials(userId, "azure-openai");
+  return credentials?.baseModel ?? null;
 }
 
 async function loadActiveProviderKeyIds(userId: string) {
@@ -96,7 +112,8 @@ export async function GET() {
       loadPreferences(context.supabase, context.user.id),
       loadActiveProviderKeyIds(context.user.id),
     ]);
-    return NextResponse.json(settingsPayload(preferences, activeProviderKeyIds));
+    const azureChatBaseModel = await loadSafeAzureChatBaseModel(context.user.id, activeProviderKeyIds);
+    return NextResponse.json(settingsPayload(preferences, activeProviderKeyIds, azureChatBaseModel));
   } catch {
     return NextResponse.json({ error: "Unable to load model-provider settings." }, { status: 500 });
   }
@@ -119,7 +136,8 @@ async function save(request: Request) {
     ]);
     const gatewayConfig = getModelGatewayConfig();
     const credentialMode = getModelGatewayCredentialMode();
-    const catalog = getAvailableBrowserModelCatalog({ gateway: gatewayConfig, credentialMode, activeProviderKeyIds });
+    const azureChatBaseModel = await loadSafeAzureChatBaseModel(context.user.id, activeProviderKeyIds);
+    const catalog = getAvailableBrowserModelCatalog({ gateway: gatewayConfig, credentialMode, activeProviderKeyIds, azureChatBaseModel });
     const requestedAliases = [
       parsed.data.chatOrchestrationModelAlias,
       parsed.data.imageGenerationModelAlias,
@@ -158,7 +176,7 @@ async function save(request: Request) {
       return NextResponse.json({ error: "Unable to save model-provider settings." }, { status: 500 });
     }
 
-    return NextResponse.json(settingsPayload(merged.preferences, activeProviderKeyIds));
+    return NextResponse.json(settingsPayload(merged.preferences, activeProviderKeyIds, azureChatBaseModel));
   } catch {
     return NextResponse.json({ error: "Unable to save model-provider settings." }, { status: 500 });
   }

@@ -47,6 +47,7 @@ export type CanvasImageBackgroundPreference = "auto" | "white" | "black";
 
 export type CanvasImageGenerationSettings = {
   enabled: boolean;
+  modelAlias: string;
   model: CanvasImageModel;
   batchSize: CanvasImageBatchSize;
   thinking: CanvasImageThinking;

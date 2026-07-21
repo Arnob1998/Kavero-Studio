@@ -43,7 +43,7 @@ import { ShapesPanel } from "@/modules/editor-panels/panels/shapes-panel";
 import { TextPanel } from "@/modules/editor-panels/panels/text-panel";
 import { useEditor } from "@/modules/canvas/state/context";
 import { getBrowserImageModelByAlias, getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings } from "@/modules/model-providers/image-browser";
-import { useModelProviderSettings } from "@/modules/model-providers/browser-settings";
+import { modelProviderSettingsChangedEvent, useModelProviderSettings } from "@/modules/model-providers/browser-settings";
 import { uploadCanvasAsset, type CanvasAsset, type CanvasAssetsResponse } from "@/modules/assets/canvas-assets";
 import {
   CANVAS_TOOL_REGISTRY,
@@ -125,6 +125,7 @@ const defaultCanvasImageModel = getBrowserImageModels("canvas-generation")[0];
 
 const defaultCanvasImageSettings: CanvasImageGenerationSettings = {
   enabled: true,
+  modelAlias: defaultCanvasImageModel.modelAlias,
   model: defaultCanvasImageModel.legacyModelId as CanvasImageModel,
   batchSize: defaultCanvasImageModel.featureCountPresets["canvas-generation"][0] as CanvasImageBatchSize,
   thinking: (defaultCanvasImageModel.reasoning.default ?? "balanced") as CanvasImageThinking,
@@ -136,6 +137,7 @@ const defaultCanvasImageSettings: CanvasImageGenerationSettings = {
 };
 
 function switchCanvasImageModel(current: CanvasImageGenerationSettings, model: CanvasImageModel): CanvasImageGenerationSettings {
+  const selected = getBrowserImageModelByLegacyId(model);
   const normalized = normalizeBrowserImageUiSettings({
     model: current.model,
     count: current.batchSize,
@@ -147,6 +149,7 @@ function switchCanvasImageModel(current: CanvasImageGenerationSettings, model: C
   }, model, "canvas-generation");
   return {
     ...current,
+    modelAlias: selected?.modelAlias ?? current.modelAlias,
     model: normalized.model as CanvasImageModel,
     batchSize: normalized.count as CanvasImageBatchSize,
     aspectRatio: normalized.aspectRatio,
@@ -199,6 +202,8 @@ export function LeftSidebar() {
     .filter((model) => model.compatibility["canvas-generation"]);
   const activeCanvasImageOptions = activeCanvasImageModels.map((model) => ({ value: model.legacyModelId as CanvasImageModel, label: model.displayLabel }));
   const activeChatModels = modelProvider.activeModels("chatOrchestration");
+  const selectedChatModel = activeChatModels.find((model) => model.modelAlias === modelProvider.settings?.selected?.chatOrchestrationModelAlias);
+  const chatControls = selectedChatModel?.capabilities.chatControls;
   const canvasImageControls = getCanvasImageControlOptions(imageGenerationSettings.model);
   const [imageTransparent, setImageTransparent] = useState(defaultCanvasImageSettings.transparentBackgroundDefault);
   const [addingGeneratedImageId, setAddingGeneratedImageId] = useState<string | null>(null);
@@ -1259,7 +1264,7 @@ export function LeftSidebar() {
                         onChange={(chatOrchestrationModelAlias) => void modelProvider.saveSelection({ chatOrchestrationModelAlias })}
                       />
                     </div>
-                    <div className="py-4">
+                    {chatControls?.temperature.supported && <div className="py-4">
                       <div className="mb-3 flex items-center justify-between">
                         <div>
                           <p className="text-[13px] font-semibold text-white">Temperature</p>
@@ -1273,41 +1278,28 @@ export function LeftSidebar() {
                         <span className="text-[10px] font-semibold text-white/28">0.0</span>
                         <input
                           type="range"
-                          min={0} max={1} step={0.1}
+                          min={chatControls.temperature.minimum}
+                          max={chatControls.temperature.maximum}
+                          step={chatControls.temperature.step}
                           value={assistantTemperature}
                           onChange={(e) => setAssistantTemperature(Number(e.target.value))}
                           className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/14 accent-accent [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-sm"
                         />
                         <span className="text-[10px] font-semibold text-white/28">1.0</span>
                       </div>
-                    </div>
+                    </div>}
 
-                    <div className="flex items-center justify-between py-4">
+                    {chatControls?.extendedThinking.supported && <div className="flex items-center justify-between py-4">
                       <div className="mr-6">
                         <p className="text-[13px] font-semibold text-white">Extended thinking</p>
                         <p className="mt-0.5 text-[11px] text-white/40">Model reasons step-by-step before responding. Slower but more thorough.</p>
                       </div>
                       <Switch checked={assistantThinking} onCheckedChange={setAssistantThinking} />
-                    </div>
-                  </div>
-                )}
-
-                {assistantSettingsTab === "tools" && (
-                  <div className="divide-y divide-white/6">
-                    <div className="flex items-center justify-between py-4">
-                      <div className="mr-6">
-                        <p className="text-[13px] font-semibold text-white">Image generation</p>
-                        <p className="mt-0.5 text-[11px] text-white/40">Let Copilot create and place generated image assets.</p>
-                      </div>
-                      <Switch
-                        checked={imageGenerationSettings.enabled}
-                        onCheckedChange={(enabled) => setImageGenerationSettings((current) => ({ ...current, enabled }))}
-                      />
-                    </div>
+                    </div>}
 
                     <div className="grid gap-3 py-4">
                       <SettingsSelect
-                        label="Model"
+                        label="Image model"
                         value={imageGenerationSettings.model}
                         options={activeCanvasImageOptions.map((option) => ({ value: option.value, label: option.label }))}
                         onChange={(model) => {
@@ -1322,12 +1314,12 @@ export function LeftSidebar() {
                         options={canvasImageControls.batches.map((value) => ({ value: String(value), label: `${value}x` }))}
                         onChange={(batchSize) => setImageGenerationSettings((current) => ({ ...current, batchSize: Number(batchSize) as CanvasImageBatchSize }))}
                       />
-                      <SettingsSelect
-                        label="Thinking"
+                      {canvasImageControls.thinking.length > 0 && <SettingsSelect
+                        label="Image thinking"
                         value={imageGenerationSettings.thinking}
                         options={canvasImageControls.thinking.map((value) => ({ value, label: labelize(value) }))}
                         onChange={(thinking) => setImageGenerationSettings((current) => ({ ...current, thinking: thinking as CanvasImageThinking }))}
-                      />
+                      />}
                       <SettingsSelect
                         label="Aspect"
                         value={imageGenerationSettings.aspectRatio}
@@ -1340,17 +1332,32 @@ export function LeftSidebar() {
                         options={canvasImageControls.sizes}
                         onChange={(imageSize) => setImageGenerationSettings((current) => ({ ...current, imageSize: imageSize as CanvasImageQuality }))}
                       />
-                      <SettingsSelect
+                      {canvasImageControls.qualities.length > 0 && <SettingsSelect
                         label="Quality"
                         value={imageGenerationSettings.quality}
                         options={canvasImageControls.qualities.map((value) => ({ value, label: labelize(value) }))}
                         onChange={(quality) => setImageGenerationSettings((current) => ({ ...current, quality: quality as CanvasImageGenerationSettings["quality"] }))}
-                      />
-                      <SettingsSelect
+                      />}
+                      {canvasImageControls.backgrounds.length > 0 && <SettingsSelect
                         label="Background"
                         value={imageGenerationSettings.background}
                         options={canvasImageControls.backgrounds.map((value) => ({ value, label: labelize(value) }))}
                         onChange={(background) => setImageGenerationSettings((current) => ({ ...current, background: background as CanvasImageGenerationSettings["background"] }))}
+                      />}
+                    </div>
+                  </div>
+                )}
+
+                {assistantSettingsTab === "tools" && (
+                  <div className="divide-y divide-white/6">
+                    <div className="flex items-center justify-between py-4">
+                      <div className="mr-6">
+                        <p className="text-[13px] font-semibold text-white">Image generation</p>
+                        <p className="mt-0.5 text-[11px] text-white/40">Let Copilot create and place generated image assets.</p>
+                      </div>
+                      <Switch
+                        checked={imageGenerationSettings.enabled}
+                        onCheckedChange={(enabled) => setImageGenerationSettings((current) => ({ ...current, enabled }))}
                       />
                     </div>
 
@@ -1560,9 +1567,15 @@ async function requestCanvasAssistantTurn({
     };
   }
 
-  const body = (await response.json().catch(() => null)) as Partial<CanvasAssistantApiResponse> & { error?: string } | null;
+  const body = (await response.json().catch(() => null)) as Partial<CanvasAssistantApiResponse> & {
+    error?: string;
+    details?: { code?: string };
+  } | null;
   if (!response.ok || !body || body.error) {
     const error = body?.error ?? "Canvas assistant failed.";
+    if (response.status === 409 && body?.details?.code === "model-selection-stale") {
+      window.dispatchEvent(new Event(modelProviderSettingsChangedEvent));
+    }
     return {
       messages: [{ id: createAssistantId("msg"), role: "assistant", content: error }],
       toolCalls: [],

@@ -15,10 +15,12 @@ import {
   getModelCatalogEntry,
   isModelGatewayError,
   logModelGatewayEvent,
+  getChatCompletionParameterOverrides,
   type ModelGatewayConfig,
 } from "@/modules/model-providers";
 import {
   prepareLiteLlmRuntimeRequest,
+  getResolvedChatPolicyModel,
   type ResolvedModelCredentials,
 } from "@/modules/model-providers/server";
 
@@ -54,6 +56,7 @@ export function createLiteLlmCanvasAssistantProvider({
 }): CanvasAssistantProvider {
   const client = createLiteLlmClient({ config });
   const catalogEntry = getModelCatalogEntry(modelAlias);
+  const policyModel = getResolvedChatPolicyModel(credentials, catalogEntry?.model);
 
   return {
     name: "litellm",
@@ -63,7 +66,12 @@ export function createLiteLlmCanvasAssistantProvider({
       const prepared = prepareLiteLlmRuntimeRequest(
         {
           model: modelAlias,
-          temperature: input.temperature ?? 0.2,
+          ...getChatCompletionParameterOverrides({
+            model: policyModel,
+            provider: catalogEntry?.provider,
+            temperature: input.temperature ?? 0.2,
+            usesTools: true,
+          }),
           messages: [
             { role: "system", content: CANVAS_ASSISTANT_SYSTEM_PROMPT },
             { role: "user", content: buildLiteLlmUserContent(input) },

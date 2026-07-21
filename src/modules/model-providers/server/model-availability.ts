@@ -3,6 +3,9 @@ import { getBrowserModelCatalog, type BrowserModelCatalogEntry } from "../browse
 import type { ModelGatewayConfig } from "../types";
 import type { ModelGatewayCredentialMode } from "./credential-mode";
 import { getAzureOpenAiEnvCredentials, getAzureOpenAiImageEnvCredentials, type AzureOpenAiEnv } from "./azure-routing";
+import { getChatControlCapabilities } from "../chat-request-policy";
+import type { AzureOpenAiBaseModel } from "@/lib/provider-key-registry";
+import { getModelCatalogEntry } from "../catalog";
 
 export type ModelAvailabilitySource = "saved-key" | "admin-environment" | "local-runtime" | null;
 export type ModelUnavailableReason = "gateway-unavailable" | "credentials-required" | "runtime-unavailable" | null;
@@ -28,10 +31,26 @@ export function getAvailableBrowserModelCatalog(input: {
   credentialMode: ModelGatewayCredentialMode;
   activeProviderKeyIds: ReadonlySet<SupportedProviderId>;
   env?: AvailabilityEnv;
+  azureChatBaseModel?: AzureOpenAiBaseModel | null;
 }): AvailableBrowserModelCatalogEntry[] {
   const env = input.env ?? (process.env as AvailabilityEnv);
   return getBrowserModelCatalog().map((model) => ({
     ...model,
+    capabilities: {
+      ...model.capabilities,
+      ...(model.capabilities.slots.includes("chatOrchestration")
+        ? {
+            chatControls: getChatControlCapabilities({
+              model: model.provider === "azure-openai"
+                ? input.azureChatBaseModel ?? getAzureOpenAiEnvCredentials(env)?.baseModel ?? model.modelAlias
+                : getModelCatalogEntry(model.modelAlias)?.model,
+              provider: model.provider,
+              transport: input.gateway.status === "disabled" ? "direct-gemini" : "chat-completions",
+              usesTools: true,
+            }),
+          }
+        : {}),
+    },
     availability: getModelAvailability(model, { ...input, env }),
   }));
 }

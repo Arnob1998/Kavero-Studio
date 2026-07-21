@@ -65,6 +65,54 @@ function providerReturning(toolCalls: Array<{ id: string; name: string; input: u
 }
 
 describe("canvas assistant orchestrator", () => {
+  it("accepts capability-normalized provider-managed Azure image settings", async () => {
+    const result = await orchestrateCanvasAssistant({
+      ...basePayload,
+      imageGeneration: {
+        enabled: true,
+        modelAlias: "kavero-image-azure-gpt-image-2",
+        model: "azure-gpt-image-2",
+        batchSize: 4,
+        thinking: "provider-managed",
+        aspectRatio: "auto",
+        imageSize: "auto",
+        quality: "auto",
+        background: "auto",
+        transparentBackgroundDefault: false,
+      },
+    }, deps());
+
+    expect(result.status).toBe(200);
+    expect("context" in result.body && result.body.context.imageGeneration).toMatchObject({
+      modelAlias: "kavero-image-azure-gpt-image-2",
+      thinking: "provider-managed",
+    });
+  });
+
+  it("rejects stale or capability-incompatible image controls with safe field details", async () => {
+    const result = await orchestrateCanvasAssistant({
+      ...basePayload,
+      imageGeneration: {
+        enabled: true,
+        modelAlias: "kavero-image-generation-default",
+        model: "azure-gpt-image-2",
+        batchSize: 4,
+        thinking: "deep",
+        aspectRatio: "auto",
+        imageSize: "auto",
+        quality: "auto",
+        background: "auto",
+        transparentBackgroundDefault: false,
+      },
+    }, deps());
+
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({
+      error: "Invalid assistant payload.",
+      details: { fieldErrors: { imageGeneration: expect.any(Array) } },
+    });
+  });
+
   it("rejects unauthenticated requests", async () => {
     const result = await orchestrateCanvasAssistant(basePayload, deps({ getUserId: vi.fn(async () => null) }));
 

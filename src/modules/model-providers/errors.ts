@@ -13,7 +13,7 @@ type ErrorContext = {
 function codeForStatus(status: number | null): ModelGatewayErrorCode {
   if (status === 401 || status === 403) return "authentication_error";
   if (status === 429) return "rate_limited";
-  if (status && status >= 500) return "provider_error";
+  if (status && status >= 400) return "provider_error";
   return "invalid_response";
 }
 

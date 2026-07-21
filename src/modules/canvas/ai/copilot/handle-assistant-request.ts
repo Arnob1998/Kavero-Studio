@@ -20,6 +20,7 @@ import {
 
 export async function handleAssistantRequest(request: Request) {
   const user = await getCanvasUser();
+  const rawBody = await request.json().catch(() => null);
   let provider = createMockCanvasAssistantProvider();
   provider.model = process.env.CANVAS_ASSISTANT_MODEL ?? DEFAULT_CANVAS_ASSISTANT_MODEL;
 
@@ -32,6 +33,16 @@ export async function handleAssistantRequest(request: Request) {
         return NextResponse.json({ error: "Unable to load Copilot model settings." }, { status: 500 });
       }
       const selection = getResolvedModelProviderPreferences(preferences.preferences);
+      const requestedImageAlias = getRequestedImageModelAlias(rawBody);
+      if (requestedImageAlias && requestedImageAlias !== selection.imageGenerationModelAlias) {
+        return NextResponse.json(
+          {
+            error: "Canvas Copilot image model selection changed. Review the current model and try again.",
+            details: { code: "model-selection-stale" },
+          },
+          { status: 409 },
+        );
+      }
       const credentials = await resolveChatOrchestrationRuntimeCredentials({
         userId: user.id,
         modelAlias: selection.chatOrchestrationModelAlias,
@@ -70,7 +81,7 @@ export async function handleAssistantRequest(request: Request) {
     }
   }
 
-  const result = await orchestrateCanvasAssistant(await request.json().catch(() => null), {
+  const result = await orchestrateCanvasAssistant(rawBody, {
     async getUserId() {
       return user?.id ?? null;
     },
@@ -126,6 +137,14 @@ export async function handleAssistantRequest(request: Request) {
   });
 
   return NextResponse.json(result.body, { status: result.status });
+}
+
+function getRequestedImageModelAlias(body: unknown) {
+  if (!body || typeof body !== "object" || !("imageGeneration" in body)) return null;
+  const imageGeneration = (body as { imageGeneration?: unknown }).imageGeneration;
+  if (!imageGeneration || typeof imageGeneration !== "object" || !("modelAlias" in imageGeneration)) return null;
+  const modelAlias = (imageGeneration as { modelAlias?: unknown }).modelAlias;
+  return typeof modelAlias === "string" && modelAlias.trim() ? modelAlias : null;
 }
 
 async function loadModelProviderPreferences(userId: string): Promise<{ ok: true; preferences: unknown } | { ok: false }> {

@@ -1,4 +1,5 @@
 export * from "./browser-catalog";
+export * from "./chat-request-policy";
 export * from "./catalog";
 export * from "./connectivity";
 export * from "./errors";

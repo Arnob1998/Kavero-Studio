@@ -11,11 +11,13 @@ import {
   getResolvedModelProviderPreferences,
   isModelGatewayError,
   logModelGatewayEvent,
+  getChatCompletionParameterOverrides,
 } from "@/modules/model-providers";
 import {
   createSafeRuntimeCredentialFailureResponse,
   prepareLiteLlmRuntimeRequest,
   resolveChatOrchestrationRuntimeCredentials,
+  getResolvedChatPolicyModel,
 } from "@/modules/model-providers/server";
 
 export const runtime = "nodejs";
@@ -442,6 +444,7 @@ async function handleGatewayRefinement({
     return createSafeRuntimeCredentialFailureResponse("Prompt refinement", credentials);
   }
   const questionsRemaining = Math.max(0, MAX_REFINER_QUESTIONS - parsed.input.answers.length);
+  const policyModel = getResolvedChatPolicyModel(credentials, catalogEntry?.model);
   const client = createLiteLlmClient({ config });
   const startedAt = Date.now();
 
@@ -459,7 +462,7 @@ async function handleGatewayRefinement({
   const prepared = prepareLiteLlmRuntimeRequest(
     {
       model: modelAlias,
-      temperature: 0.35,
+      ...getChatCompletionParameterOverrides({ model: policyModel, provider: catalogEntry?.provider, temperature: 0.35 }),
       response_format: {
         type: "json_schema",
         json_schema: {

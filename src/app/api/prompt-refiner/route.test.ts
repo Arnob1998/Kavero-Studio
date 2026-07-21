@@ -97,7 +97,6 @@ describe("/api/prompt-refiner", () => {
     });
     expect(outboundBody).toMatchObject({
       model: "kavero-chat-openai-gpt-5-6",
-      temperature: 0.35,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -111,6 +110,7 @@ describe("/api/prompt-refiner", () => {
       },
       api_key: "sk-user-openai-1234567890",
     });
+    expect(outboundBody).not.toHaveProperty("temperature");
     expect(outboundBody.messages[0]).toMatchObject({ role: "system" });
     expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
     expect(mocks.generateContent).not.toHaveBeenCalled();
@@ -139,7 +139,7 @@ describe("/api/prompt-refiner", () => {
       apiBase: "https://kavero.openai.azure.com",
       apiVersion: "2025-04-01-preview",
       deploymentName: "private-deployment-one",
-      baseModel: "gpt-4.1",
+      baseModel: "gpt-5.6-sol",
     });
     mocks.createClient.mockResolvedValue(createSupabaseClient({
       preferences: { modelProviders: { chatOrchestrationModelAlias: "kavero-chat-azure-openai" } },
@@ -155,13 +155,14 @@ describe("/api/prompt-refiner", () => {
     expect(body.model).toBe("kavero-chat-azure-openai");
     expect(outbound).toMatchObject({
       model: "kavero-chat-azure-openai",
-      user_config: { model_list: [{ litellm_params: { model: "azure/private-deployment-one" } }] },
+      user_config: { model_list: [{ litellm_params: { model: "azure/gpt5_series/private-deployment-one" } }] },
     });
+    expect(outbound).not.toHaveProperty("temperature");
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       "x-kavero-routing-version": "v1",
       "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/),
     });
-    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain("gpt-4.1");
+    expect(JSON.stringify(consoleInfoSpy.mock.calls)).toContain("gpt-5.6-sol");
     expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain("private-deployment-one");
   });
 

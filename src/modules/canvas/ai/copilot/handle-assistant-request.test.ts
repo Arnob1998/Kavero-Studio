@@ -362,7 +362,7 @@ describe("handleAssistantRequest provider selection", () => {
       apiBase: "https://kavero.openai.azure.com",
       apiVersion: "2025-04-01-preview",
       deploymentName: "copilot-private-deployment",
-      baseModel: "gpt-5",
+      baseModel: "gpt-5.6-sol",
     });
     mocks.getCanvasAdmin.mockReturnValue(createAdmin(
       { "asset-1": asset() },
@@ -381,9 +381,52 @@ describe("handleAssistantRequest provider selection", () => {
       model: "kavero-chat-azure-openai",
       user_config: { model_list: [{ litellm_params: { model: "azure/gpt5_series/copilot-private-deployment" } }] },
     });
+    expect(outbound).not.toHaveProperty("temperature");
+    expect(outbound).not.toHaveProperty("reasoning_effort");
     expect(outbound.tools).toEqual(expect.arrayContaining([expect.objectContaining({ type: "function" })]));
     expect(JSON.stringify(outbound.messages)).toContain("First instruction");
     expect(JSON.stringify(outbound.messages)).toContain("First response");
+  });
+
+  it("rejects a stale Copilot image alias before provider traffic", async () => {
+    configureGateway();
+    vi.stubEnv("CANVAS_ASSISTANT_PROVIDER", "gemini");
+    mocks.getCanvasAdmin.mockReturnValue(createAdmin(
+      { "asset-1": asset() },
+      {
+        modelProviders: {
+          chatOrchestrationModelAlias: DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
+          imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+        },
+      },
+    ));
+    const staleRequest = new Request("http://localhost/api/canvas/assistant", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        designId: "design-1",
+        pageId: "page-1",
+        messages: [{ role: "user", content: "make an ad" }],
+        imageGeneration: {
+          enabled: true,
+          modelAlias: "kavero-image-azure-gpt-image-2",
+          model: "azure-gpt-image-2",
+          batchSize: 4,
+          thinking: "provider-managed",
+          aspectRatio: "auto",
+          imageSize: "auto",
+          quality: "auto",
+          background: "auto",
+          transparentBackgroundDefault: false,
+        },
+      }),
+    });
+
+    const response = await handleAssistantRequest(staleRequest);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ details: { code: "model-selection-stale" } });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("ignores saved Copilot credentials in env-only mode", async () => {

@@ -7,6 +7,7 @@ import {
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   createAdminClient: vi.fn(),
+  getUserProviderCredentials: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -14,6 +15,9 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mocks.createAdminClient,
+}));
+vi.mock("@/lib/provider-keys", () => ({
+  getUserProviderCredentials: mocks.getUserProviderCredentials,
 }));
 
 import { GET, PATCH } from "./route";
@@ -30,6 +34,13 @@ const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[ke
 describe("/api/model-providers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getUserProviderCredentials.mockResolvedValue({
+      apiKey: "azure-key-redacted-for-test",
+      apiBase: "https://example.openai.azure.com",
+      apiVersion: "2025-04-01-preview",
+      deploymentName: "deployment-redacted-for-test",
+      baseModel: "gpt-5.6-sol",
+    });
     mocks.createAdminClient.mockReturnValue(createProviderKeyAdmin(["google-gemini", "openai", "groq", "azure-openai", "azure-openai-image"]));
     for (const key of envKeys) delete process.env[key];
   });

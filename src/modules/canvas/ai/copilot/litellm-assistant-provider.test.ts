@@ -121,11 +121,12 @@ describe("LiteLLM canvas assistant provider", () => {
     );
     expect(outboundBody).toMatchObject({
       model: "kavero-chat-openai-gpt-5-6",
-      temperature: 0.2,
+      reasoning_effort: "none",
       tool_choice: "auto",
       api_key: "sk-user-openai-1234567890",
       messages: [{ role: "system", content: expect.stringContaining("Kavero") }, { role: "user" }],
     });
+    expect(outboundBody).not.toHaveProperty("temperature");
     expect(outboundBody.tools).toEqual(
       expect.arrayContaining([
         {

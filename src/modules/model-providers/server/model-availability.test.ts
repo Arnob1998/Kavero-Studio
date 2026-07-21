@@ -95,6 +95,25 @@ describe("model availability", () => {
       .toMatchObject({ active: false, reason: "credentials-required" });
   });
 
+  it("exposes only safe Azure GPT-5.6 chat controls", () => {
+    const catalog = getAvailableBrowserModelCatalog({
+      gateway: configuredGateway,
+      credentialMode: "user-required",
+      activeProviderKeyIds: new Set(["azure-openai"]),
+      azureChatBaseModel: "gpt-5.6-sol",
+      env: {},
+    });
+    const azure = catalog.find((model) => model.modelAlias === "kavero-chat-azure-openai");
+
+    expect(azure?.capabilities.chatControls).toMatchObject({
+      temperature: { supported: false },
+      extendedThinking: { supported: false },
+      toolReasoningEffort: null,
+    });
+    expect(JSON.stringify(azure)).not.toContain("deploymentName");
+    expect(JSON.stringify(azure)).not.toContain("apiKey");
+  });
+
   it.each([
     [{ status: "error", gateway: "litellm", issues: [{ code: "missing-api-key", message: "Invalid" }] } as ModelGatewayConfig],
     [{ status: "disabled", gateway: null, reason: "not-configured" } as ModelGatewayConfig],
