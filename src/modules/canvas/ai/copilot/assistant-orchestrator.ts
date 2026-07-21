@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CANVAS_TOOL_REGISTRY,
   type CanvasToolName,
+  type CanvasToolJsonSchema,
   type CanvasToolRisk,
 } from "@/modules/canvas/actions/canvas-tool-registry";
 import { isModelGatewayError } from "@/modules/model-providers";
@@ -54,7 +55,7 @@ export interface CanvasAssistantToolSchema {
   name: CanvasToolName;
   description: string;
   riskLevel: CanvasToolRisk;
-  inputSchema: Record<string, unknown>;
+  inputSchema: CanvasToolJsonSchema;
 }
 
 export interface SafeCanvasAssistantContext {

@@ -147,6 +147,30 @@ function request(
   });
 }
 
+function expectOpenAiCompatibleToolSchemas(tools: unknown) {
+  expect(Array.isArray(tools)).toBe(true);
+  for (const tool of tools as Array<{ function?: { name?: string; parameters?: unknown } }>) {
+    expect(tool.function?.parameters, tool.function?.name).toMatchObject({
+      type: "object",
+      properties: expect.any(Object),
+    });
+  }
+  expect(tools).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      function: expect.objectContaining({
+        name: "set_background",
+        parameters: expect.objectContaining({ type: "object" }),
+      }),
+    }),
+    expect.objectContaining({
+      function: expect.objectContaining({
+        name: "request_feedback",
+        parameters: expect.objectContaining({ type: "object" }),
+      }),
+    }),
+  ]));
+}
+
 async function inspectAsset(row: AssetRow | null) {
   const admin = createAdmin({ "asset-1": row });
   mocks.getCanvasAdmin.mockReturnValue(admin);
@@ -329,14 +353,14 @@ describe("handleAssistantRequest provider selection", () => {
       }],
     })));
 
-    const response = await handleAssistantRequest(request([]));
+    const response = await handleAssistantRequest(request([], [
+      { role: "user", content: "Create a polished poster layout." },
+    ]));
     const outboundBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0]![1]!.body));
 
     expect(response.status).toBe(200);
     expect(outboundBody.api_key).toBe("sk-user-openai-1234567890");
-    expect(outboundBody.tools).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "function" }),
-    ]));
+    expectOpenAiCompatibleToolSchemas(outboundBody.tools);
     expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "openai");
   });
 
@@ -383,7 +407,7 @@ describe("handleAssistantRequest provider selection", () => {
     });
     expect(outbound).not.toHaveProperty("temperature");
     expect(outbound).not.toHaveProperty("reasoning_effort");
-    expect(outbound.tools).toEqual(expect.arrayContaining([expect.objectContaining({ type: "function" })]));
+    expectOpenAiCompatibleToolSchemas(outbound.tools);
     expect(JSON.stringify(outbound.messages)).toContain("First instruction");
     expect(JSON.stringify(outbound.messages)).toContain("First response");
   });
