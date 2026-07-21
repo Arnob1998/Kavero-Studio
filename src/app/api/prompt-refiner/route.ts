@@ -51,8 +51,8 @@ Refined prompt rules — critical:
 - Do not start image generation. Only refine the prompt or ask one clarification question.
 
 JSON shapes:
-{"status":"questions","intentSummary":"...","question":{"id":"...","text":"...","options":[{"id":"...","label":"...","value":"...","allowsCustom":false}]}}
-{"status":"refined","intentSummary":"...","refinedPrompt":"...","refinementNote":"..."}
+{"status":"questions","intentSummary":"...","question":{"id":"...","text":"...","options":[{"id":"...","label":"...","value":"...","allowsCustom":false}]},"refinedPrompt":null,"refinementNote":null}
+{"status":"refined","intentSummary":"...","question":null,"refinedPrompt":"...","refinementNote":"..."}
 
 The refinementNote should briefly explain what was added or changed and why, in one sentence.`;
 
@@ -99,14 +99,72 @@ const refinerResponseSchema = z.discriminatedUnion("status", [
       text: z.string().trim().min(1).max(500),
       options: z.array(refinerChoiceSchema).min(2).max(5),
     }),
+    refinedPrompt: z.null().optional(),
+    refinementNote: z.null().optional(),
   }),
   z.object({
     status: z.literal("refined"),
     intentSummary: z.string().trim().min(1).max(800),
+    question: z.null().optional(),
     refinedPrompt: z.string().trim().min(1).max(12000),
-    refinementNote: z.string().trim().max(1200).optional().default(""),
+    refinementNote: z.string().trim().max(1200).nullable().optional().transform((value) => value ?? ""),
   }),
 ]);
+
+// Keep one provider-neutral wire schema for LiteLLM and direct Gemini. All
+// branch-specific fields are required but nullable because structured-output
+// providers handle a single object shape more reliably than oneOf/discriminators.
+const promptRefinerJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: { type: "string", enum: ["questions", "refined"] },
+    intentSummary: { type: "string", minLength: 1, maxLength: 800 },
+    question: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", minLength: 1, maxLength: 40 },
+            text: { type: "string", minLength: 1, maxLength: 500 },
+            options: {
+              type: "array",
+              minItems: 2,
+              maxItems: 5,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  id: { type: "string", minLength: 1, maxLength: 40 },
+                  label: { type: "string", minLength: 1, maxLength: 80 },
+                  value: { type: "string", minLength: 1, maxLength: 500 },
+                  allowsCustom: { type: "boolean" },
+                },
+                required: ["id", "label", "value", "allowsCustom"],
+              },
+            },
+          },
+          required: ["id", "text", "options"],
+        },
+        { type: "null" },
+      ],
+    },
+    refinedPrompt: {
+      anyOf: [
+        { type: "string", minLength: 1, maxLength: 12000 },
+        { type: "null" },
+      ],
+    },
+    refinementNote: {
+      anyOf: [
+        { type: "string", maxLength: 1200 },
+        { type: "null" },
+      ],
+    },
+  },
+  required: ["status", "intentSummary", "question", "refinedPrompt", "refinementNote"],
+} as const;
 
 function jsonError(message: string, status = 400, details?: unknown) {
   return Response.json({ error: message, details }, { status });
@@ -293,8 +351,21 @@ function responseWithRefinedPayload(refined: z.infer<typeof refinerResponseSchem
     return jsonError("Prompt refiner exceeded the question limit.", 502);
   }
 
+  if (refined.status === "questions") {
+    return Response.json({
+      status: refined.status,
+      intentSummary: refined.intentSummary,
+      question: refined.question,
+      model,
+      maxQuestions: MAX_REFINER_QUESTIONS,
+    });
+  }
+
   return Response.json({
-    ...refined,
+    status: refined.status,
+    intentSummary: refined.intentSummary,
+    refinedPrompt: refined.refinedPrompt,
+    refinementNote: refined.refinementNote,
     model,
     maxQuestions: MAX_REFINER_QUESTIONS,
   });
@@ -389,7 +460,14 @@ async function handleGatewayRefinement({
     {
       model: modelAlias,
       temperature: 0.35,
-      response_format: { type: "json_object" },
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "kavero_prompt_refiner",
+          strict: true,
+          schema: promptRefinerJsonSchema,
+        },
+      },
       messages: [
         { role: "system", content: PROMPT_REFINER_SYSTEM_PROMPT },
         { role: "user", content },
@@ -512,6 +590,7 @@ async function handleDirectGeminiRefinement(request: Request, userId: string) {
   const config: GenerateContentConfig = {
     temperature: 0.35,
     responseMimeType: "application/json",
+    responseJsonSchema: promptRefinerJsonSchema,
     thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
     systemInstruction: PROMPT_REFINER_SYSTEM_PROMPT,
   };

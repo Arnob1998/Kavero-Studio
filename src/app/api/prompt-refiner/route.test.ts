@@ -98,7 +98,17 @@ describe("/api/prompt-refiner", () => {
     expect(outboundBody).toMatchObject({
       model: "kavero-chat-openai-gpt-5-6",
       temperature: 0.35,
-      response_format: { type: "json_object" },
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "kavero_prompt_refiner",
+          strict: true,
+          schema: {
+            type: "object",
+            required: ["status", "intentSummary", "question", "refinedPrompt", "refinementNote"],
+          },
+        },
+      },
       api_key: "sk-user-openai-1234567890",
     });
     expect(outboundBody.messages[0]).toMatchObject({ role: "system" });
@@ -311,6 +321,10 @@ describe("/api/prompt-refiner", () => {
         model: "gemini-3.1-pro-preview",
         config: expect.objectContaining({
           responseMimeType: "application/json",
+          responseJsonSchema: expect.objectContaining({
+            type: "object",
+            required: ["status", "intentSummary", "question", "refinedPrompt", "refinementNote"],
+          }),
           systemInstruction: expect.any(String),
         }),
       }),
@@ -336,6 +350,35 @@ describe("/api/prompt-refiner", () => {
     expect(response.status).toBe(502);
     expect(body).toMatchObject({ error: "Prompt refinement returned an invalid response." });
     expect(JSON.stringify(consoleErrorSpy.mock.calls)).not.toContain("A product photo");
+  });
+
+  it("accepts the nullable structured-output question branch without exposing null fields", async () => {
+    configureGateway();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => litellmResponse({
+      status: "questions",
+      intentSummary: "A product image needs one decision.",
+      question: {
+        id: "setting",
+        text: "Where should the product appear?",
+        options: [
+          { id: "studio", label: "Studio", value: "studio", allowsCustom: false },
+          { id: "other", label: "Other", value: "other", allowsCustom: true },
+        ],
+      },
+      refinedPrompt: null,
+      refinementNote: null,
+    })));
+
+    const response = (await POST(jsonRequest(validBody())))!;
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      status: "questions",
+      question: { id: "setting", options: expect.any(Array) },
+    });
+    expect(body).not.toHaveProperty("refinedPrompt");
+    expect(body).not.toHaveProperty("refinementNote");
   });
 
   it("maps LiteLLM authentication and rate limit errors to safe responses", async () => {
@@ -424,6 +467,7 @@ function refinedPayload() {
   return {
     status: "refined",
     intentSummary: "Product image",
+    question: null,
     refinedPrompt: "A refined product prompt.",
     refinementNote: "Added lighting and composition.",
   };

@@ -84,6 +84,7 @@ import {
   shouldOpenImageGenerationGeminiKeyGate,
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "../utils/prompt-refiner-policy";
+import { ModelQuickPicker } from "./model-quick-picker";
 
 // TEMP: Hide the prompt chatbox/hover only on the generation workspace. Set this to false to restore it there.
 const hidePromptComposerDuringGeneration = true;
@@ -952,6 +953,7 @@ export function GeneratePage() {
     .filter((model): model is BrowserImageModel => Boolean(model));
   const activeChatModels = modelProvider.activeModels("chatOrchestration");
   const settingDefinitions = createSettingDefinitions(settings.model, activeImageModels);
+  const railSettingDefinitions = settingDefinitions.filter((definition) => definition.key !== "model");
   const currentDefinition =
     settingDefinitions.find((definition) => definition.key === activeSetting) ?? settingDefinitions[0];
   const CurrentSettingIcon = currentDefinition.icon;
@@ -1977,7 +1979,7 @@ export function GeneratePage() {
       </motion.aside>
 
       <motion.div
-        className="fixed bottom-5 left-1.5 z-30 hidden w-[250px] grid-cols-2 gap-2 rounded-xl px-2 py-1.5 text-[11px] text-white min-[920px]:grid min-[920px]:bottom-8 xl:w-[300px]"
+        className="fixed bottom-5 left-1.5 z-30 hidden w-[172px] grid-cols-1 gap-1.5 rounded-xl px-1.5 py-1.5 text-white min-[920px]:grid min-[920px]:bottom-8 xl:w-[248px]"
         initial={false}
         animate={{
           x: generationActive ? -280 : 0,
@@ -1987,20 +1989,22 @@ export function GeneratePage() {
         }}
         transition={generationTransition}
       >
-        <label className="grid gap-1">
-          <span className="font-bold text-white/42">Image model</span>
-          <select className="h-8 min-w-0 rounded-lg border border-white/10 bg-black/60 px-2 font-bold" value={modelProvider.settings?.selected?.imageGenerationModelAlias ?? ""} disabled={activeImageModels.length === 0} onChange={(event) => void modelProvider.saveSelection({ imageGenerationModelAlias: event.target.value })}>
-            {activeImageModels.length === 0 ? <option value="">No active models</option> : null}
-            {activeImageModels.map((model) => <option key={model.modelAlias} value={model.modelAlias}>{model.displayLabel}</option>)}
-          </select>
-        </label>
-        <label className="grid gap-1">
-          <span className="font-bold text-white/42">Prompt model</span>
-          <select className="h-8 min-w-0 rounded-lg border border-white/10 bg-black/60 px-2 font-bold" value={modelProvider.settings?.selected?.chatOrchestrationModelAlias ?? ""} disabled={activeChatModels.length === 0} onChange={(event) => void modelProvider.saveSelection({ chatOrchestrationModelAlias: event.target.value })}>
-            {activeChatModels.length === 0 ? <option value="">No active models</option> : null}
-            {activeChatModels.map((model) => <option key={model.modelAlias} value={model.modelAlias}>{model.displayLabel}</option>)}
-          </select>
-        </label>
+        <ModelQuickPicker
+          label="Image model"
+          icon={Images}
+          value={modelProvider.settings?.selected?.imageGenerationModelAlias ?? ""}
+          options={activeImageModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel, description: model.description }))}
+          emptyLabel="No active models"
+          onSelect={(imageGenerationModelAlias) => void modelProvider.saveSelection({ imageGenerationModelAlias })}
+        />
+        <ModelQuickPicker
+          label="Prompt model"
+          icon={BrainCircuit}
+          value={modelProvider.settings?.selected?.chatOrchestrationModelAlias ?? ""}
+          options={activeChatModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel, description: model.providerLabel }))}
+          emptyLabel="No active models"
+          onSelect={(chatOrchestrationModelAlias) => void modelProvider.saveSelection({ chatOrchestrationModelAlias })}
+        />
       </motion.div>
 
       <motion.aside
@@ -2024,7 +2028,7 @@ export function GeneratePage() {
           </button>
         </FloatingTooltip.Trigger>
         <div className="my-1 h-px w-8 bg-white/[0.08]" />
-        {settingDefinitions.map((definition) => {
+        {railSettingDefinitions.map((definition) => {
           const Icon = definition.icon;
           const selected = getSelectedOption(definition);
           const active = settingsOpen && activeSetting === definition.key;
