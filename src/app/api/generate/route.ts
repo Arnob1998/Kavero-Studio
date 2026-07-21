@@ -197,6 +197,7 @@ function logStandaloneGenerateGatewayEvent(input: {
     createModelGatewayEvent({
       userId: input.userId,
       feature: "standalone-generate",
+      slot: "imageGeneration",
       provider: input.selection.provider,
       model: input.selection.model,
       modelAlias: input.selection.modelAlias,

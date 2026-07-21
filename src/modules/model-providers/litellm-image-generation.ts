@@ -52,19 +52,19 @@ function getOpenAiImageWarnings(settings: LiteLlmImageGenerationSettings) {
   return warnings;
 }
 
-function createIntent(input: GenerateLiteLlmImageInput, provider: "gemini" | "openai"): ImageGenerationIntent {
+function createIntent(input: GenerateLiteLlmImageInput, provider: "gemini" | "openai" | "azure-openai"): ImageGenerationIntent {
   if (input.intent) return input.intent;
   return {
     modelAlias: input.modelAlias,
     feature: input.taskLabel === "auto-segment-isolation" ? "auto-segment-isolation" : input.taskLabel === "canvas-image-generation" ? "canvas-generation" : "standalone-generate",
     prompt: input.prompt,
-    count: provider === "openai" ? 1 : input.settings.count,
-    aspectRatio: provider === "openai" ? "auto" : input.settings.aspectRatio,
-    outputSize: provider === "openai" ? "auto" : input.settings.imageSize,
-    quality: provider === "openai" ? "auto" : undefined,
+    count: provider !== "gemini" ? 1 : input.settings.count,
+    aspectRatio: provider !== "gemini" ? "auto" : input.settings.aspectRatio,
+    outputSize: provider !== "gemini" ? "auto" : input.settings.imageSize,
+    quality: provider !== "gemini" ? "auto" : undefined,
     background: "auto",
     referenceImages: input.referenceImages,
-    reasoning: provider === "openai" ? undefined : input.settings.thinking,
+    reasoning: provider !== "gemini" ? undefined : input.settings.thinking,
   };
 }
 
@@ -113,7 +113,7 @@ export async function generateLiteLlmImage(input: GenerateLiteLlmImageInput): Pr
 
   return {
     ...normalized,
-    warnings: capability.provider === "openai" && !input.intent ? getOpenAiImageWarnings(input.settings) : [],
+    warnings: capability.provider !== "gemini" && !input.intent ? getOpenAiImageWarnings(input.settings) : [],
     requestId: response.requestId,
     callId: response.callId,
     usage: response.usage,

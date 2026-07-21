@@ -8,7 +8,7 @@ import {
   mergeModelProviderPreferences,
   validateModelAliasForSlot,
 } from "./preferences";
-import { OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
+import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS, OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 
 describe("model provider preferences", () => {
   it("returns safe defaults when preferences are missing or invalid", () => {
@@ -91,6 +91,38 @@ describe("model provider preferences", () => {
       selection: {
         chatOrchestrationModelAlias: "kavero-chat-azure-openai",
         imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      },
+    });
+  });
+
+  it.each([
+    "kavero-chat-orchestration-default",
+    "kavero-chat-openai-gpt-5-6",
+    "kavero-chat-azure-openai",
+  ])("selects Azure image generation without rewriting the %s orchestration slot", (chatAlias) => {
+    const result = mergeModelProviderPreferences(
+      { modelProviders: { chatOrchestrationModelAlias: chatAlias } },
+      { imageGenerationModelAlias: AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      selection: {
+        chatOrchestrationModelAlias: chatAlias,
+        imageGenerationModelAlias: AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+      },
+    });
+  });
+
+  it("changes orchestration while preserving Azure image generation", () => {
+    const result = mergeModelProviderPreferences(
+      { modelProviders: { imageGenerationModelAlias: AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS } },
+      { chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6" },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      selection: {
+        chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
+        imageGenerationModelAlias: AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
       },
     });
   });

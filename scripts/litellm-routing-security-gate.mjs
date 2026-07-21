@@ -133,6 +133,29 @@ function dynamicBody({ alias, model, apiBase }) {
   });
 }
 
+function dynamicImageBody({ alias, deployment, apiBase }) {
+  return JSON.stringify({
+    model: alias,
+    prompt: "security-gate-azure-image",
+    n: 1,
+    size: "1024x1024",
+    quality: "low",
+    user_config: {
+      model_list: [
+        {
+          model_name: alias,
+          litellm_params: {
+            model: `azure/${deployment}`,
+            api_key: providerCanary,
+            api_base: apiBase,
+            api_version: "2024-02-01",
+          },
+        },
+      ],
+    },
+  });
+}
+
 async function main() {
   cleanup();
   docker(["network", "create", network]);
@@ -176,6 +199,29 @@ async function main() {
   observed = await hits();
   const imageGenerationError = response.ok ? "" : await response.text();
   record("signed GPT Image generation", response.ok && observed.count === 1 && observed.hits[0].path.includes("/images/generations"), { status: response.status, upstreamHits: observed.count, paths: observed.hits.map((hit) => hit.path), error: imageGenerationError.slice(0, 500) });
+
+  await resetHits();
+  const azureImageDeployment = "gate-azure-image";
+  const azureImageBase = "http://mp9f1-mock:8080/azure-image";
+  const azureImageBody = dynamicImageBody({
+    alias: "kavero-image-azure-gpt-image-2",
+    deployment: azureImageDeployment,
+    apiBase: azureImageBase,
+  });
+  response = await request("/v1/images/generations", {
+    body: azureImageBody,
+    signature: signedHeaders("/v1/images/generations", azureImageBody),
+  });
+  observed = await hits();
+  record(
+    "signed Azure GPT Image mapping",
+    response.ok &&
+      observed.count === 1 &&
+      observed.hits[0].path.startsWith("/azure-image/") &&
+      observed.hits[0].path.includes(`/deployments/${azureImageDeployment}/images/generations`) &&
+      observed.hits[0].path.includes("api-version=2024-02-01"),
+    { status: response.status, upstreamHits: observed.count, paths: observed.hits.map((hit) => hit.path) },
+  );
 
   const editFixture = imageEditFixture();
   await rejection("signed GPT Image multipart edit remains fail-closed", () => request("/v1/images/edits", {

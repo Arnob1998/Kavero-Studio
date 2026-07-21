@@ -203,7 +203,7 @@ KAVERO_LITELLM_ROUTING_SECRET=
 
 Keep LiteLLM credentials, the routing secret, upstream provider keys, and internal gateway URLs server-only. A hosted external LiteLLM service must run the matching Kavero custom-auth hook with the same routing secret and pinned LiteLLM contract; an unmodified LiteLLM endpoint is not supported for dynamic client routing.
 
-Azure OpenAI orchestration can use saved Settings credentials or a complete server environment configuration. Set `AZURE_API_KEY`, `AZURE_API_BASE`, `AZURE_API_VERSION`, `AZURE_DEPLOYMENT_NAME`, and `AZURE_BASE_MODEL` together. Supported model families are `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; Azure image generation is not configured by these values.
+Azure OpenAI orchestration and image generation use independent logical configurations. Orchestration uses the `AZURE_API_*` record; Azure GPT Image 2 uses the `AZURE_IMAGE_*` record. The same resource URL and key may be entered explicitly in both records, but values are never copied or inferred between them. See [Azure OpenAI setup](docs/azure-openai-setup.md).
 
 OpenAI orchestration offers stable Kavero aliases for `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
 
@@ -255,6 +255,11 @@ Important envs:
 | `AZURE_API_VERSION` | Azure OpenAI API version used for orchestration requests. |
 | `AZURE_DEPLOYMENT_NAME` | Account-specific Azure OpenAI deployment name; kept server-only. |
 | `AZURE_BASE_MODEL` | Curated routing family: `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`. GPT-5 families use LiteLLM's explicit `azure/gpt5_series/<deployment>` route. |
+| `AZURE_IMAGE_API_KEY` | Azure image-slot key, supplied independently even when identical to `AZURE_API_KEY`. |
+| `AZURE_IMAGE_API_BASE` | Azure image-slot resource URL, supplied independently even when identical to `AZURE_API_BASE`. |
+| `AZURE_IMAGE_API_VERSION` | Validated Azure GPT Image 2 API version: `2024-02-01`. |
+| `AZURE_IMAGE_DEPLOYMENT_NAME` | Azure GPT Image 2 deployment name; kept server-only. |
+| `AZURE_IMAGE_BASE_MODEL` | Validated image family: `gpt-image-2`. |
 | `OLLAMA_BASE_URL` | Optional server-side Ollama URL for the LiteLLM gateway. |
 
 The setup CLI keeps existing non-empty values by default, asks before replacing secrets, writes through a backup, and never echoes secrets back to your terminal.

@@ -8,7 +8,8 @@ import {
   getModelGatewayCredentialMode,
   type ModelGatewayCredentialMode,
 } from "./credential-mode";
-import { getAzureOpenAiEnvCredentials, type AzureOpenAiEnv } from "./azure-routing";
+import { getAzureOpenAiEnvCredentials, getAzureOpenAiImageEnvCredentials, type AzureOpenAiEnv } from "./azure-routing";
+import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "../image-capabilities";
 
 export { getProviderKeyIdForModelProvider } from "../provider-key-mapping";
 
@@ -88,7 +89,9 @@ export async function resolveModelCredentials(
     return failure(input, entry.provider, null, validation.code, validation.message);
   }
 
-  const providerKeyId = getProviderKeyIdForModelProvider(entry.provider);
+  const providerKeyId = entry.modelAlias === AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS
+    ? "azure-openai-image"
+    : getProviderKeyIdForModelProvider(entry.provider);
   const credentialMode = input.credentialMode ?? getModelGatewayCredentialMode();
   const context = {
     modelAlias: input.modelAlias,
@@ -181,9 +184,11 @@ function gatewayEnvOrFailure(
   context: CredentialResolutionContext,
   env?: AzureOpenAiEnv,
 ): GatewayEnvCredentialResolution | FailedCredentialResolution {
-  if (context.providerKeyId !== "azure-openai") return gatewayEnv(context);
+  if (context.providerKeyId !== "azure-openai" && context.providerKeyId !== "azure-openai-image") return gatewayEnv(context);
 
-  const credentials = getAzureOpenAiEnvCredentials(env);
+  const credentials = context.providerKeyId === "azure-openai-image"
+    ? getAzureOpenAiImageEnvCredentials(env)
+    : getAzureOpenAiEnvCredentials(env);
   return credentials
     ? gatewayEnv(context, credentials)
     : failure(
@@ -191,7 +196,9 @@ function gatewayEnvOrFailure(
         context.provider,
         context.providerKeyId,
         "missing-credentials",
-        "Complete Azure OpenAI environment credentials are required.",
+        context.providerKeyId === "azure-openai-image"
+          ? "Complete Azure OpenAI image environment credentials are required."
+          : "Complete Azure OpenAI environment credentials are required.",
       );
 }
 

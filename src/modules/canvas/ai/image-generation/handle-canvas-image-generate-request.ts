@@ -293,6 +293,7 @@ function logCanvasImageGatewayEvent(input: {
     createModelGatewayEvent({
       userId: input.userId,
       feature: "canvas-image-generation",
+      slot: "imageGeneration",
       provider: input.selection.provider,
       model: input.selection.model,
       modelAlias: input.selection.modelAlias,

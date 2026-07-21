@@ -151,6 +151,60 @@ describe("model credential routing", () => {
     )).resolves.toMatchObject({ ok: false, code: "missing-credentials" });
   });
 
+  it("keeps Azure orchestration and image credentials independent in saved and env modes", async () => {
+    const savedImage = {
+      apiKey: "saved-image-key-012345678901234567",
+      apiBase: "https://shared.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "saved-image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    const env = {
+      AZURE_API_KEY: "shared-key-012345678901234567890",
+      AZURE_API_BASE: "https://shared.openai.azure.com",
+      AZURE_API_VERSION: "2025-04-01-preview",
+      AZURE_DEPLOYMENT_NAME: "chat-deployment",
+      AZURE_BASE_MODEL: "gpt-5.6-sol",
+      AZURE_IMAGE_API_KEY: "shared-key-012345678901234567890",
+      AZURE_IMAGE_API_BASE: "https://shared.openai.azure.com",
+      AZURE_IMAGE_API_VERSION: "2024-02-01",
+      AZURE_IMAGE_DEPLOYMENT_NAME: "image-deployment",
+      AZURE_IMAGE_BASE_MODEL: "gpt-image-2",
+    };
+    const input = {
+      userId: "user-1",
+      modelAlias: "kavero-image-azure-gpt-image-2",
+      slot: "imageGeneration" as const,
+    };
+
+    getCredentials.mockResolvedValue(savedImage);
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-or-user" },
+      { ...dependencies, env },
+    )).resolves.toMatchObject({
+      providerKeyId: "azure-openai-image",
+      credentialSource: "user-byok",
+      credentials: savedImage,
+    });
+    expect(getCredentials).toHaveBeenCalledWith("user-1", "azure-openai-image");
+
+    getCredentials.mockResolvedValue(null);
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-only" },
+      { ...dependencies, env },
+    )).resolves.toMatchObject({
+      providerKeyId: "azure-openai-image",
+      credentialSource: "gateway-env",
+      credentials: { deploymentName: "image-deployment", apiVersion: "2024-02-01" },
+    });
+
+    const orchestrationOnly = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("AZURE_IMAGE_")));
+    await expect(resolveModelCredentials(
+      { ...input, credentialMode: "env-only" },
+      { ...dependencies, env: orchestrationOnly },
+    )).resolves.toMatchObject({ ok: false, code: "missing-credentials" });
+  });
+
   it("handles unknown aliases and wrong slots before credential loading", async () => {
     await expect(
       resolveModelCredentials(

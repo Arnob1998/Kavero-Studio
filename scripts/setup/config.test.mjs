@@ -50,6 +50,9 @@ describe("setup config", () => {
     for (const key of ["AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION", "AZURE_DEPLOYMENT_NAME", "AZURE_BASE_MODEL"]) {
       expect(sensitiveEnvKeys.has(key)).toBe(true);
     }
+    for (const key of ["AZURE_IMAGE_API_KEY", "AZURE_IMAGE_API_BASE", "AZURE_IMAGE_API_VERSION", "AZURE_IMAGE_DEPLOYMENT_NAME", "AZURE_IMAGE_BASE_MODEL"]) {
+      expect(sensitiveEnvKeys.has(key)).toBe(true);
+    }
   });
 
   it("requires the local Docker LiteLLM gateway shape", () => {

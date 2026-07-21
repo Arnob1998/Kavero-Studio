@@ -50,7 +50,7 @@ export type ImageSizeCapabilities =
 
 export type ImageModelCapabilities = {
   modelAlias: string;
-  provider: "gemini" | "openai";
+  provider: "gemini" | "openai" | "azure-openai";
   model: string;
   legacyModelId: string;
   displayLabel: string;
@@ -155,6 +155,7 @@ const OPENAI_SIZE_PRESETS = [
 export const GEMINI_PRO_IMAGE_MODEL_ALIAS = "kavero-image-gemini-3-pro";
 export const GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS = "kavero-image-gemini-2-5-flash";
 export const OPENAI_GPT_IMAGE_2_MODEL_ALIAS = "kavero-image-openai-gpt-image-2";
+export const AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS = "kavero-image-azure-gpt-image-2";
 export const DEFAULT_IMAGE_MODEL_LEGACY_ID = "gemini-3.1-flash-image-preview";
 
 export const imageModelCapabilities = [
@@ -247,6 +248,40 @@ export const imageModelCapabilities = [
     displayLabel: "GPT Image 2",
     description: "OpenAI text-to-image generation with provider-native quality and output sizes.",
     badge: "GPT",
+    selectable: true,
+    supportsTextToImage: true,
+    supportsReferenceEditing: false,
+    supportsMask: false,
+    maximumReferenceImages: 0,
+    supportedReferenceMimeTypes: [],
+    count: { minimum: 1, maximum: 10, presets: [1, 2, 3, 4, 6, 8, 10], default: 1 },
+    size: {
+      mode: "constrained-dimensions",
+      presets: OPENAI_SIZE_PRESETS,
+      aspectRatios: ["auto", "1:1", "3:2", "2:3"],
+      defaultSize: "auto",
+      defaultAspectRatio: "auto",
+      constraints: { maximumEdge: 3840, edgeMultiple: 16, maximumAspectRatio: 3, minimumPixels: 655_360, maximumPixels: 8_294_400 },
+    },
+    quality: { values: ["auto", "low", "medium", "high"], default: "auto" },
+    background: { values: ["auto", "opaque", "transparent"], default: "auto" },
+    reasoning: { values: [], default: null },
+    streaming: true,
+    transport: { generation: "json", editing: null },
+    compatibility: { "standalone-generate": true, "canvas-generation": true, "auto-segment-isolation": false },
+    featureCountPresets: { "standalone-generate": [1, 2, 3, 4, 6, 8, 10], "canvas-generation": [4, 8], "auto-segment-isolation": [] },
+    featureAspectRatios: { "standalone-generate": ["auto", "1:1", "3:2", "2:3"], "canvas-generation": ["auto", "1:1", "3:2", "2:3"], "auto-segment-isolation": [] },
+    fixedResolutionWarning: null,
+    runtime: { adapter: "openai-images", directTransport: null, gatewayTransport: "openai-generations", responseNormalizer: "openai-images" },
+  },
+  {
+    modelAlias: AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+    provider: "azure-openai",
+    model: "gpt-image-2",
+    legacyModelId: "azure-gpt-image-2",
+    displayLabel: "Azure GPT Image 2",
+    description: "Azure OpenAI text-to-image generation through an independently configured image deployment.",
+    badge: "AZ",
     selectable: true,
     supportsTextToImage: true,
     supportsReferenceEditing: false,

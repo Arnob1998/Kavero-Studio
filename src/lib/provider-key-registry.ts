@@ -5,6 +5,7 @@ export const supportedProviderIds = [
   "openai",
   "groq",
   "azure-openai",
+  "azure-openai-image",
   "openai-compatible",
 ] as const;
 
@@ -20,6 +21,13 @@ export type ProviderCredentialsMap = {
     apiVersion: string;
     deploymentName: string;
     baseModel: AzureOpenAiBaseModel;
+  };
+  "azure-openai-image": {
+    apiKey: string;
+    apiBase: string;
+    apiVersion: string;
+    deploymentName: string;
+    baseModel: AzureOpenAiImageBaseModel;
   };
   "openai-compatible": { apiKey?: string; apiBase: string };
 };
@@ -88,6 +96,19 @@ export const providerKeyRegistry: Record<SupportedProviderId, ProviderKeyRegistr
     storageFormat: "json",
     checkMode: "live",
   },
+  "azure-openai-image": {
+    id: "azure-openai-image",
+    label: "Azure OpenAI (Image)",
+    credentialFields: [
+      { id: "apiKey", required: true, secret: true },
+      { id: "apiBase", required: true, secret: false },
+      { id: "apiVersion", required: true, secret: false },
+      { id: "deploymentName", required: true, secret: false },
+      { id: "baseModel", required: true, secret: false },
+    ],
+    storageFormat: "json",
+    checkMode: "live",
+  },
   "openai-compatible": {
     id: "openai-compatible",
     label: "OpenAI-compatible",
@@ -105,6 +126,7 @@ const providerLogoPaths: Record<SupportedProviderId, string> = {
   openai: "/llm-providers/openai.png",
   groq: "/llm-providers/grok-icon.png",
   "azure-openai": "/llm-providers/Microsoft_Azure.svg",
+  "azure-openai-image": "/llm-providers/Microsoft_Azure.svg",
   "openai-compatible": "/llm-providers/openai.png",
 };
 
@@ -125,6 +147,8 @@ export const azureOpenAiBaseModels = [
   "gpt-5.6-luna",
 ] as const;
 export type AzureOpenAiBaseModel = (typeof azureOpenAiBaseModels)[number];
+export const azureOpenAiImageBaseModels = ["gpt-image-2"] as const;
+export type AzureOpenAiImageBaseModel = (typeof azureOpenAiImageBaseModels)[number];
 
 const azureBaseModelLabels: Record<AzureOpenAiBaseModel, string> = {
   "gpt-4o": "GPT-4o family",
@@ -133,6 +157,9 @@ const azureBaseModelLabels: Record<AzureOpenAiBaseModel, string> = {
   "gpt-5.6-sol": "GPT-5.6 Sol",
   "gpt-5.6-terra": "GPT-5.6 Terra",
   "gpt-5.6-luna": "GPT-5.6 Luna",
+};
+const azureImageBaseModelLabels: Record<AzureOpenAiImageBaseModel, string> = {
+  "gpt-image-2": "GPT Image 2",
 };
 
 export function getBrowserProviderKeyCatalog(): BrowserProviderKeyCatalogEntry[] {
@@ -147,7 +174,7 @@ export function getBrowserProviderKeyCatalog(): BrowserProviderKeyCatalogEntry[]
       credentialFields: entry.credentialFields.map((field) => ({
         ...field,
         label:
-          providerId === "azure-openai" && field.id === "apiBase"
+          (providerId === "azure-openai" || providerId === "azure-openai-image") && field.id === "apiBase"
             ? "Azure endpoint"
             : credentialFieldLabels[field.id],
         inputType: field.secret
@@ -159,9 +186,11 @@ export function getBrowserProviderKeyCatalog(): BrowserProviderKeyCatalogEntry[]
               : "text",
         ...(field.id === "baseModel"
           ? {
-              options: azureOpenAiBaseModels.map((value) => ({
+              options: (providerId === "azure-openai-image" ? azureOpenAiImageBaseModels : azureOpenAiBaseModels).map((value) => ({
                 value,
-                label: azureBaseModelLabels[value],
+                label: providerId === "azure-openai-image"
+                  ? azureImageBaseModelLabels[value as AzureOpenAiImageBaseModel]
+                  : azureBaseModelLabels[value as AzureOpenAiBaseModel],
               })),
             }
           : {}),
@@ -184,6 +213,7 @@ const deploymentNameSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const azureBaseModelSchema = z.enum(azureOpenAiBaseModels);
+const azureImageBaseModelSchema = z.enum(azureOpenAiImageBaseModels);
 const apiBaseSchema = z.string().trim().max(2048).transform((value, context) => {
   let url: URL;
 
@@ -228,6 +258,15 @@ const credentialSchemas = {
       apiVersion: apiVersionSchema,
       deploymentName: deploymentNameSchema,
       baseModel: azureBaseModelSchema,
+    })
+    .strict(),
+  "azure-openai-image": z
+    .object({
+      apiKey: apiKeySchema,
+      apiBase: azureApiBaseSchema,
+      apiVersion: z.literal("2024-02-01"),
+      deploymentName: deploymentNameSchema,
+      baseModel: azureImageBaseModelSchema,
     })
     .strict(),
   "openai-compatible": z

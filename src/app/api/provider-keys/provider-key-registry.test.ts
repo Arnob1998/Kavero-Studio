@@ -15,6 +15,7 @@ describe("provider key registry", () => {
       "openai",
       "groq",
       "azure-openai",
+      "azure-openai-image",
       "openai-compatible",
     ]);
     expect(providerKeyRegistry).not.toHaveProperty("ollama");
@@ -30,6 +31,11 @@ describe("provider key registry", () => {
       "baseModel",
     ]);
     expect(providerKeyRegistry["azure-openai"].checkMode).toBe("live");
+    expect(providerKeyRegistry["azure-openai-image"]).toMatchObject({
+      label: "Azure OpenAI (Image)",
+      storageFormat: "json",
+      checkMode: "live",
+    });
     expect(providerKeyRegistry["openai-compatible"]).toMatchObject({
       storageFormat: "json",
       checkMode: "validation-only",
@@ -63,6 +69,10 @@ describe("provider key registry", () => {
         { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
         { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
       ]));
+    expect(catalog.find((provider) => provider.id === "azure-openai-image")?.credentialFields
+      .find((field) => field.id === "baseModel")?.options).toEqual([
+        { value: "gpt-image-2", label: "GPT Image 2" },
+      ]);
   });
 
   it("round-trips legacy Gemini strings and JSON multi-field credentials", () => {
@@ -78,6 +88,28 @@ describe("provider key registry", () => {
       baseModel: "gpt-4.1" as const,
     };
     expect(deserializeProviderCredentials("azure-openai", serializeProviderCredentials("azure-openai", azure))).toEqual(azure);
+    const azureImage = {
+      apiKey: azure.apiKey,
+      apiBase: azure.apiBase,
+      apiVersion: "2024-02-01" as const,
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2" as const,
+    };
+    expect(deserializeProviderCredentials("azure-openai-image", serializeProviderCredentials("azure-openai-image", azureImage))).toEqual(azureImage);
+  });
+
+  it("accepts only the validated Azure image deployment mapping", () => {
+    const valid = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    expect(parseProviderCredentials("azure-openai-image", valid)).toEqual(valid);
+    expect(parseProviderCredentials("azure-openai-image", { ...valid, apiVersion: "2025-04-01-preview" })).toBeNull();
+    expect(parseProviderCredentials("azure-openai-image", { ...valid, baseModel: "gpt-image-1" })).toBeNull();
+    expect(parseProviderCredentials("azure-openai-image", { ...valid, deploymentName: "bad/name" })).toBeNull();
   });
 
   it.each([

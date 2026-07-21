@@ -15,18 +15,21 @@ describe("generate model helpers", () => {
       "gemini-3-pro-image-preview",
       "gemini-2.5-flash-image",
       "gpt-image-2",
+      "azure-gpt-image-2",
     ]);
     expect(modelLabels).toEqual({
       "gemini-3.1-flash-image-preview": "Nano Banana 2",
       "gemini-3-pro-image-preview": "Nano Banana Pro",
       "gemini-2.5-flash-image": "Nano Banana",
       "gpt-image-2": "GPT Image 2",
+      "azure-gpt-image-2": "Azure GPT Image 2",
     });
     expect(referenceImageLimits).toEqual({
       "gemini-3.1-flash-image-preview": 14,
       "gemini-3-pro-image-preview": 14,
       "gemini-2.5-flash-image": 3,
       "gpt-image-2": 0,
+      "azure-gpt-image-2": 0,
     });
     expect(aspectRatios).toContain("auto");
     expect(aspectRatios).toContain("16:9");

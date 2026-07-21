@@ -212,6 +212,64 @@ describe("canvas image generation API", () => {
     expect(body.images).toHaveLength(4);
   });
 
+  it("generates Azure GPT Image 2 canvas candidates through the independent image slot", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6",
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } }));
+    const credentials = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://images.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    mocks.getUserProviderCredentials.mockResolvedValue(credentials);
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => new Response(JSON.stringify({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }],
+    }), { headers: { "Content-Type": "application/json" } })));
+
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      count: 4,
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "medium",
+    })));
+    const body = await response.json();
+    const outbound = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "azure-openai-image");
+    expect(outbound).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      user_config: { model_list: [{ litellm_params: {
+        model: "azure/image-deployment",
+        api_version: "2024-02-01",
+      } }] },
+    });
+    expect(body).toMatchObject({ model: "kavero-image-azure-gpt-image-2", modelLabel: "Azure GPT Image 2" });
+    expect(body.images).toHaveLength(4);
+  });
+
+  it("rejects Azure image canvas references before upstream traffic", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } }));
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      count: 4,
+      imageSize: "auto",
+      referenceImages: [{ dataUrl: "data:image/png;base64,AAAA", mimeType: "image/png" }],
+    })));
+    expect(response.status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+  });
+
   it("rejects GPT Image 2 canvas references before upstream traffic", async () => {
     configureGateway();
     const response = await POST(request(validBody({

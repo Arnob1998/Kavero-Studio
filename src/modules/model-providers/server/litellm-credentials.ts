@@ -86,8 +86,9 @@ function paramsForProvider<T extends SupportedProviderId>(
     case "openai":
     case "groq":
       return { api_key: (credentials as { apiKey: string }).apiKey };
-    case "azure-openai": {
-      const azure = credentials as ProviderCredentialsMap["azure-openai"];
+    case "azure-openai":
+    case "azure-openai-image": {
+      const azure = credentials as ProviderCredentialsMap["azure-openai"] | ProviderCredentialsMap["azure-openai-image"];
       return {
         api_key: azure.apiKey,
         api_base: azure.apiBase,

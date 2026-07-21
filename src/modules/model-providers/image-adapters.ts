@@ -176,9 +176,15 @@ const openAiAdapter: ImageModelAdapter = {
   normalizeResponse: normalizeOpenAiImageResponse,
 };
 
+const azureOpenAiAdapter: ImageModelAdapter = {
+  ...openAiAdapter,
+  provider: "azure-openai",
+};
+
 export const imageModelAdapterRegistry: Record<ImageModelCapabilities["provider"], ImageModelAdapter> = {
   gemini: geminiAdapter,
   openai: openAiAdapter,
+  "azure-openai": azureOpenAiAdapter,
 };
 
 export function getImageModelAdapter(modelOrAlias: string): ImageModelAdapter | null {

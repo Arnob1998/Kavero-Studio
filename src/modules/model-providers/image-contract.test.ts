@@ -3,6 +3,7 @@ import { createGeminiGenerateContentConfig, getImageModelAdapter } from "./image
 import {
   GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS,
   GEMINI_PRO_IMAGE_MODEL_ALIAS,
+  AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
   OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
   getImageModelCapabilities,
   getImageModelCapabilitiesByLegacyModel,
@@ -22,6 +23,7 @@ describe("image model configuration contract", () => {
     expect(getImageModelCapabilitiesByLegacyModel("gemini-3-pro-image-preview")?.modelAlias).toBe(GEMINI_PRO_IMAGE_MODEL_ALIAS);
     expect(getImageModelCapabilities(GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS)?.legacyModelId).toBe("gemini-2.5-flash-image");
     expect(getImageModelCapabilities(OPENAI_GPT_IMAGE_2_MODEL_ALIAS)?.legacyModelId).toBe("gpt-image-2");
+    expect(getImageModelCapabilities(AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS)?.legacyModelId).toBe("azure-gpt-image-2");
   });
 
   it("projects GPT Image 2 as a text-to-image-only standalone and canvas model", () => {
@@ -30,12 +32,14 @@ describe("image model configuration contract", () => {
       "gemini-3-pro-image-preview",
       "gemini-2.5-flash-image",
       "gpt-image-2",
+      "azure-gpt-image-2",
     ]);
     expect(getBrowserImageModels("standalone-generate").map((model) => model.displayLabel)).toEqual([
       "Nano Banana 2",
       "Nano Banana Pro",
       "Nano Banana",
       "GPT Image 2",
+      "Azure GPT Image 2",
     ]);
     const gpt = browserImageModels.find((model) => model.legacyModelId === "gpt-image-2");
     expect(gpt).toMatchObject({
@@ -46,6 +50,14 @@ describe("image model configuration contract", () => {
       quality: { values: ["auto", "low", "medium", "high"], default: "auto" },
     });
     expect(getBrowserImageModels("auto-segment-isolation").some((model) => model.legacyModelId === "gpt-image-2")).toBe(false);
+    const azure = browserImageModels.find((model) => model.legacyModelId === "azure-gpt-image-2");
+    expect(azure).toMatchObject({
+      provider: "azure-openai",
+      supportsReferenceEditing: false,
+      supportsMask: false,
+      maximumReferenceImages: 0,
+    });
+    expect(getBrowserImageModels("auto-segment-isolation").some((model) => model.legacyModelId === "azure-gpt-image-2")).toBe(false);
   });
 
   it("owns defaults, feature presets, reference limits, MIME types, and fixed-resolution warnings", () => {

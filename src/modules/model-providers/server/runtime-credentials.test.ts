@@ -106,6 +106,46 @@ describe("runtime model credentials", () => {
     expect(JSON.stringify(prepared)).not.toContain("browser");
   });
 
+  it("constructs Azure image user_config from the independent image record", () => {
+    const prepared = prepareLiteLlmImageRuntimeRequest({
+      ok: true,
+      status: "resolved",
+      credentialSource: "gateway-env",
+      credentials: {
+        apiKey: "azure-image-key-012345678901234567890",
+        apiBase: "https://images.openai.azure.com",
+        apiVersion: "2024-02-01",
+        deploymentName: "image-deployment",
+        baseModel: "gpt-image-2",
+      },
+      modelAlias: "kavero-image-azure-gpt-image-2",
+      slot: "imageGeneration",
+      provider: "azure-openai",
+      providerKeyId: "azure-openai-image",
+    });
+    expect(prepared).toMatchObject({
+      ok: true,
+      monitoringModel: "gpt-image-2",
+      credentialSource: "gateway-env",
+    });
+    if (!("transformRequestBody" in prepared)) return;
+    const body = prepared.transformRequestBody({
+      model: "caller-model",
+      prompt: "draw",
+      api_key: "caller-key",
+      user_config: { caller: true },
+    });
+    expect(body).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      prompt: "draw",
+      user_config: {
+        model_list: [{ litellm_params: { model: "azure/image-deployment", api_version: "2024-02-01" } }],
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("caller-key");
+    expect(JSON.stringify(body)).not.toContain("caller-model");
+  });
+
   it("returns fixed safe runtime credential errors", async () => {
     const required = createSafeRuntimeCredentialFailureResponse("Image Judge", {
       ok: false,

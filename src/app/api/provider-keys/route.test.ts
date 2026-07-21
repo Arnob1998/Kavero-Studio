@@ -48,6 +48,7 @@ describe("/api/provider-keys", () => {
       "openai",
       "groq",
       "azure-openai",
+      "azure-openai-image",
       "openai-compatible",
     ]);
     expect(body.providers.find((provider: { id: string }) => provider.id === "azure-openai")).toMatchObject({
@@ -157,6 +158,24 @@ describe("/api/provider-keys", () => {
     expect(JSON.stringify(body)).not.toContain(credentials.apiBase);
     expect(JSON.stringify(body)).not.toContain(credentials.apiVersion);
     expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
+  });
+
+  it("stores Azure image credentials in a separate provider record", async () => {
+    const rpc = createUpsertRpc("azure-openai-image", "...7890");
+    mocks.createClient.mockResolvedValue(createSupabaseClient({ user: { id: "user-1" } }));
+    mocks.createAdminClient.mockReturnValue({ rpc });
+    const credentials = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    const response = await POST(providerRequest("azure-openai-image", credentials));
+    const rpcPayload = rpc.mock.calls[0]![1] as { p_provider_id: string; p_secret: string };
+    expect(response.status).toBe(200);
+    expect(rpcPayload.p_provider_id).toBe("azure-openai-image");
+    expect(JSON.parse(rpcPayload.p_secret)).toEqual(credentials);
   });
 
   it("accepts an OpenAI-compatible public base URL without requiring an API key", async () => {

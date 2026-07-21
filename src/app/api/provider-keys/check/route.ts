@@ -11,7 +11,7 @@ import {
   getModelGatewayConfig,
   isModelGatewayError,
 } from "@/modules/model-providers";
-import { buildAzureOpenAiLiteLlmRequest } from "@/modules/model-providers/server";
+import { buildAzureOpenAiImageGenerationUrl, buildAzureOpenAiLiteLlmRequest } from "@/modules/model-providers/server";
 
 export async function POST(request: Request) {
   const parsed = parseProviderCredentialPayload(await request.json().catch(() => null));
@@ -70,6 +70,29 @@ export async function POST(request: Request) {
 }
 
 async function checkProviderCredentials(providerId: SupportedProviderId, credentials: ProviderCredentials) {
+  if (providerId === "azure-openai-image") {
+    const url = buildAzureOpenAiImageGenerationUrl(credentials);
+    if (!url) return { ok: false, status: 400 };
+    const imageCredentials = credentials as { apiKey: string };
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "api-key": imageCredentials.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "A minimal blue circle on a plain white background",
+        n: 1,
+        size: "1024x1024",
+        quality: "low",
+        output_format: "png",
+      }),
+    });
+    if (!response.ok) return { ok: false, status: response.status };
+    const payload = await response.json().catch(() => null) as { data?: Array<{ b64_json?: unknown }> } | null;
+    return {
+      ok: Boolean(payload?.data?.length === 1 && typeof payload.data[0]?.b64_json === "string"),
+      status: 200,
+    };
+  }
+
   if (providerId === "azure-openai") {
     const config = getModelGatewayConfig();
     if (config.status !== "configured") return { ok: false, status: 503 };

@@ -153,6 +153,38 @@ describe("/api/provider-keys/check", () => {
     expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
   });
 
+  it("checks the independent Azure image slot through its validated deployment route", async () => {
+    const credentials = azureImageCredentials();
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      data: [{ b64_json: "aW1hZ2U=" }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(checkCredentialsRequest("azure-openai-image", credentials));
+    const body = await response.json();
+    const [url, init] = fetchMock.mock.calls[0]!;
+
+    expect(body).toMatchObject({ status: "passed" });
+    expect(String(url)).toBe(
+      "https://images.openai.azure.com/openai/deployments/image-deployment/images/generations?api-version=2024-02-01",
+    );
+    expect(init).toMatchObject({ method: "POST" });
+    expect(init?.headers).toMatchObject({ "api-key": credentials.apiKey });
+    expect(JSON.stringify(body)).not.toContain(credentials.apiKey);
+    expect(JSON.stringify(body)).not.toContain(credentials.apiBase);
+    expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
+  });
+
+  it("rejects a malformed Azure image response without exposing configuration", async () => {
+    const credentials = azureImageCredentials();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    const response = await POST(checkCredentialsRequest("azure-openai-image", credentials));
+    const body = await response.json();
+    expect(body).toMatchObject({ status: "failed", code: "provider_error" });
+    expect(JSON.stringify(body)).not.toContain(credentials.apiKey);
+    expect(JSON.stringify(body)).not.toContain(credentials.deploymentName);
+  });
+
   it.each([
     ["unsupported", { apiKey: "sk-0123456789012345678901234" }],
     ["openai-compatible", { apiBase: "http://localhost:11434/v1" }],
@@ -188,6 +220,16 @@ function azureCredentials() {
     apiVersion: "2025-04-01-preview",
     deploymentName: "deployment-one",
     baseModel: "gpt-4.1",
+  };
+}
+
+function azureImageCredentials() {
+  return {
+    apiKey: "azure-image-key-012345678901234567890",
+    apiBase: "https://images.openai.azure.com",
+    apiVersion: "2024-02-01",
+    deploymentName: "image-deployment",
+    baseModel: "gpt-image-2",
   };
 }
 

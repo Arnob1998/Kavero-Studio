@@ -109,6 +109,11 @@ export const sensitiveEnvKeys = new Set([
   "AZURE_API_VERSION",
   "AZURE_DEPLOYMENT_NAME",
   "AZURE_BASE_MODEL",
+  "AZURE_IMAGE_API_KEY",
+  "AZURE_IMAGE_API_BASE",
+  "AZURE_IMAGE_API_VERSION",
+  "AZURE_IMAGE_DEPLOYMENT_NAME",
+  "AZURE_IMAGE_BASE_MODEL",
 ]);
 
 export const dockerGeneratedSecretKeys = [

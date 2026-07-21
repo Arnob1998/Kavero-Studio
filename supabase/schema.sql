@@ -1129,6 +1129,7 @@ begin
     'openai',
     'groq',
     'azure-openai',
+    'azure-openai-image',
     'openai-compatible'
   ) then
     raise exception 'Provider is not available yet';
@@ -1143,7 +1144,7 @@ begin
     raise exception 'API key is too short';
   end if;
 
-  if p_provider_id in ('azure-openai', 'openai-compatible') then
+  if p_provider_id in ('azure-openai', 'azure-openai-image', 'openai-compatible') then
     begin
       credentials_json := p_secret::jsonb;
     exception when others then
@@ -1155,7 +1156,7 @@ begin
       raise exception 'Provider API base is required';
     end if;
 
-    if p_provider_id = 'azure-openai' and (
+    if p_provider_id in ('azure-openai', 'azure-openai-image') and (
       nullif(trim(credentials_json ->> 'apiKey'), '') is null
       or char_length(trim(credentials_json ->> 'apiKey')) < 20
       or nullif(trim(credentials_json ->> 'apiVersion'), '') is null
@@ -1178,11 +1179,12 @@ begin
     when 'openai' then 'OpenAI'
     when 'groq' then 'Groq'
     when 'azure-openai' then 'Azure OpenAI'
+    when 'azure-openai-image' then 'Azure OpenAI (Image)'
     when 'openai-compatible' then 'OpenAI-compatible'
   end;
   next_secret_name := 'user:' || p_user_id::text || ':provider:' || p_provider_id;
   next_secret_description := next_provider_label || case
-    when p_provider_id in ('azure-openai', 'openai-compatible') then ' credentials'
+    when p_provider_id in ('azure-openai', 'azure-openai-image', 'openai-compatible') then ' credentials'
     else ' API key'
   end;
 

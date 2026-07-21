@@ -11,7 +11,7 @@ describe("provider key schema contract", () => {
     expect(schema).toContain("provider_key.provider_id = p_provider_id");
   });
 
-  it.each(["google-gemini", "openai", "groq", "azure-openai", "openai-compatible"])(
+  it.each(["google-gemini", "openai", "groq", "azure-openai", "azure-openai-image", "openai-compatible"])(
     "explicitly allows %s in upsert_provider_key",
     (providerId) => {
       expect(schema).toContain(`'${providerId}'`);

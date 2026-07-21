@@ -9,6 +9,7 @@ import { emptyModelGatewayUsage } from "./usage";
 export type ModelGatewayEventInput = {
   userId?: string | null;
   feature: string;
+  slot?: import("./types").ModelCapabilitySlot | null;
   provider?: ModelProviderId | null;
   model?: string | null;
   modelAlias: string;
@@ -29,6 +30,7 @@ export function createModelGatewayEvent(input: ModelGatewayEventInput): ModelGat
   return {
     userId: input.userId ?? null,
     feature: input.feature,
+    slot: input.slot ?? null,
     provider: input.provider ?? null,
     model: input.model ?? null,
     modelAlias: input.modelAlias,
@@ -52,6 +54,7 @@ export function toLoggableModelGatewayEvent(event: ModelGatewayEvent): Record<st
     type: "model_gateway_event",
     userId: event.userId,
     feature: event.feature,
+    slot: event.slot,
     provider: event.provider,
     model: event.model,
     modelAlias: event.modelAlias,

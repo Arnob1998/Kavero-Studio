@@ -270,7 +270,7 @@ export function ProviderKeyManager({
                               field.secret
                                 ? "Enter a new secret"
                                 : field.id === "apiBase"
-                                  ? provider.id === "azure-openai"
+                                  ? provider.id === "azure-openai" || provider.id === "azure-openai-image"
                                     ? "https://resource.openai.azure.com"
                                     : "https://provider.example/v1"
                                   : field.id === "deploymentName"

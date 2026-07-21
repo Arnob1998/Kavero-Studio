@@ -661,6 +661,102 @@ describe("/api/generate POST", () => {
     }));
   });
 
+  it("generates and persists Azure GPT Image 2 through its independent signed route", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({
+      metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+        chatOrchestrationModelAlias: "kavero-chat-orchestration-default",
+        imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+      } } }, error: null },
+    });
+    mocks.createClient.mockResolvedValue(supabase);
+    const credentials = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://images.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    mocks.getUserProviderCredentials.mockResolvedValueOnce(credentials);
+    const fetchImpl = vi.fn<FetchMock>(async () => gatewayJsonResponse({
+      data: [{ b64_json: "R0lGODlhAQABAIAAAAUEBA==" }],
+    }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      imageSize: "1024x1024",
+      aspectRatio: "1:1",
+      quality: "low",
+    })));
+    const body = await json(response);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    const outbound = JSON.parse(String(init?.body));
+
+    expect(response.status).toBe(200);
+    expect(String(url)).toBe("http://litellm:4000/v1/images/generations");
+    expect(init?.headers).toEqual(expect.objectContaining({ "x-kavero-routing-signature": expect.stringMatching(/^[a-f0-9]{64}$/) }));
+    expect(mocks.getUserProviderCredentials).toHaveBeenCalledWith("user-1", "azure-openai-image");
+    expect(outbound).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      user_config: { model_list: [{
+        model_name: "kavero-image-azure-gpt-image-2",
+        litellm_params: {
+          model: "azure/image-deployment",
+          api_key: credentials.apiKey,
+          api_base: credentials.apiBase,
+          api_version: "2024-02-01",
+        },
+      }] },
+    });
+    expect(body).toMatchObject({
+      model: "kavero-image-azure-gpt-image-2",
+      modelLabel: "Azure GPT Image 2",
+    });
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      model_id: "kavero-image-azure-gpt-image-2",
+      model_label: "Azure GPT Image 2",
+    }));
+  });
+
+  it("rejects Azure image references before upstream traffic and persistence", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+    const response = await POST(request(validBody({
+      model: "azure-gpt-image-2",
+      imageSize: "auto",
+      referenceImages: [referenceImage(1)],
+    })));
+    expect(response.status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+  });
+
+  it("creates no persistence side effects for malformed Azure image responses", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { plan: "premium", preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    mocks.getUserProviderCredentials.mockResolvedValueOnce({
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://images.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    });
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(async () => gatewayJsonResponse({ data: [] })));
+    const response = await POST(request(validBody({ model: "azure-gpt-image-2", imageSize: "auto" })));
+    expect(response.status).toBe(502);
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+    expect(admin.__mocks.generatedImageInsert).not.toHaveBeenCalled();
+  });
+
   it("rejects GPT Image 2 references before upstream traffic and persists nothing", async () => {
     enableGateway();
     const fetchImpl = vi.fn<FetchMock>();

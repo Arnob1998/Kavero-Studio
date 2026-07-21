@@ -8,7 +8,7 @@ import {
   injectServerLiteLlmCredentials,
   sanitizeLiteLlmRequestBody,
 } from "./litellm-credentials";
-import { buildAzureOpenAiLiteLlmRequest } from "./azure-routing";
+import { buildAzureOpenAiImageLiteLlmRequest, buildAzureOpenAiLiteLlmRequest } from "./azure-routing";
 
 export type ResolvedModelCredentials = Extract<ModelCredentialResolution, { ok: true }>;
 
@@ -61,6 +61,20 @@ export function prepareLiteLlmRuntimeRequest(
   | RuntimeCredentialFailure {
   if (resolution.providerKeyId === "azure-openai") {
     const azure = buildAzureOpenAiLiteLlmRequest(body, resolution.credentials);
+    if (!azure) {
+      return { ok: false, status: "error", code: "invalid-provider-credentials" };
+    }
+
+    return {
+      ok: true,
+      body: azure.body,
+      credentialSource: resolution.credentialSource,
+      monitoringModel: azure.monitoringModel,
+    };
+  }
+
+  if (resolution.providerKeyId === "azure-openai-image") {
+    const azure = buildAzureOpenAiImageLiteLlmRequest(body, resolution.credentials);
     if (!azure) {
       return { ok: false, status: "error", code: "invalid-provider-credentials" };
     }

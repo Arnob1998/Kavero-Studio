@@ -198,6 +198,58 @@ describe("setup doctor", () => {
     }
   });
 
+  it("validates the Azure image slot independently without inferring orchestration values", () => {
+    const complete = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({
+        AZURE_API_KEY: "same-key-012345678901234567890",
+        AZURE_API_BASE: "https://shared.openai.azure.com",
+        AZURE_API_VERSION: "2025-04-01-preview",
+        AZURE_DEPLOYMENT_NAME: "chat-deployment",
+        AZURE_BASE_MODEL: "gpt-5.6-sol",
+        AZURE_IMAGE_API_KEY: "same-key-012345678901234567890",
+        AZURE_IMAGE_API_BASE: "https://shared.openai.azure.com",
+        AZURE_IMAGE_API_VERSION: "2024-02-01",
+        AZURE_IMAGE_DEPLOYMENT_NAME: "image-deployment",
+        AZURE_IMAGE_BASE_MODEL: "gpt-image-2",
+      }),
+    });
+    expect(complete.filter((item) => item.status === "fail")).toEqual([]);
+
+    const orchestrationOnly = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({
+        AZURE_API_KEY: "same-key-012345678901234567890",
+        AZURE_API_BASE: "https://shared.openai.azure.com",
+        AZURE_API_VERSION: "2025-04-01-preview",
+        AZURE_DEPLOYMENT_NAME: "chat-deployment",
+        AZURE_BASE_MODEL: "gpt-5.6-sol",
+        AZURE_IMAGE_API_VERSION: "2024-02-01",
+        AZURE_IMAGE_DEPLOYMENT_NAME: "image-deployment",
+        AZURE_IMAGE_BASE_MODEL: "gpt-image-2",
+      }),
+    });
+    expect(orchestrationOnly).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "fail", label: "AZURE_IMAGE_API_KEY" }),
+      expect.objectContaining({ status: "fail", label: "AZURE_IMAGE_API_BASE" }),
+    ]));
+
+    const mismatched = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({
+        AZURE_IMAGE_API_KEY: "image-key-012345678901234567890",
+        AZURE_IMAGE_API_BASE: "https://images.openai.azure.com",
+        AZURE_IMAGE_API_VERSION: "2025-04-01-preview",
+        AZURE_IMAGE_DEPLOYMENT_NAME: "image-deployment",
+        AZURE_IMAGE_BASE_MODEL: "gpt-image-1",
+      }),
+    });
+    expect(mismatched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "fail", label: "AZURE_IMAGE_API_VERSION" }),
+      expect.objectContaining({ status: "fail", label: "AZURE_IMAGE_BASE_MODEL" }),
+    ]));
+  });
+
   it("passes a valid local Docker env and compose config", () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), "kavero-doctor-"));
     try {

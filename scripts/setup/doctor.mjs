@@ -219,6 +219,34 @@ export function validateEnvForProfile({ profileId, env }) {
     }
   }
 
+  const azureImageKeys = [
+    "AZURE_IMAGE_API_KEY",
+    "AZURE_IMAGE_API_BASE",
+    "AZURE_IMAGE_API_VERSION",
+    "AZURE_IMAGE_DEPLOYMENT_NAME",
+    "AZURE_IMAGE_BASE_MODEL",
+  ];
+  if (azureImageKeys.some((key) => hasValue(env[key]))) {
+    for (const key of azureImageKeys) {
+      if (!hasValue(env[key])) checks.push(check("fail", key, "Required for Azure OpenAI image configuration."));
+    }
+    if (hasValue(env.AZURE_IMAGE_API_KEY) && (String(env.AZURE_IMAGE_API_KEY).trim().length < 20 || isPlaceholderValue(env.AZURE_IMAGE_API_KEY))) {
+      checks.push(check("fail", "AZURE_IMAGE_API_KEY", "Must be a non-placeholder Azure API key."));
+    }
+    if (hasValue(env.AZURE_IMAGE_API_BASE) && !isValidAzureEndpoint(env.AZURE_IMAGE_API_BASE)) {
+      checks.push(check("fail", "AZURE_IMAGE_API_BASE", "Must be an Azure OpenAI HTTPS endpoint."));
+    }
+    if (hasValue(env.AZURE_IMAGE_API_VERSION) && String(env.AZURE_IMAGE_API_VERSION).trim() !== "2024-02-01") {
+      checks.push(check("fail", "AZURE_IMAGE_API_VERSION", "Azure GPT Image 2 requires the validated 2024-02-01 API version."));
+    }
+    if (hasValue(env.AZURE_IMAGE_DEPLOYMENT_NAME) && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(String(env.AZURE_IMAGE_DEPLOYMENT_NAME).trim())) {
+      checks.push(check("fail", "AZURE_IMAGE_DEPLOYMENT_NAME", "Invalid Azure image deployment name."));
+    }
+    if (hasValue(env.AZURE_IMAGE_BASE_MODEL) && String(env.AZURE_IMAGE_BASE_MODEL).trim() !== "gpt-image-2") {
+      checks.push(check("fail", "AZURE_IMAGE_BASE_MODEL", "Unsupported Azure image model family."));
+    }
+  }
+
   if (hasValue(env.OLLAMA_BASE_URL)) {
     if (isPlaceholderValue(env.OLLAMA_BASE_URL)) {
       checks.push(check("fail", "OLLAMA_BASE_URL", "Blank or an http(s) URL is required."));

@@ -10,6 +10,7 @@ describe("model gateway monitoring", () => {
     const event = createModelGatewayEvent({
       userId: "user-1",
       feature: "prompt-refiner",
+      slot: "chatOrchestration",
       provider: "gemini",
       model: "gemini/gemini-3.1-pro-preview",
       modelAlias: "kavero-chat-orchestration-default",
@@ -40,6 +41,7 @@ describe("model gateway monitoring", () => {
       type: "model_gateway_event",
       ...event,
     });
+    expect(payload.slot).toBe("chatOrchestration");
     expect(payload).not.toHaveProperty("apiKey");
     expect(payload).not.toHaveProperty("messages");
     expect(payload).not.toHaveProperty("images");
@@ -82,6 +84,7 @@ describe("model gateway monitoring", () => {
     const logger = { info: vi.fn() };
     const event = createModelGatewayEvent({
       feature: "image-generation",
+      slot: "imageGeneration",
       modelAlias: "kavero-image-generation-default",
       status: "error",
       latencyMs: 50,

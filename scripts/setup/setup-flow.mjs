@@ -23,6 +23,11 @@ function gatewayProviderEnv(inputs = {}, { defaultOllamaBaseUrl = "" } = {}) {
     AZURE_API_VERSION: inputs.AZURE_API_VERSION ?? "",
     AZURE_DEPLOYMENT_NAME: inputs.AZURE_DEPLOYMENT_NAME ?? "",
     AZURE_BASE_MODEL: inputs.AZURE_BASE_MODEL ?? "",
+    AZURE_IMAGE_API_KEY: inputs.AZURE_IMAGE_API_KEY ?? "",
+    AZURE_IMAGE_API_BASE: inputs.AZURE_IMAGE_API_BASE ?? "",
+    AZURE_IMAGE_API_VERSION: inputs.AZURE_IMAGE_API_VERSION ?? "",
+    AZURE_IMAGE_DEPLOYMENT_NAME: inputs.AZURE_IMAGE_DEPLOYMENT_NAME ?? "",
+    AZURE_IMAGE_BASE_MODEL: inputs.AZURE_IMAGE_BASE_MODEL ?? "",
     OLLAMA_BASE_URL: inputs.OLLAMA_BASE_URL ?? defaultOllamaBaseUrl,
   };
 }
@@ -224,6 +229,33 @@ export async function runSetupWizard({
       }),
       prompts,
     );
+    inputs.AZURE_IMAGE_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Azure image-slot API key", placeholder: "Optional; enter explicitly even when shared" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_API_BASE = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot endpoint", placeholder: "https://resource.openai.azure.com" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_API_VERSION = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot API version", placeholder: "2024-02-01" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_DEPLOYMENT_NAME = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot deployment name", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_BASE_MODEL = assertNotCanceled(
+      await prompts.select({
+        message: "Azure image-slot model family",
+        initialValue: "",
+        options: [
+          { value: "", label: "Not configured" },
+          { value: "gpt-image-2", label: "GPT Image 2" },
+        ],
+      }),
+      prompts,
+    );
     inputs.OLLAMA_BASE_URL = assertNotCanceled(
       await prompts.text({
         message: "Ollama base URL for the gateway",
@@ -347,6 +379,33 @@ export async function runSetupWizard({
             { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
             { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
             { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+          ],
+        }),
+        prompts,
+      );
+      inputs.AZURE_IMAGE_API_KEY = assertNotCanceled(
+        await prompts.password({ message: "Azure image-slot API key", placeholder: "Optional; enter explicitly even when shared" }),
+        prompts,
+      );
+      inputs.AZURE_IMAGE_API_BASE = assertNotCanceled(
+        await prompts.text({ message: "Azure image-slot endpoint", placeholder: "https://resource.openai.azure.com" }),
+        prompts,
+      );
+      inputs.AZURE_IMAGE_API_VERSION = assertNotCanceled(
+        await prompts.text({ message: "Azure image-slot API version", placeholder: "2024-02-01" }),
+        prompts,
+      );
+      inputs.AZURE_IMAGE_DEPLOYMENT_NAME = assertNotCanceled(
+        await prompts.text({ message: "Azure image-slot deployment name", placeholder: "Optional" }),
+        prompts,
+      );
+      inputs.AZURE_IMAGE_BASE_MODEL = assertNotCanceled(
+        await prompts.select({
+          message: "Azure image-slot model family",
+          initialValue: "",
+          options: [
+            { value: "", label: "Not configured" },
+            { value: "gpt-image-2", label: "GPT Image 2" },
           ],
         }),
         prompts,

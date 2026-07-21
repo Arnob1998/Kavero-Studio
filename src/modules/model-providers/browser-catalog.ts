@@ -2,6 +2,7 @@ import { modelCatalog } from "./catalog";
 import { getProviderKeyIdForModelProvider } from "./provider-key-mapping";
 import type { SupportedProviderId } from "@/lib/provider-key-registry";
 import type { ModelCatalogEntry, ModelCapabilitySlot, ModelProviderId } from "./types";
+import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 
 const providerDisplay: Record<ModelProviderId, { label: string; logoPath: string }> = {
   gemini: {
@@ -51,7 +52,9 @@ export function toBrowserModelCatalogEntry(entry: ModelCatalogEntry): BrowserMod
     provider: entry.provider,
     providerLabel: provider.label,
     providerLogoPath: provider.logoPath,
-    providerKeyId: getProviderKeyIdForModelProvider(entry.provider),
+    providerKeyId: entry.modelAlias === AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS
+      ? "azure-openai-image"
+      : getProviderKeyIdForModelProvider(entry.provider),
     modelAlias: entry.modelAlias,
     displayLabel: entry.displayLabel,
     capabilities: {

@@ -112,6 +112,7 @@ export type ModelGatewayCredentialSource =
 export type ModelGatewayEvent = {
   userId: string | null;
   feature: string;
+  slot: ModelCapabilitySlot | null;
   provider: ModelProviderId | null;
   model: string | null;
   modelAlias: string;

@@ -39,6 +39,20 @@ describe("provider key secret helpers", () => {
 
     await expect(getUserProviderCredentials("user-1", "azure-openai")).resolves.toBeNull();
   });
+
+  it("loads Azure image credentials only from the independent image record", async () => {
+    const credentials = {
+      apiKey: "azure-image-key-012345678901234567890",
+      apiBase: "https://kavero.openai.azure.com",
+      apiVersion: "2024-02-01",
+      deploymentName: "image-deployment",
+      baseModel: "gpt-image-2",
+    };
+    const admin = createAdmin(JSON.stringify(credentials));
+    mocks.createAdminClient.mockReturnValue(admin);
+    await expect(getUserProviderCredentials("user-1", "azure-openai-image")).resolves.toEqual(credentials);
+    expect(admin.from().eq).toHaveBeenCalledWith("provider_id", "azure-openai-image");
+  });
 });
 
 function createAdmin(secret: string) {

@@ -32,7 +32,7 @@ describe("ProviderSettingsPanel", () => {
     expect(screen.getByText("Image-generation model")).toBeInTheDocument();
     const [chatSelect, imageSelect] = screen.getAllByRole("combobox") as HTMLSelectElement[];
     expect([chatSelect, imageSelect]).toHaveLength(2);
-    for (const label of ["Google Gemini", "OpenAI", "Groq", "Azure OpenAI", "OpenAI-compatible"]) {
+    for (const label of ["Google Gemini", "OpenAI", "Groq", "Azure OpenAI", "Azure OpenAI (Image)", "OpenAI-compatible"]) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.queryByText("Hugging Face")).not.toBeInTheDocument();
@@ -44,6 +44,7 @@ describe("ProviderSettingsPanel", () => {
     expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-openai-gpt-5-6");
     expect(Array.from(imageSelect!.options, (option) => option.value)).not.toContain("kavero-chat-azure-openai");
     expect(Array.from(imageSelect!.options, (option) => option.value)).toContain("kavero-image-openai-gpt-image-2");
+    expect(Array.from(imageSelect!.options, (option) => option.value)).toContain("kavero-image-azure-gpt-image-2");
 
     const azureButton = screen.getByRole("button", { name: "Azure OpenAI provider settings" });
     expect(azureButton.querySelector("img")).toHaveAttribute("src", "/llm-providers/Microsoft_Azure.svg");
@@ -137,7 +138,7 @@ describe("ProviderSettingsPanel", () => {
     expect(apiVersionInput).toHaveValue("");
     expect(deploymentInput).toHaveValue("");
     expect(baseModelInput).toHaveValue("");
-  });
+  }, 10_000);
 
   it("omits the optional OpenAI-compatible API key when it is blank", async () => {
     const user = userEvent.setup();
@@ -158,6 +159,33 @@ describe("ProviderSettingsPanel", () => {
       credentials: { apiBase: "https://models.example.com/v1" },
     });
   });
+
+  it("live-checks and saves the independent Azure image configuration", async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettingsPanel />);
+    await screen.findByText("Provider keys");
+    await user.click(screen.getByRole("button", { name: "Azure OpenAI (Image) provider settings" }));
+    await user.type(screen.getByLabelText("Azure OpenAI (Image) API key"), "azure-image-key-012345678901234567890");
+    await user.type(screen.getByLabelText("Azure OpenAI (Image) Azure endpoint"), "https://kavero.openai.azure.com");
+    await user.type(screen.getByLabelText("Azure OpenAI (Image) API version"), "2024-02-01");
+    await user.type(screen.getByLabelText("Azure OpenAI (Image) Deployment name"), "image-deployment");
+    await user.selectOptions(screen.getByLabelText("Azure OpenAI (Image) Model family"), "gpt-image-2");
+    await user.click(screen.getByRole("button", { name: "Check key" }));
+    await screen.findByText("Live check passed. Credentials are ready to save.");
+    await user.click(screen.getByRole("button", { name: "Save credentials" }));
+    const expected = {
+      providerId: "azure-openai-image",
+      credentials: {
+        apiKey: "azure-image-key-012345678901234567890",
+        apiBase: "https://kavero.openai.azure.com",
+        apiVersion: "2024-02-01",
+        deploymentName: "image-deployment",
+        baseModel: "gpt-image-2",
+      },
+    };
+    expect(requestBodies("/api/provider-keys/check")).toContainEqual(expected);
+    expect(requestBodies("/api/provider-keys")).toContainEqual(expected);
+  }, 10_000);
 
   it("renders fixed safe check failure copy instead of raw provider payloads", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -219,6 +247,19 @@ describe("ProviderSettingsPanel", () => {
     expect(requestBodies("/api/model-providers")).toContainEqual({
       chatOrchestrationModelAlias: "kavero-chat-azure-openai",
       imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    });
+  });
+
+  it("saves Azure image selection independently from Azure orchestration", async () => {
+    const user = userEvent.setup();
+    render(<ProviderSettingsPanel />);
+    const selectors = await screen.findAllByRole("combobox");
+    await user.selectOptions(selectors[0]!, "kavero-chat-azure-openai");
+    await user.selectOptions(selectors[1]!, "kavero-image-azure-gpt-image-2");
+    await user.click(screen.getByRole("button", { name: "Save models" }));
+    expect(requestBodies("/api/model-providers")).toContainEqual({
+      chatOrchestrationModelAlias: "kavero-chat-azure-openai",
+      imageGenerationModelAlias: "kavero-image-azure-gpt-image-2",
     });
   });
 });
@@ -302,6 +343,13 @@ const providerCatalog = [
       ],
     },
   ]),
+  provider("azure-openai-image", "Azure OpenAI (Image)", "live", [
+    field("apiKey", "API key", true, true),
+    field("apiBase", "Azure endpoint", true, false),
+    field("apiVersion", "API version", true, false),
+    field("deploymentName", "Deployment name", true, false),
+    { ...field("baseModel", "Model family", true, false), inputType: "select", options: [{ value: "gpt-image-2", label: "GPT Image 2" }] },
+  ]),
   provider("openai-compatible", "OpenAI-compatible", "validation-only", [
     field("apiKey", "API key", false, true),
     field("apiBase", "API base URL", true, false),
@@ -312,7 +360,7 @@ function provider(id: string, label: string, checkMode: string, credentialFields
   return {
     id,
     label,
-    logoPath: id === "azure-openai" ? "/llm-providers/Microsoft_Azure.svg" : "/llm-providers/openai.png",
+    logoPath: id.startsWith("azure-openai") ? "/llm-providers/Microsoft_Azure.svg" : "/llm-providers/openai.png",
     checkMode,
     credentialFields,
   };
@@ -328,6 +376,7 @@ const modelCatalog = [
   model("openai", "OpenAI", "openai", "kavero-chat-openai-gpt-5-6", "GPT-5.6", "chatOrchestration"),
   model("openai", "OpenAI", "openai", "kavero-image-openai-gpt-image-2", "GPT Image 2", "imageGeneration"),
   model("azure-openai", "Azure OpenAI", "azure-openai", "kavero-chat-azure-openai", "Azure OpenAI deployment", "chatOrchestration"),
+  model("azure-openai", "Azure OpenAI", "azure-openai-image", "kavero-image-azure-gpt-image-2", "Azure GPT Image 2", "imageGeneration"),
 ];
 
 function model(providerId: string, providerLabel: string, providerKeyId: string, modelAlias: string, displayLabel: string, slot: string) {
