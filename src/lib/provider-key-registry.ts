@@ -240,7 +240,11 @@ const apiBaseSchema = z.string().trim().max(2048).transform((value, context) => 
 });
 const azureApiBaseSchema = apiBaseSchema.transform((value, context) => {
   const url = new URL(value);
-  if (url.pathname !== "/" || !url.hostname.toLowerCase().endsWith(".openai.azure.com")) {
+  const hostname = url.hostname.toLowerCase();
+  const isAzureOpenAiHostname =
+    hostname.endsWith(".openai.azure.com") ||
+    hostname.endsWith(".cognitiveservices.azure.com");
+  if (url.pathname !== "/" || !isAzureOpenAiHostname) {
     context.addIssue({ code: "custom", message: "Invalid Azure endpoint." });
     return z.NEVER;
   }

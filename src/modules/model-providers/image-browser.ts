@@ -63,6 +63,10 @@ export function getBrowserImageModelByLegacyId(model: string): BrowserImageModel
   return browserImageModels.find((entry) => entry.legacyModelId === model) ?? null;
 }
 
+export function getBrowserImageModelByAlias(modelAlias: string): BrowserImageModel | null {
+  return browserImageModels.find((entry) => entry.modelAlias === modelAlias) ?? null;
+}
+
 export type BrowserImageUiSettings = {
   model: string;
   count: number;

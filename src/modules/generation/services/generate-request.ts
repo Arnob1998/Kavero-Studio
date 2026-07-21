@@ -16,6 +16,7 @@ export const referenceImageSchema = z.object({
 const generateRequestStructure = z
   .object({
     prompt: z.string().trim().min(1).max(12000),
+    modelAlias: z.string().trim().min(1).max(200),
     model: z.string().default(DEFAULT_IMAGE_MODEL_LEGACY_ID),
     count: z.coerce.number().int().min(1).max(16).default(1),
     thinking: z.string().default("balanced"),

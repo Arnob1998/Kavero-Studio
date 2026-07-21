@@ -18,6 +18,17 @@ vi.mock("@/modules/assets/canvas-assets", () => ({
   uploadCanvasAsset: canvasAssetMocks.uploadCanvasAsset,
 }));
 
+vi.mock("@/modules/model-providers/browser-settings", () => ({
+  useModelProviderSettings: () => ({
+    settings: null,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    saveSelection: vi.fn(),
+    activeModels: () => [],
+  }),
+}));
+
 const relationMap: SceneRelationMap = {
   version: 1,
   designId: "design-1",

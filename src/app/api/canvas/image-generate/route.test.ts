@@ -212,6 +212,22 @@ describe("canvas image generation API", () => {
     expect(body.images).toHaveLength(4);
   });
 
+  it("returns a structured stale-selection conflict before canvas upstream traffic", async () => {
+    configureGateway();
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } }));
+
+    const response = await POST(request(validBody({ modelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS })));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      details: { code: "model-selection-stale", selectedModelAlias: "kavero-image-openai-gpt-image-2" },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.getUserProviderCredentials).not.toHaveBeenCalled();
+  });
+
   it("generates Azure GPT Image 2 canvas candidates through the independent image slot", async () => {
     configureGateway();
     mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: {
@@ -297,6 +313,7 @@ describe("canvas image generation API", () => {
   });
 
   it("preserves direct Gemini behavior and metadata when the gateway is disabled", async () => {
+    mocks.getCanvasAdmin.mockReturnValue(adminWithPreferences({ modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-2-5-flash" } }));
     const response = await POST(request(validBody({ model: "gemini-2.5-flash-image", count: 4 })));
     const body = await response.json();
 
@@ -484,9 +501,18 @@ function configureGateway() {
 }
 
 function validBody(overrides: Record<string, unknown> = {}) {
+  const model = String(overrides.model ?? "gemini-3.1-flash-image-preview");
+  const modelAlias = String(overrides.modelAlias ?? ({
+    "gemini-3.1-flash-image-preview": "kavero-image-generation-default",
+    "gemini-3-pro-image-preview": "kavero-image-gemini-3-pro",
+    "gemini-2.5-flash-image": "kavero-image-gemini-2-5-flash",
+    "gpt-image-2": "kavero-image-openai-gpt-image-2",
+    "azure-gpt-image-2": "kavero-image-azure-gpt-image-2",
+  }[model] ?? "kavero-image-generation-default"));
   return {
     prompt: "Create a clean app icon.",
-    model: "gemini-3.1-flash-image-preview",
+    model,
+    modelAlias,
     count: 4,
     thinking: "balanced",
     aspectRatio: "auto",

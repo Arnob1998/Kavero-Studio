@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useModelProviderSettings, type BrowserAvailableModelCatalogEntry } from "@/modules/model-providers/browser-settings";
 import {
   ProviderKeyManager,
   type BrowserProviderKeyCatalogEntry,
@@ -21,39 +22,13 @@ import {
 
 type CapabilitySlot = "chatOrchestration" | "imageGeneration";
 
-type BrowserModelCatalogEntry = {
-  provider: string;
-  providerLabel: string;
-  providerLogoPath: string;
-  providerKeyId: string | null;
-  modelAlias: string;
-  displayLabel: string;
-  capabilities: {
-    slots: CapabilitySlot[];
-    requirements: string[];
-    supportsTools: boolean;
-    supportsStructuredJson: boolean;
-    supportsMultimodalImageInput: boolean;
-    supportsImageOutput: boolean;
-    supportsStreaming: boolean;
-  };
-};
+type BrowserModelCatalogEntry = BrowserAvailableModelCatalogEntry;
 
 type GatewayStatus = {
   status: "disabled" | "configured" | "error";
   gateway: "litellm" | null;
   configured: boolean;
   issues: Array<{ code: string; message: string }>;
-};
-
-type ModelProviderSettings = {
-  gateway: GatewayStatus;
-  credentialMode: "env-or-user" | "user-required" | "env-only";
-  catalog: BrowserModelCatalogEntry[];
-  selected: {
-    chatOrchestrationModelAlias: string;
-    imageGenerationModelAlias: string;
-  };
 };
 
 type ConnectivityResult = GatewayStatus & {
@@ -64,11 +39,12 @@ type ConnectivityResult = GatewayStatus & {
 type StatusTone = "idle" | "checking" | "passed" | "failed";
 
 export function ProviderSettingsPanel() {
+  const modelSettings = useModelProviderSettings();
+  const settings = modelSettings.settings;
   const [providerCatalog, setProviderCatalog] = useState<BrowserProviderKeyCatalogEntry[]>([]);
   const [savedProviderKeys, setSavedProviderKeys] = useState<ProviderKeyMetadata[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [settings, setSettings] = useState<ModelProviderSettings | null>(null);
   const [chatAlias, setChatAlias] = useState("");
   const [imageAlias, setImageAlias] = useState("");
   const [modelSaveStatus, setModelSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -83,16 +59,24 @@ export function ProviderSettingsPanel() {
     () => settings?.catalog.filter((entry) => entry.capabilities.slots.includes("imageGeneration")) ?? [],
     [settings],
   );
+  const providerStates = useMemo(() => Object.fromEntries(providerCatalog.map((provider) => {
+    const saved = savedProviderKeys.find((key) => key.provider_id === provider.id);
+    const providerModels = settings?.catalog.filter((model) => model.providerKeyId === provider.id) ?? [];
+    const managed = providerModels.some((model) => model.availability.source === "admin-environment");
+    const label = saved?.status === "disabled"
+      ? "Disabled"
+      : saved?.status === "active"
+        ? provider.checkMode === "validation-only" ? "Configured" : "Active"
+        : managed ? "Managed by admin" : "Setup required";
+    return [provider.id, label];
+  })), [providerCatalog, savedProviderKeys, settings]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadSettings() {
       try {
-        const [providerKeyResponse, modelResponse] = await Promise.all([
-          fetch("/api/provider-keys"),
-          fetch("/api/model-providers"),
-        ]);
+        const providerKeyResponse = await fetch("/api/provider-keys");
 
         if (providerKeyResponse.ok) {
           const payload = (await providerKeyResponse.json()) as {
@@ -107,16 +91,6 @@ export function ProviderSettingsPanel() {
           setLoadFailed(true);
         }
 
-        if (modelResponse.ok) {
-          const modelSettings = (await modelResponse.json()) as ModelProviderSettings;
-          if (isMounted) {
-            setSettings(modelSettings);
-            setChatAlias(modelSettings.selected.chatOrchestrationModelAlias);
-            setImageAlias(modelSettings.selected.imageGenerationModelAlias);
-          }
-        } else if (isMounted) {
-          setLoadFailed(true);
-        }
       } catch {
         if (isMounted) setLoadFailed(true);
       } finally {
@@ -131,29 +105,27 @@ export function ProviderSettingsPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!settings) return;
+    setChatAlias(settings.selected.chatOrchestrationModelAlias);
+    setImageAlias(settings.selected.imageGenerationModelAlias);
+  }, [settings]);
+
   async function saveModelSettings() {
     if (!chatAlias || !imageAlias) return;
 
     setModelSaveStatus("saving");
 
-    const response = await fetch("/api/model-providers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chatOrchestrationModelAlias: chatAlias,
-        imageGenerationModelAlias: imageAlias,
-      }),
+    const result = await modelSettings.saveSelection({
+      chatOrchestrationModelAlias: chatAlias,
+      imageGenerationModelAlias: imageAlias,
     });
-
-    if (!response.ok) {
+    if (!result.ok) {
       setModelSaveStatus("failed");
       return;
     }
-
-    const nextSettings = (await response.json()) as ModelProviderSettings;
-    setSettings(nextSettings);
-    setChatAlias(nextSettings.selected.chatOrchestrationModelAlias);
-    setImageAlias(nextSettings.selected.imageGenerationModelAlias);
+    setChatAlias(result.settings.selected.chatOrchestrationModelAlias);
+    setImageAlias(result.settings.selected.imageGenerationModelAlias);
     setModelSaveStatus("saved");
   }
 
@@ -181,7 +153,7 @@ export function ProviderSettingsPanel() {
   return (
     <section
       className="grid gap-4 rounded-lg border border-white/[0.1] bg-white/[0.045] p-4 shadow-[0_18px_70px_rgb(0_0_0_/_0.28)] sm:p-5"
-      aria-busy={isLoading}
+      aria-busy={isLoading || modelSettings.loading}
     >
       <div className="flex flex-col gap-3 border-b border-white/[0.08] pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
@@ -200,7 +172,7 @@ export function ProviderSettingsPanel() {
             </p>
           </div>
         </div>
-        <GatewayBadge gateway={gateway} loading={isLoading} />
+        <GatewayBadge gateway={gateway} loading={isLoading || modelSettings.loading} />
       </div>
 
       {loadFailed ? (
@@ -213,11 +185,13 @@ export function ProviderSettingsPanel() {
             providers={providerCatalog}
             savedKeys={savedProviderKeys}
             loading={isLoading}
+            providerStates={providerStates}
             onSaved={(providerKey) => {
               setSavedProviderKeys((current) => [
                 providerKey,
                 ...current.filter((key) => key.provider_id !== providerKey.provider_id),
               ]);
+              void modelSettings.refresh();
             }}
           />
 
@@ -245,7 +219,7 @@ export function ProviderSettingsPanel() {
               label="Orchestration/chat model"
               value={chatAlias}
               models={chatModels}
-              disabled={isLoading || !settings}
+              disabled={isLoading || modelSettings.loading || !settings}
               onChange={(value) => {
                 setChatAlias(value);
                 setModelSaveStatus("idle");
@@ -260,7 +234,7 @@ export function ProviderSettingsPanel() {
               label="Image-generation model"
               value={imageAlias}
               models={imageModels}
-              disabled={isLoading || !settings}
+              disabled={isLoading || modelSettings.loading || !settings}
               onChange={(value) => {
                 setImageAlias(value);
                 setModelSaveStatus("idle");
@@ -353,12 +327,17 @@ function ModelSelector({
           onChange={(event) => onChange(event.target.value)}
         >
           {models.map((model) => (
-            <option key={model.modelAlias} value={model.modelAlias}>
-              {model.providerLabel} - {model.displayLabel}
+            <option key={model.modelAlias} value={model.modelAlias} disabled={!model.availability.active}>
+              {model.providerLabel} - {model.displayLabel}{model.availability.active ? "" : " (Setup required)"}
             </option>
           ))}
         </select>
       </div>
+      {selected && !selected.availability.active ? (
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-100/70">
+          <LockKeyhole size={12} /> {selected.availability.message ?? "Set up this provider before selecting the model."}
+        </span>
+      ) : null}
     </label>
   );
 }
@@ -397,6 +376,9 @@ function ModelCredentialAdvisory({
 
   return (
     <div className="-mt-2 rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[11px] font-medium text-white/44">
+      <span className={model.availability.active ? "text-emerald-200/72" : "text-amber-100/70"}>
+        {model.availability.active ? "Ready to use." : "Unavailable."}
+      </span>{" "}
       <span className="text-white/68">{model.providerLabel}: {keyState}.</span>{" "}{message}
     </div>
   );

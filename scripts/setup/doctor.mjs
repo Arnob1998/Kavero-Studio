@@ -50,7 +50,7 @@ function hasValue(value) {
 
 function isValidSkSecret(value) {
   const trimmed = String(value ?? "").trim();
-  return trimmed.startsWith("sk-") && trimmed.length > 8 && !isPlaceholderValue(trimmed);
+  return trimmed.startsWith("sk-") && trimmed.length >= 32 && !isPlaceholderValue(trimmed);
 }
 
 function isValidRoutingSecret(value) {
@@ -68,7 +68,10 @@ function isValidAzureEndpoint(value) {
       !url.search &&
       !url.hash &&
       url.pathname === "/" &&
-      url.hostname.toLowerCase().endsWith(".openai.azure.com")
+      (
+        url.hostname.toLowerCase().endsWith(".openai.azure.com") ||
+        url.hostname.toLowerCase().endsWith(".cognitiveservices.azure.com")
+      )
     );
   } catch {
     return false;
@@ -157,7 +160,7 @@ export function validateEnvForProfile({ profileId, env }) {
     }
 
     if (hasValue(env.KAVERO_LITELLM_API_KEY) && !isValidSkSecret(env.KAVERO_LITELLM_API_KEY)) {
-      checks.push(check("fail", "KAVERO_LITELLM_API_KEY", "Must be a non-placeholder sk- secret."));
+      checks.push(check("fail", "KAVERO_LITELLM_API_KEY", "Must be a non-placeholder sk- secret of at least 32 characters."));
     }
   }
 
@@ -175,7 +178,7 @@ export function validateEnvForProfile({ profileId, env }) {
   }
 
   if (hasValue(env.LITELLM_MASTER_KEY) && !isValidSkSecret(env.LITELLM_MASTER_KEY)) {
-    checks.push(check("fail", "LITELLM_MASTER_KEY", "Must be a non-placeholder sk- secret."));
+    checks.push(check("fail", "LITELLM_MASTER_KEY", "Must be a non-placeholder sk- secret of at least 32 characters."));
   }
 
   for (const key of ["OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"]) {

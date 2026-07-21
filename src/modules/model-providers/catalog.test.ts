@@ -9,7 +9,7 @@ import {
   getModelsForCapability,
   modelCatalog,
 } from "./catalog";
-import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS, OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
+import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS, GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS, GEMINI_PRO_IMAGE_MODEL_ALIAS, OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 
 describe("model provider catalog", () => {
   it("keeps separate defaults for orchestration/chat and image generation", () => {
@@ -55,6 +55,8 @@ describe("model provider catalog", () => {
     expect(chatModels).not.toContain(DEFAULT_IMAGE_GENERATION_MODEL_ALIAS);
     expect(imageModels).toEqual([
       DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
+      GEMINI_PRO_IMAGE_MODEL_ALIAS,
+      GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS,
       OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
       AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
     ]);

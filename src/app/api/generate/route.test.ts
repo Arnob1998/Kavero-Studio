@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_IMAGE_GENERATION_MODEL_ALIAS } from "@/modules/model-providers";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -183,9 +184,18 @@ function referenceImage(index: number, mimeType = "image/png") {
 }
 
 function validBody(overrides: Record<string, unknown> = {}) {
+  const model = String(overrides.model ?? "gemini-3.1-flash-image-preview");
+  const modelAlias = String(overrides.modelAlias ?? ({
+    "gemini-3.1-flash-image-preview": "kavero-image-generation-default",
+    "gemini-3-pro-image-preview": "kavero-image-gemini-3-pro",
+    "gemini-2.5-flash-image": "kavero-image-gemini-2-5-flash",
+    "gpt-image-2": "kavero-image-openai-gpt-image-2",
+    "azure-gpt-image-2": "kavero-image-azure-gpt-image-2",
+  }[model] ?? "kavero-image-generation-default"));
   return {
     prompt: "Generate a polished product image.",
-    model: "gemini-3.1-flash-image-preview",
+    model,
+    modelAlias,
     count: 1,
     thinking: "balanced",
     aspectRatio: "auto",
@@ -803,6 +813,25 @@ describe("/api/generate POST", () => {
     expect(admin.__mocks.generatedImageInsert).not.toHaveBeenCalled();
   });
 
+  it("returns a structured stale-selection conflict before upstream traffic", async () => {
+    enableGateway();
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: {
+      imageGenerationModelAlias: "kavero-image-openai-gpt-image-2",
+    } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
+    const fetchImpl = vi.fn<FetchMock>();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await POST(request(validBody({ modelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS })));
+
+    expect(response.status).toBe(409);
+    await expect(json(response)).resolves.toMatchObject({
+      details: { code: "model-selection-stale", selectedModelAlias: "kavero-image-openai-gpt-image-2" },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+  });
+
   it("injects only trusted image credentials and strips reserved caller fields", async () => {
     enableGateway();
     mocks.getUserProviderCredentials.mockResolvedValueOnce({ apiKey: "user-gemini-key-0123456789" });
@@ -1020,6 +1049,8 @@ describe("/api/generate POST", () => {
   });
 
   it("keeps current imageSize behavior for gemini-2.5-flash-image", async () => {
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-2-5-flash" } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
     const response = await POST(
       request(validBody({ model: "gemini-2.5-flash-image", aspectRatio: "auto", imageSize: "4K" })),
     );
@@ -1041,6 +1072,8 @@ describe("/api/generate POST", () => {
   });
 
   it("keeps current imageSize and aspectRatio behavior for Gemini 3 image models", async () => {
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-3-pro" } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
     const response = await POST(
       request(
         validBody({
@@ -1073,6 +1106,8 @@ describe("/api/generate POST", () => {
     );
 
     mocks.generateContent.mockClear();
+    supabase = createSupabaseClient({ metadataResult: { data: { preferences: { modelProviders: { imageGenerationModelAlias: "kavero-image-gemini-3-pro" } } }, error: null } });
+    mocks.createClient.mockResolvedValue(supabase);
     await POST(request(validBody({ model: "gemini-3-pro-image-preview", thinking: "deep" })));
 
     expect(mocks.generateContent).toHaveBeenLastCalledWith(

@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
   DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
-  getBrowserModelCatalog,
   getModelGatewayConfig,
   getResolvedModelProviderPreferences,
   getSafeGatewayStatus,
@@ -11,6 +10,9 @@ import {
 } from "@/modules/model-providers";
 import { createClient } from "@/lib/supabase/server";
 import { getModelGatewayCredentialMode } from "@/modules/model-providers/server/credential-mode";
+import { getAvailableBrowserModelCatalog } from "@/modules/model-providers/server/model-availability";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { SupportedProviderId } from "@/lib/provider-key-registry";
 
 const modelProviderSettingsSchema = z
   .object({
@@ -26,13 +28,15 @@ type UserMetadataRow = {
   preferences: unknown;
 };
 
-function settingsPayload(preferences: unknown) {
+function settingsPayload(preferences: unknown, activeProviderKeyIds: ReadonlySet<SupportedProviderId>) {
   const selection = getResolvedModelProviderPreferences(preferences);
+  const gatewayConfig = getModelGatewayConfig();
+  const credentialMode = getModelGatewayCredentialMode();
 
   return {
-    gateway: getSafeGatewayStatus(getModelGatewayConfig()),
-    credentialMode: getModelGatewayCredentialMode(),
-    catalog: getBrowserModelCatalog(),
+    gateway: getSafeGatewayStatus(gatewayConfig),
+    credentialMode,
+    catalog: getAvailableBrowserModelCatalog({ gateway: gatewayConfig, credentialMode, activeProviderKeyIds }),
     defaults: {
       chatOrchestrationModelAlias: DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS,
       imageGenerationModelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
@@ -40,6 +44,18 @@ function settingsPayload(preferences: unknown) {
     selected: selection,
     ...selection,
   };
+}
+
+async function loadActiveProviderKeyIds(userId: string) {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("user_provider_keys")
+    .select("provider_id")
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  if (error) throw new Error("Unable to load provider availability.");
+  return new Set((data ?? []).map((row) => row.provider_id as SupportedProviderId));
 }
 
 async function getAuthenticatedContext() {
@@ -76,8 +92,11 @@ export async function GET() {
   if ("response" in context) return context.response;
 
   try {
-    const preferences = await loadPreferences(context.supabase, context.user.id);
-    return NextResponse.json(settingsPayload(preferences));
+    const [preferences, activeProviderKeyIds] = await Promise.all([
+      loadPreferences(context.supabase, context.user.id),
+      loadActiveProviderKeyIds(context.user.id),
+    ]);
+    return NextResponse.json(settingsPayload(preferences, activeProviderKeyIds));
   } catch {
     return NextResponse.json({ error: "Unable to load model-provider settings." }, { status: 500 });
   }
@@ -94,7 +113,29 @@ async function save(request: Request) {
   if ("response" in context) return context.response;
 
   try {
-    const currentPreferences = await loadPreferences(context.supabase, context.user.id);
+    const [currentPreferences, activeProviderKeyIds] = await Promise.all([
+      loadPreferences(context.supabase, context.user.id),
+      loadActiveProviderKeyIds(context.user.id),
+    ]);
+    const gatewayConfig = getModelGatewayConfig();
+    const credentialMode = getModelGatewayCredentialMode();
+    const catalog = getAvailableBrowserModelCatalog({ gateway: gatewayConfig, credentialMode, activeProviderKeyIds });
+    const requestedAliases = [
+      parsed.data.chatOrchestrationModelAlias,
+      parsed.data.imageGenerationModelAlias,
+    ].filter((value): value is string => Boolean(value));
+    const unavailable = requestedAliases
+      .map((alias) => catalog.find((model) => model.modelAlias === alias))
+      .find((model) => model && !model.availability.active);
+    if (unavailable) {
+      return NextResponse.json(
+        {
+          error: unavailable.availability.message ?? "The selected model is not available.",
+          code: "model-unavailable",
+        },
+        { status: 409 },
+      );
+    }
     const merged = mergeModelProviderPreferences(currentPreferences, parsed.data);
 
     if (!merged.ok) {
@@ -117,7 +158,7 @@ async function save(request: Request) {
       return NextResponse.json({ error: "Unable to save model-provider settings." }, { status: 500 });
     }
 
-    return NextResponse.json(settingsPayload(merged.preferences));
+    return NextResponse.json(settingsPayload(merged.preferences, activeProviderKeyIds));
   } catch {
     return NextResponse.json({ error: "Unable to save model-provider settings." }, { status: 500 });
   }

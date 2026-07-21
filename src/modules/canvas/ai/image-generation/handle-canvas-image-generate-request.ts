@@ -35,6 +35,7 @@ const referenceImageSchema = z.object({
 const generateRequestStructure = z
   .object({
     prompt: z.string().trim().min(1).max(12000),
+    modelAlias: z.string().trim().min(1).max(200),
     model: z.string().default(DEFAULT_IMAGE_MODEL_LEGACY_ID),
     count: z.coerce.number().int(),
     thinking: z.string().default("balanced"),
@@ -331,7 +332,7 @@ function logGatewayFailures(failures: unknown[]) {
   );
 }
 
-async function handleDirectGeminiCanvasGeneration(request: Request, userId: string) {
+async function handleDirectGeminiCanvasGeneration(request: Request, userId: string, selection: ImageModelSelection) {
   let apiKey: string | null;
   try {
     apiKey = await getUserProviderApiKey(userId, "google-gemini");
@@ -345,6 +346,7 @@ async function handleDirectGeminiCanvasGeneration(request: Request, userId: stri
   if ("response" in parsed) return parsed.response;
 
   const { input, references } = parsed;
+  if (input.modelAlias !== selection.modelAlias) return staleModelSelectionResponse(selection);
   if (getImageModelCapabilitiesByLegacyModel(input.model)?.provider !== "gemini") {
     return jsonError("The selected image model requires the configured model gateway.", 503);
   }
@@ -420,24 +422,21 @@ async function handleGatewayCanvasGeneration({
   request,
   userId,
   config,
+  selection,
 }: {
   request: Request;
   userId: string;
   config: Extract<ModelGatewayConfig, { status: "configured" }>;
+  selection: ImageModelSelection;
 }) {
   const parsed = await parseCanvasGenerateInput(request);
   if ("response" in parsed) return parsed.response;
 
   const { input, inputReferenceImages } = parsed;
-  const selectionResult = await loadImageModelSelection(userId);
-  if (!selectionResult.ok) return selectionResult.response;
-
-  const selection = selectionResult.selection;
   const requestCapability = getImageModelCapabilitiesByLegacyModel(input.model);
   const selectedCapability = getImageModelCapabilities(selection.modelAlias);
-  if (!requestCapability || !selectedCapability || requestCapability.provider !== selectedCapability.provider) {
-    return jsonError("The requested image model does not match the image provider selected in Settings.", 400);
-  }
+  if (input.modelAlias !== selection.modelAlias) return staleModelSelectionResponse(selection);
+  if (!requestCapability || !selectedCapability || requestCapability.modelAlias !== selectedCapability.modelAlias) return staleModelSelectionResponse(selection);
   const runtimeCapability = selectedCapability;
   const credentials = await resolveImageGenerationRuntimeCredentials({
     userId,
@@ -569,9 +568,12 @@ export async function handleCanvasImageGenerateRequest(request: Request) {
   const access = await requireCanvasAccess(user.id);
   if (access.response) return access.response;
 
+  const selectionResult = await loadImageModelSelection(user.id);
+  if (!selectionResult.ok) return selectionResult.response;
+  const selection = selectionResult.selection;
   const gatewayConfig = getModelGatewayConfig();
   if (gatewayConfig.status === "disabled") {
-    return handleDirectGeminiCanvasGeneration(request, user.id);
+    return handleDirectGeminiCanvasGeneration(request, user.id, selection);
   }
   if (gatewayConfig.status === "error") {
     return safeGatewayConfigurationResponse();
@@ -581,5 +583,16 @@ export async function handleCanvasImageGenerateRequest(request: Request) {
     request,
     userId: user.id,
     config: gatewayConfig,
+    selection,
   });
+}
+
+function staleModelSelectionResponse(selection: ImageModelSelection) {
+  return Response.json(
+    {
+      error: "Your default image model changed. Kavero refreshed the selection; review it and try again.",
+      details: { code: "model-selection-stale", selectedModelAlias: selection.modelAlias },
+    },
+    { status: 409 },
+  );
 }

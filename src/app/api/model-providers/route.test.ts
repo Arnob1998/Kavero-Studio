@@ -6,10 +6,14 @@ import {
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
+  createAdminClient: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: mocks.createClient,
+}));
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: mocks.createAdminClient,
 }));
 
 import { GET, PATCH } from "./route";
@@ -26,6 +30,7 @@ const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[ke
 describe("/api/model-providers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.createAdminClient.mockReturnValue(createProviderKeyAdmin(["google-gemini", "openai", "groq", "azure-openai", "azure-openai-image"]));
     for (const key of envKeys) delete process.env[key];
   });
 
@@ -93,6 +98,10 @@ describe("/api/model-providers", () => {
   );
 
   it("saves valid aliases and preserves existing preferences", async () => {
+    process.env.KAVERO_MODEL_GATEWAY = "litellm";
+    process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
+    process.env.KAVERO_LITELLM_API_KEY = "gateway-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
     const upsert = vi.fn(async () => ({ error: null }));
     mocks.createClient.mockResolvedValue(
       createSupabaseClient({
@@ -149,6 +158,23 @@ describe("/api/model-providers", () => {
     expect(wrongSlot.status).toBe(400);
     await expect(wrongSlot.json()).resolves.toMatchObject({ code: "wrong-slot" });
   });
+
+  it("rejects an unavailable model without exposing credential details", async () => {
+    process.env.KAVERO_MODEL_GATEWAY = "litellm";
+    process.env.KAVERO_LITELLM_BASE_URL = "http://litellm:4000";
+    process.env.KAVERO_LITELLM_API_KEY = "gateway-secret";
+    process.env.KAVERO_LITELLM_ROUTING_SECRET = "routingSecret_0123456789012345678901234567890123456789";
+    mocks.createAdminClient.mockReturnValue(createProviderKeyAdmin([]));
+    mocks.createClient.mockResolvedValue(createSupabaseClient({ preferences: {} }));
+
+    const response = (await PATCH(jsonRequest({ chatOrchestrationModelAlias: "kavero-chat-openai-gpt-5-6" })))!;
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({ code: "model-unavailable" });
+    expect(JSON.stringify(body)).not.toContain("OPENAI_API_KEY");
+    expect(JSON.stringify(body)).not.toContain("gateway-secret");
+  });
 });
 
 function jsonRequest(body: unknown) {
@@ -157,6 +183,19 @@ function jsonRequest(body: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function createProviderKeyAdmin(providerIds: string[]) {
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    then: undefined as unknown,
+  };
+  query.eq = vi.fn(() => query);
+  Object.defineProperty(query, "then", {
+    value: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: providerIds.map((provider_id) => ({ provider_id })), error: null }).then(resolve),
+  });
+  return { from: vi.fn(() => query) };
 }
 
 function createSupabaseClient(options: {

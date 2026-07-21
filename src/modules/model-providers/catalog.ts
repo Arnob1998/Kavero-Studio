@@ -1,5 +1,10 @@
 import type { ModelCatalogEntry, ModelCapabilitySlot } from "./types";
-import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS, OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
+import {
+  AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+  GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS,
+  GEMINI_PRO_IMAGE_MODEL_ALIAS,
+  OPENAI_GPT_IMAGE_2_MODEL_ALIAS,
+} from "./image-capabilities";
 
 export const DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS = "kavero-chat-orchestration-default";
 export const DEFAULT_IMAGE_GENERATION_MODEL_ALIAS = "kavero-image-generation-default";
@@ -32,6 +37,36 @@ export const modelCatalog = [
     model: "gemini/gemini-3.1-flash-image-preview",
     modelAlias: DEFAULT_IMAGE_GENERATION_MODEL_ALIAS,
     displayLabel: "Nano Banana 2",
+    capabilities: {
+      slots: ["imageGeneration"],
+      supportsTools: false,
+      supportsStructuredJson: false,
+      supportsMultimodalImageInput: true,
+      supportsImageOutput: true,
+      supportsStreaming: false,
+      requirements: ["provider-key"],
+    },
+  },
+  {
+    provider: "gemini",
+    model: "gemini/gemini-3-pro-image-preview",
+    modelAlias: GEMINI_PRO_IMAGE_MODEL_ALIAS,
+    displayLabel: "Nano Banana Pro",
+    capabilities: {
+      slots: ["imageGeneration"],
+      supportsTools: false,
+      supportsStructuredJson: false,
+      supportsMultimodalImageInput: true,
+      supportsImageOutput: true,
+      supportsStreaming: false,
+      requirements: ["provider-key"],
+    },
+  },
+  {
+    provider: "gemini",
+    model: "gemini/gemini-2.5-flash-image",
+    modelAlias: GEMINI_2_5_FLASH_IMAGE_MODEL_ALIAS,
+    displayLabel: "Nano Banana",
     capabilities: {
       slots: ["imageGeneration"],
       supportsTools: false,

@@ -41,7 +41,8 @@ import { PromptComposer } from "@/components/headless/prompt-composer";
 import { SiteNav } from "@/components/site-nav";
 import { FloatingTooltip } from "@/components/unlumen-ui/floating-tooltip";
 import { brand } from "@/lib/brand";
-import { getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings } from "@/modules/model-providers/image-browser";
+import { getBrowserImageModelByAlias, getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings, type BrowserImageModel } from "@/modules/model-providers/image-browser";
+import { useModelProviderSettings } from "@/modules/model-providers/browser-settings";
 import type {
   DrivePreflightResponse,
   GateDialog,
@@ -257,8 +258,11 @@ interface SettingDefinition {
   options: SettingOption[];
 }
 
-function createSettingDefinitions(activeModelId: string): SettingDefinition[] {
-  const activeModel = standaloneImageModels.find((model) => model.legacyModelId === activeModelId) ?? standaloneImageModels[0];
+function createSettingDefinitions(activeModelId: string, models: readonly BrowserImageModel[] = standaloneImageModels): SettingDefinition[] {
+  const selectableModels = models;
+  const activeModel = selectableModels.find((model) => model.legacyModelId === activeModelId)
+    ?? standaloneImageModels.find((model) => model.legacyModelId === activeModelId)
+    ?? standaloneImageModels[0];
   return [
   {
     key: "model",
@@ -266,11 +270,13 @@ function createSettingDefinitions(activeModelId: string): SettingDefinition[] {
     tooltip: "Generation model",
     description: "Choose the image generation model for this run.",
     icon: Sparkles,
-    options: standaloneImageModels.map((model) => ({
-      label: model.displayLabel,
-      value: model.legacyModelId,
-      description: model.description,
-    })),
+    options: selectableModels.length
+      ? selectableModels.map((model) => ({
+          label: model.displayLabel,
+          value: model.legacyModelId,
+          description: model.description,
+        }))
+      : [{ label: "No active image models", value: "", description: "Add or enable provider credentials in Settings." }],
   },
   {
     key: "count",
@@ -902,6 +908,7 @@ function PromptLibrarySkeleton() {
 }
 
 export function GeneratePage() {
+  const modelProvider = useModelProviderSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSetting, setActiveSetting] = useState<SettingKey>("aspect");
   const [settings, setSettings] = useState<Record<SettingKey, string>>(defaultSettings);
@@ -940,7 +947,11 @@ export function GeneratePage() {
   const gateDialogResolverRef = useRef<((value: boolean) => void) | null>(null);
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
 
-  const settingDefinitions = createSettingDefinitions(settings.model);
+  const activeImageModels = modelProvider.activeModels("imageGeneration")
+    .map((model) => getBrowserImageModelByAlias(model.modelAlias))
+    .filter((model): model is BrowserImageModel => Boolean(model));
+  const activeChatModels = modelProvider.activeModels("chatOrchestration");
+  const settingDefinitions = createSettingDefinitions(settings.model, activeImageModels);
   const currentDefinition =
     settingDefinitions.find((definition) => definition.key === activeSetting) ?? settingDefinitions[0];
   const CurrentSettingIcon = currentDefinition.icon;
@@ -1061,6 +1072,24 @@ export function GeneratePage() {
   useEffect(() => {
     void loadWorkspaceStatus();
   }, []);
+
+  useEffect(() => {
+    const alias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    const selected = alias ? getBrowserImageModelByAlias(alias) : null;
+    if (!selected || selected.legacyModelId === settings.model) return;
+    setSettings((current) => {
+      const normalized = normalizeBrowserImageUiSettings({
+        model: current.model,
+        count: Number(current.count),
+        aspectRatio: current.aspect,
+        imageSize: current.quality,
+        reasoning: current.thinking,
+        quality: current.providerQuality,
+        background: current.background as "auto" | "opaque" | "transparent",
+      }, selected.legacyModelId, "standalone-generate");
+      return { ...current, model: normalized.model, count: String(normalized.count), aspect: normalized.aspectRatio, quality: normalized.imageSize, thinking: normalized.reasoning, providerQuality: normalized.quality ?? "auto", background: normalized.background ?? "auto" };
+    });
+  }, [modelProvider.settings?.selected?.imageGenerationModelAlias, settings.model]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1579,6 +1608,11 @@ export function GeneratePage() {
   const handleGenerate = async (value: string) => {
     const prompt = value.trim();
     if (!prompt || isGenerating) return;
+    const selectedImageAlias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    if (!selectedImageAlias || !activeImageModels.some((model) => model.modelAlias === selectedImageAlias)) {
+      setGenerationError("No active image model is selected. Add provider credentials or choose an active model in Settings.");
+      return;
+    }
 
     const status = await loadWorkspaceStatus();
     if (!(await requireSignedIn(status))) return;
@@ -1625,6 +1659,7 @@ export function GeneratePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
+          modelAlias: selectedImageAlias,
           model,
           count: Number(settings.count),
           thinking: settings.thinking,
@@ -1640,6 +1675,13 @@ export function GeneratePage() {
       const payload = (await response.json()) as Partial<GenerateApiResponse> & GenerateApiError;
 
       if (!response.ok) {
+        if (response.status === 409 && (payload.details as { code?: string } | undefined)?.code === "model-selection-stale") {
+          setActiveRun(null);
+          setPromptText(prompt);
+          setReferenceImages(submittedReferenceImages);
+          await modelProvider.refresh();
+          throw new Error(payload.error || "Your default image model changed. Review it and try again.");
+        }
         if (shouldOpenImageGenerationGeminiKeyGate(response.status, payload.error)) {
           setActiveRun(null);
           setPromptText(prompt);
@@ -1934,9 +1976,8 @@ export function GeneratePage() {
         </label>
       </motion.aside>
 
-      <motion.button
-        className="fixed bottom-5 left-1.5 z-30 hidden h-12 w-[212px] items-center gap-1.5 rounded-xl px-3 text-[13px] text-white transition hover:bg-white/[0.06] min-[920px]:flex min-[920px]:bottom-8 xl:w-[236px]"
-        type="button"
+      <motion.div
+        className="fixed bottom-5 left-1.5 z-30 hidden w-[250px] grid-cols-2 gap-2 rounded-xl px-2 py-1.5 text-[11px] text-white min-[920px]:grid min-[920px]:bottom-8 xl:w-[300px]"
         initial={false}
         animate={{
           x: generationActive ? -280 : 0,
@@ -1945,15 +1986,22 @@ export function GeneratePage() {
           pointerEvents: generationActive ? "none" : "auto",
         }}
         transition={generationTransition}
-        onClick={() => {
-          setActiveSetting("model");
-          setSettingsOpen(true);
-        }}
       >
-        <span className="font-bold text-white/52">Model</span>
-        <strong className="truncate font-extrabold">{activeModelOption.label}</strong>
-        <ChevronDown aria-hidden="true" size={15} />
-      </motion.button>
+        <label className="grid gap-1">
+          <span className="font-bold text-white/42">Image model</span>
+          <select className="h-8 min-w-0 rounded-lg border border-white/10 bg-black/60 px-2 font-bold" value={modelProvider.settings?.selected?.imageGenerationModelAlias ?? ""} disabled={activeImageModels.length === 0} onChange={(event) => void modelProvider.saveSelection({ imageGenerationModelAlias: event.target.value })}>
+            {activeImageModels.length === 0 ? <option value="">No active models</option> : null}
+            {activeImageModels.map((model) => <option key={model.modelAlias} value={model.modelAlias}>{model.displayLabel}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1">
+          <span className="font-bold text-white/42">Prompt model</span>
+          <select className="h-8 min-w-0 rounded-lg border border-white/10 bg-black/60 px-2 font-bold" value={modelProvider.settings?.selected?.chatOrchestrationModelAlias ?? ""} disabled={activeChatModels.length === 0} onChange={(event) => void modelProvider.saveSelection({ chatOrchestrationModelAlias: event.target.value })}>
+            {activeChatModels.length === 0 ? <option value="">No active models</option> : null}
+            {activeChatModels.map((model) => <option key={model.modelAlias} value={model.modelAlias}>{model.displayLabel}</option>)}
+          </select>
+        </label>
+      </motion.div>
 
       <motion.aside
         className={`${glassPanelClass} fixed right-0 top-1/2 z-30 hidden w-16 flex-col items-center gap-2 rounded-l-2xl bg-black/35 px-2 py-3 min-[760px]:flex`}
@@ -2099,6 +2147,8 @@ export function GeneratePage() {
                         type="button"
                         onClick={() => setSettings((current) => {
                           if (currentDefinition.key !== "model") return { ...current, [currentDefinition.key]: option.value };
+                          const selectedModel = getBrowserImageModelByLegacyId(option.value);
+                          if (selectedModel) void modelProvider.saveSelection({ imageGenerationModelAlias: selectedModel.modelAlias });
                           const normalized = normalizeBrowserImageUiSettings({
                             model: current.model,
                             count: Number(current.count),

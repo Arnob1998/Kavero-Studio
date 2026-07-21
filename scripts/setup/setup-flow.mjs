@@ -11,9 +11,16 @@ import { writeEnvFileSafely } from "./env-file.mjs";
 import { runLocalDockerStack } from "./run.mjs";
 
 const localLiteLlmBaseUrl = "http://litellm:4000";
-const localOllamaBaseUrl = "http://host.docker.internal:11434";
 
-function gatewayProviderEnv(inputs = {}, { defaultOllamaBaseUrl = "" } = {}) {
+export const setupGatewayProviders = [
+  { value: "gemini", label: "Google Gemini", hint: "Chat orchestration and image generation" },
+  { value: "openai", label: "OpenAI", hint: "Chat orchestration and GPT Image 2" },
+  { value: "groq", label: "Groq", hint: "Chat orchestration" },
+  { value: "azure-openai", label: "Azure OpenAI", hint: "Chat orchestration" },
+  { value: "azure-openai-image", label: "Azure OpenAI (image)", hint: "Independent GPT Image 2 deployment" },
+];
+
+function gatewayProviderEnv(inputs = {}) {
   return {
     OPENAI_API_KEY: inputs.OPENAI_API_KEY ?? "",
     GEMINI_API_KEY: inputs.GEMINI_API_KEY ?? "",
@@ -28,7 +35,7 @@ function gatewayProviderEnv(inputs = {}, { defaultOllamaBaseUrl = "" } = {}) {
     AZURE_IMAGE_API_VERSION: inputs.AZURE_IMAGE_API_VERSION ?? "",
     AZURE_IMAGE_DEPLOYMENT_NAME: inputs.AZURE_IMAGE_DEPLOYMENT_NAME ?? "",
     AZURE_IMAGE_BASE_MODEL: inputs.AZURE_IMAGE_BASE_MODEL ?? "",
-    OLLAMA_BASE_URL: inputs.OLLAMA_BASE_URL ?? defaultOllamaBaseUrl,
+    OLLAMA_BASE_URL: inputs.OLLAMA_BASE_URL ?? "",
   };
 }
 
@@ -73,7 +80,7 @@ export function buildSetupValues({
       KAVERO_LITELLM_API_KEY: secrets.KAVERO_LITELLM_API_KEY,
       KAVERO_LITELLM_ROUTING_SECRET: secrets.KAVERO_LITELLM_ROUTING_SECRET,
       LITELLM_MASTER_KEY: secrets.LITELLM_MASTER_KEY,
-      ...gatewayProviderEnv(inputs, { defaultOllamaBaseUrl: localOllamaBaseUrl }),
+      ...gatewayProviderEnv(inputs),
     };
   }
 
@@ -106,6 +113,93 @@ function assertNotCanceled(value, prompts) {
     process.exit(0);
   }
   return value;
+}
+
+export async function promptForGatewayProviders({ prompts, inputs, target = "gateway" }) {
+  const selectedProviders = assertNotCanceled(
+    await prompts.multiselect({
+      message: "Choose model providers to configure",
+      options: setupGatewayProviders,
+      required: false,
+    }),
+    prompts,
+  );
+
+  if (selectedProviders.includes("gemini")) {
+    inputs.GEMINI_API_KEY = assertNotCanceled(
+      await prompts.password({ message: `Gemini API key for the ${target}` }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("openai")) {
+    inputs.OPENAI_API_KEY = assertNotCanceled(
+      await prompts.password({ message: `OpenAI API key for the ${target}` }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("groq")) {
+    inputs.GROQ_API_KEY = assertNotCanceled(
+      await prompts.password({ message: `Groq API key for the ${target}` }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("azure-openai")) {
+    inputs.AZURE_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Azure OpenAI API key" }),
+      prompts,
+    );
+    inputs.AZURE_API_BASE = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI endpoint", placeholder: "https://resource.openai.azure.com" }),
+      prompts,
+    );
+    inputs.AZURE_API_VERSION = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI API version", placeholder: "Optional" }),
+      prompts,
+    );
+    inputs.AZURE_DEPLOYMENT_NAME = assertNotCanceled(
+      await prompts.text({ message: "Azure OpenAI deployment name" }),
+      prompts,
+    );
+    inputs.AZURE_BASE_MODEL = assertNotCanceled(
+      await prompts.select({
+        message: "Azure OpenAI model family",
+        options: [
+          { value: "gpt-4o", label: "GPT-4o family" },
+          { value: "gpt-4.1", label: "GPT-4.1 family" },
+          { value: "gpt-5", label: "GPT-5 family" },
+          { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+          { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+          { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+        ],
+      }),
+      prompts,
+    );
+  }
+  if (selectedProviders.includes("azure-openai-image")) {
+    inputs.AZURE_IMAGE_API_KEY = assertNotCanceled(
+      await prompts.password({ message: "Azure image-slot API key" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_API_BASE = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot endpoint", placeholder: "https://resource.openai.azure.com" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_API_VERSION = assertNotCanceled(
+      await prompts.text({
+        message: "Azure image-slot API version",
+        initialValue: "2024-02-01",
+        placeholder: "2024-02-01",
+      }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_DEPLOYMENT_NAME = assertNotCanceled(
+      await prompts.text({ message: "Azure image-slot deployment name" }),
+      prompts,
+    );
+    inputs.AZURE_IMAGE_BASE_MODEL = "gpt-image-2";
+  }
+
+  return selectedProviders;
 }
 
 export async function runSetupWizard({
@@ -182,88 +276,10 @@ export async function runSetupWizard({
       prompts,
     );
     prompts.note(
-      "These server envs configure the bundled model gateway. The in-app API key screen remains unchanged.",
+      "Select only the providers you want on the bundled gateway. The in-app API key screen remains unchanged.",
       "Model gateway",
     );
-    inputs.GEMINI_API_KEY = assertNotCanceled(
-      await prompts.password({ message: "Gemini API key for the gateway", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.OPENAI_API_KEY = assertNotCanceled(
-      await prompts.password({ message: "OpenAI API key for the gateway", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.GROQ_API_KEY = assertNotCanceled(
-      await prompts.password({ message: "Groq API key for the gateway", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.AZURE_API_KEY = assertNotCanceled(
-      await prompts.password({ message: "Azure OpenAI API key for this server", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.AZURE_API_BASE = assertNotCanceled(
-      await prompts.text({ message: "Azure OpenAI endpoint", placeholder: "https://resource.openai.azure.com" }),
-      prompts,
-    );
-    inputs.AZURE_API_VERSION = assertNotCanceled(
-      await prompts.text({ message: "Azure OpenAI API version", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.AZURE_DEPLOYMENT_NAME = assertNotCanceled(
-      await prompts.text({ message: "Azure OpenAI deployment name", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.AZURE_BASE_MODEL = assertNotCanceled(
-      await prompts.select({
-        message: "Azure OpenAI model family",
-        initialValue: "",
-        options: [
-          { value: "", label: "Not configured" },
-          { value: "gpt-4o", label: "GPT-4o family" },
-          { value: "gpt-4.1", label: "GPT-4.1 family" },
-          { value: "gpt-5", label: "GPT-5 family" },
-          { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-          { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-          { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-        ],
-      }),
-      prompts,
-    );
-    inputs.AZURE_IMAGE_API_KEY = assertNotCanceled(
-      await prompts.password({ message: "Azure image-slot API key", placeholder: "Optional; enter explicitly even when shared" }),
-      prompts,
-    );
-    inputs.AZURE_IMAGE_API_BASE = assertNotCanceled(
-      await prompts.text({ message: "Azure image-slot endpoint", placeholder: "https://resource.openai.azure.com" }),
-      prompts,
-    );
-    inputs.AZURE_IMAGE_API_VERSION = assertNotCanceled(
-      await prompts.text({ message: "Azure image-slot API version", placeholder: "2024-02-01" }),
-      prompts,
-    );
-    inputs.AZURE_IMAGE_DEPLOYMENT_NAME = assertNotCanceled(
-      await prompts.text({ message: "Azure image-slot deployment name", placeholder: "Optional" }),
-      prompts,
-    );
-    inputs.AZURE_IMAGE_BASE_MODEL = assertNotCanceled(
-      await prompts.select({
-        message: "Azure image-slot model family",
-        initialValue: "",
-        options: [
-          { value: "", label: "Not configured" },
-          { value: "gpt-image-2", label: "GPT Image 2" },
-        ],
-      }),
-      prompts,
-    );
-    inputs.OLLAMA_BASE_URL = assertNotCanceled(
-      await prompts.text({
-        message: "Ollama base URL for the gateway",
-        initialValue: localOllamaBaseUrl,
-        placeholder: localOllamaBaseUrl,
-      }),
-      prompts,
-    );
+    await promptForGatewayProviders({ prompts, inputs });
   } else {
     inputs.NEXT_PUBLIC_SUPABASE_URL = assertNotCanceled(
       await prompts.text({ message: "Supabase public URL", placeholder: "https://project.supabase.co" }),
@@ -339,85 +355,7 @@ export async function runSetupWizard({
         await prompts.password({ message: "Matching LiteLLM routing secret" }),
         prompts,
       );
-      inputs.GEMINI_API_KEY = assertNotCanceled(
-        await prompts.password({ message: "Gemini API key for this server", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.OPENAI_API_KEY = assertNotCanceled(
-        await prompts.password({ message: "OpenAI API key for this server", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.GROQ_API_KEY = assertNotCanceled(
-        await prompts.password({ message: "Groq API key for this server", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.AZURE_API_KEY = assertNotCanceled(
-        await prompts.password({ message: "Azure OpenAI API key for this server", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.AZURE_API_BASE = assertNotCanceled(
-        await prompts.text({ message: "Azure OpenAI endpoint", placeholder: "https://resource.openai.azure.com" }),
-        prompts,
-      );
-      inputs.AZURE_API_VERSION = assertNotCanceled(
-        await prompts.text({ message: "Azure OpenAI API version", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.AZURE_DEPLOYMENT_NAME = assertNotCanceled(
-        await prompts.text({ message: "Azure OpenAI deployment name", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.AZURE_BASE_MODEL = assertNotCanceled(
-        await prompts.select({
-          message: "Azure OpenAI model family",
-          initialValue: "",
-          options: [
-            { value: "", label: "Not configured" },
-            { value: "gpt-4o", label: "GPT-4o family" },
-            { value: "gpt-4.1", label: "GPT-4.1 family" },
-            { value: "gpt-5", label: "GPT-5 family" },
-            { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-            { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-            { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-          ],
-        }),
-        prompts,
-      );
-      inputs.AZURE_IMAGE_API_KEY = assertNotCanceled(
-        await prompts.password({ message: "Azure image-slot API key", placeholder: "Optional; enter explicitly even when shared" }),
-        prompts,
-      );
-      inputs.AZURE_IMAGE_API_BASE = assertNotCanceled(
-        await prompts.text({ message: "Azure image-slot endpoint", placeholder: "https://resource.openai.azure.com" }),
-        prompts,
-      );
-      inputs.AZURE_IMAGE_API_VERSION = assertNotCanceled(
-        await prompts.text({ message: "Azure image-slot API version", placeholder: "2024-02-01" }),
-        prompts,
-      );
-      inputs.AZURE_IMAGE_DEPLOYMENT_NAME = assertNotCanceled(
-        await prompts.text({ message: "Azure image-slot deployment name", placeholder: "Optional" }),
-        prompts,
-      );
-      inputs.AZURE_IMAGE_BASE_MODEL = assertNotCanceled(
-        await prompts.select({
-          message: "Azure image-slot model family",
-          initialValue: "",
-          options: [
-            { value: "", label: "Not configured" },
-            { value: "gpt-image-2", label: "GPT Image 2" },
-          ],
-        }),
-        prompts,
-      );
-      inputs.OLLAMA_BASE_URL = assertNotCanceled(
-        await prompts.text({
-          message: "Ollama base URL for this server",
-          placeholder: "http://127.0.0.1:11434",
-          defaultValue: "",
-        }),
-        prompts,
-      );
+      await promptForGatewayProviders({ prompts, inputs, target: "server" });
     }
   }
 

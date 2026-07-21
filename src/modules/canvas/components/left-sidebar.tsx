@@ -32,7 +32,6 @@ import { AutoSegmentPanel } from "@/modules/editor-panels/panels/auto-segment-pa
 import { AssetsPanel } from "@/modules/editor-panels/panels/assets-panel";
 import { CopilotPanel } from "@/modules/editor-panels/panels/copilot-panel";
 import {
-  canvasImageModelOptions,
   getCanvasImageControlOptions,
   GeneratePanel,
   labelize,
@@ -43,7 +42,8 @@ import { RelationsPanel } from "@/modules/editor-panels/panels/relations-panel";
 import { ShapesPanel } from "@/modules/editor-panels/panels/shapes-panel";
 import { TextPanel } from "@/modules/editor-panels/panels/text-panel";
 import { useEditor } from "@/modules/canvas/state/context";
-import { getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings } from "@/modules/model-providers/image-browser";
+import { getBrowserImageModelByAlias, getBrowserImageModelByLegacyId, getBrowserImageModels, normalizeBrowserImageUiSettings } from "@/modules/model-providers/image-browser";
+import { useModelProviderSettings } from "@/modules/model-providers/browser-settings";
 import { uploadCanvasAsset, type CanvasAsset, type CanvasAssetsResponse } from "@/modules/assets/canvas-assets";
 import {
   CANVAS_TOOL_REGISTRY,
@@ -158,6 +158,7 @@ function switchCanvasImageModel(current: CanvasImageGenerationSettings, model: C
 }
 
 export function LeftSidebar() {
+  const modelProvider = useModelProviderSettings();
   const {
     addText,
     addShape,
@@ -192,6 +193,12 @@ export function LeftSidebar() {
   const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
   const [imageGenerationWarnings, setImageGenerationWarnings] = useState<string[]>([]);
   const [imageGenerationSettings, setImageGenerationSettings] = useState<CanvasImageGenerationSettings>(defaultCanvasImageSettings);
+  const activeCanvasImageModels = modelProvider.activeModels("imageGeneration")
+    .map((model) => getBrowserImageModelByAlias(model.modelAlias))
+    .filter((model): model is NonNullable<typeof model> => Boolean(model))
+    .filter((model) => model.compatibility["canvas-generation"]);
+  const activeCanvasImageOptions = activeCanvasImageModels.map((model) => ({ value: model.legacyModelId as CanvasImageModel, label: model.displayLabel }));
+  const activeChatModels = modelProvider.activeModels("chatOrchestration");
   const canvasImageControls = getCanvasImageControlOptions(imageGenerationSettings.model);
   const [imageTransparent, setImageTransparent] = useState(defaultCanvasImageSettings.transparentBackgroundDefault);
   const [addingGeneratedImageId, setAddingGeneratedImageId] = useState<string | null>(null);
@@ -232,6 +239,13 @@ export function LeftSidebar() {
       window.dispatchEvent(new CustomEvent("kavero:canvas-lock", { detail: { locked: false } }));
     };
   }, [assistantBusy]);
+
+  useEffect(() => {
+    const alias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    const selected = alias ? getBrowserImageModelByAlias(alias) : null;
+    if (!selected || selected.legacyModelId === imageGenerationSettings.model) return;
+    setImageGenerationSettings((current) => switchCanvasImageModel(current, selected.legacyModelId as CanvasImageModel));
+  }, [imageGenerationSettings.model, modelProvider.settings?.selected?.imageGenerationModelAlias]);
 
   const stopAssistant = useCallback(() => {
     assistantStoppedRef.current = true;
@@ -524,6 +538,7 @@ export function LeftSidebar() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
+          modelAlias: modelProvider.settings?.selected?.imageGenerationModelAlias,
           model: settings.model,
           count: settings.batchSize,
           thinking: settings.thinking,
@@ -542,19 +557,28 @@ export function LeftSidebar() {
         images?: Array<{ id: string; dataUrl: string; mimeType: string; variant: number }>;
         warnings?: string[];
         error?: string;
+        details?: { code?: string };
       };
-      if (!response.ok) throw new Error(payload.error ?? "Image generation failed.");
+      if (!response.ok) {
+        if (response.status === 409 && payload.details?.code === "model-selection-stale") await modelProvider.refresh();
+        throw new Error(payload.error ?? "Image generation failed.");
+      }
       return {
         images: await processGeneratedImages(payload.images ?? [], prompt, transparentBackground),
         warnings: payload.warnings ?? [],
       };
     },
-    [getCanvasVisualPreview, processGeneratedImages],
+    [getCanvasVisualPreview, modelProvider, processGeneratedImages],
   );
 
   const handleGenerateImages = useCallback(async () => {
     const prompt = imagePrompt.trim();
     if (!prompt || imageGenerating) return;
+    const selectedAlias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    if (!selectedAlias || !activeCanvasImageModels.some((model) => model.modelAlias === selectedAlias)) {
+      setImageGenerationError("No active image model is selected. Add provider credentials or choose an active model in Settings.");
+      return;
+    }
     setImageGenerating(true);
     setImageGenerationError(null);
     setImageGenerationWarnings([]);
@@ -571,7 +595,7 @@ export function LeftSidebar() {
     } finally {
       setImageGenerating(false);
     }
-  }, [imageGenerating, imageGenerationSettings, imagePrompt, imageTransparent, requestGeneratedImages]);
+  }, [activeCanvasImageModels, imageGenerating, imageGenerationSettings, imagePrompt, imageTransparent, modelProvider.settings?.selected?.imageGenerationModelAlias, requestGeneratedImages]);
 
   const addGeneratedImageToCanvas = useCallback(
     async (image: GeneratedCanvasImage, position?: { x: number; y: number }) => {
@@ -949,8 +973,13 @@ export function LeftSidebar() {
                       showError(error instanceof Error ? error.message : "Unable to add generated image.");
                     })}
                     onTransparentChange={setImageTransparent}
+                    modelOptions={activeCanvasImageOptions}
                     onSettingsChange={(settings) => setImageGenerationSettings((current) =>
-                      settings.model === current.model ? settings : switchCanvasImageModel(current, settings.model)
+                      settings.model === current.model ? settings : (() => {
+                        const selected = getBrowserImageModelByLegacyId(settings.model);
+                        if (selected) void modelProvider.saveSelection({ imageGenerationModelAlias: selected.modelAlias });
+                        return switchCanvasImageModel(current, settings.model);
+                      })()
                     )}
                   />
                 )}
@@ -995,6 +1024,8 @@ export function LeftSidebar() {
                     onRun={() => void runAutoSegment()}
                     onAddSegment={(segment) => void addAutoSegmentToCanvas(segment)}
                     onAddAll={() => void addAllAutoSegmentsToCanvas()}
+                    modelAvailable={Boolean(getBrowserImageModelByLegacyId(imageGenerationSettings.model)?.compatibility["auto-segment-isolation"])}
+                    modelUnavailableMessage={`${getBrowserImageModelByLegacyId(imageGenerationSettings.model)?.displayLabel ?? "The selected model"} does not support Auto Segment. Choose a compatible image model in Settings.`}
                   />
                 )}
 
@@ -1221,6 +1252,14 @@ export function LeftSidebar() {
                 {assistantSettingsTab === "model" && (
                   <div className="divide-y divide-white/6">
                     <div className="py-4">
+                      <SettingsSelect
+                        label="Copilot model"
+                        value={modelProvider.settings?.selected?.chatOrchestrationModelAlias ?? ""}
+                        options={activeChatModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel }))}
+                        onChange={(chatOrchestrationModelAlias) => void modelProvider.saveSelection({ chatOrchestrationModelAlias })}
+                      />
+                    </div>
+                    <div className="py-4">
                       <div className="mb-3 flex items-center justify-between">
                         <div>
                           <p className="text-[13px] font-semibold text-white">Temperature</p>
@@ -1270,8 +1309,12 @@ export function LeftSidebar() {
                       <SettingsSelect
                         label="Model"
                         value={imageGenerationSettings.model}
-                        options={canvasImageModelOptions.map((option) => ({ value: option.value, label: option.label }))}
-                        onChange={(model) => setImageGenerationSettings((current) => switchCanvasImageModel(current, model as CanvasImageModel))}
+                        options={activeCanvasImageOptions.map((option) => ({ value: option.value, label: option.label }))}
+                        onChange={(model) => {
+                          const selected = getBrowserImageModelByLegacyId(model);
+                          if (selected) void modelProvider.saveSelection({ imageGenerationModelAlias: selected.modelAlias });
+                          setImageGenerationSettings((current) => switchCanvasImageModel(current, model as CanvasImageModel));
+                        }}
                       />
                       <SettingsSelect
                         label="Batch"

@@ -48,6 +48,7 @@ export function GeneratePanel({
   onAddImage,
   onTransparentChange,
   onSettingsChange,
+  modelOptions = canvasImageModelOptions,
 }: {
   prompt: string;
   images: GeneratedCanvasImage[];
@@ -62,6 +63,7 @@ export function GeneratePanel({
   onAddImage: (image: GeneratedCanvasImage) => void;
   onTransparentChange: (value: boolean) => void;
   onSettingsChange: (settings: CanvasImageGenerationSettings) => void;
+  modelOptions?: Array<{ value: CanvasImageModel; label: string }>;
 }) {
   const controls = getCanvasImageControlOptions(settings.model);
   return (
@@ -103,7 +105,7 @@ export function GeneratePanel({
             </button>
             <button
               className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-accent px-3 text-[11px] font-black text-white shadow-[0_12px_26px_rgb(59_130_246_/_0.24)] transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={generating || !prompt.trim()}
+              disabled={generating || !prompt.trim() || modelOptions.length === 0}
               type="submit"
             >
               {generating ? <LoaderCircle size={12} className="animate-spin" /> : <Sparkles size={12} />}
@@ -180,7 +182,7 @@ export function GeneratePanel({
           <SettingsSelect
             label="Model"
             value={settings.model}
-            options={canvasImageModelOptions.map((option) => ({ value: option.value, label: option.label }))}
+            options={modelOptions.map((option) => ({ value: option.value, label: option.label }))}
             onChange={(model) => onSettingsChange({ ...settings, model: model as CanvasImageModel })}
           />
           <SettingsSelect
@@ -228,6 +230,7 @@ export function SettingsSelect({
   const [placement, setPlacement] = useState<"top" | "bottom">("bottom");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const selected = options.find((option) => option.value === value) ?? options[0];
+  const unavailable = options.length === 0;
   const menuPlacementClass = placement === "top" ? "bottom-full mb-1 max-h-64" : "top-full mt-1 max-h-56";
 
   const toggleOpen = () => {
@@ -252,12 +255,13 @@ export function SettingsSelect({
               : "border-white/[0.09] bg-white/[0.055] text-white/72 hover:border-white/[0.16] hover:bg-white/[0.075]"
           }`}
           type="button"
+          disabled={unavailable}
           onClick={toggleOpen}
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <span className="truncate">{selected?.label ?? value}</span>
+          <span className="truncate">{selected?.label ?? (unavailable ? "No active models" : value)}</span>
           <ChevronDown size={13} className={`shrink-0 text-white/36 transition ${open ? "rotate-180 text-accent/90" : ""}`} />
         </button>
         {open ? (

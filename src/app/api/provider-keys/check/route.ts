@@ -100,7 +100,7 @@ async function checkProviderCredentials(providerId: SupportedProviderId, credent
     const request = buildAzureOpenAiLiteLlmRequest(
       {
         model: "kavero-chat-azure-openai",
-        max_tokens: 1,
+        max_tokens: 256,
         messages: [{ role: "user", content: "Connectivity check" }],
       },
       credentials,

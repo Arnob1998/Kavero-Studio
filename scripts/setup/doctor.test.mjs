@@ -34,9 +34,9 @@ function validLocalDockerEnv(overrides = {}) {
     KAVERO_LOCAL_STORAGE_ROOT: "/data/kavero-storage",
     KAVERO_MODEL_GATEWAY: "litellm",
     KAVERO_LITELLM_BASE_URL: "http://litellm:4000",
-    KAVERO_LITELLM_API_KEY: "sk-local-app",
+    KAVERO_LITELLM_API_KEY: "sk-local-app-012345678901234567890",
     KAVERO_LITELLM_ROUTING_SECRET: "localRoutingSecret_012345678901234567890123456789",
-    LITELLM_MASTER_KEY: "sk-local-master",
+    LITELLM_MASTER_KEY: "sk-local-master-012345678901234567890",
     OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GROQ_API_KEY: "",
@@ -75,8 +75,8 @@ describe("setup doctor", () => {
       env: validLocalDockerEnv({
         KAVERO_MODEL_GATEWAY: "direct",
         KAVERO_LITELLM_BASE_URL: "not-a-url",
-        KAVERO_LITELLM_API_KEY: "not-sk",
-        LITELLM_MASTER_KEY: "sk-replace-with-litellm-master-key",
+        KAVERO_LITELLM_API_KEY: "sk-too-short",
+        LITELLM_MASTER_KEY: "sk-also-too-short",
         [publicLiteLlmKey]: "http://litellm:4000",
       }),
     });
@@ -149,7 +149,7 @@ describe("setup doctor", () => {
         KAVERO_AUTH_MODE: "google",
         KAVERO_MODEL_GATEWAY: "litellm",
         KAVERO_LITELLM_BASE_URL: "https://litellm.example.com",
-        KAVERO_LITELLM_API_KEY: "sk-hosted-app",
+        KAVERO_LITELLM_API_KEY: "sk-hosted-app-012345678901234567890",
         KAVERO_LITELLM_ROUTING_SECRET: "hostedRoutingSecret_0123456789012345678901234567",
       },
     });
@@ -182,6 +182,18 @@ describe("setup doctor", () => {
       }),
     });
     expect(complete.filter((item) => item.status === "fail")).toEqual([]);
+
+    const cognitiveServicesEndpoint = validateEnvForProfile({
+      profileId: "local-docker",
+      env: validLocalDockerEnv({
+        AZURE_API_KEY: "azure-key-012345678901234567890",
+        AZURE_API_BASE: "https://kavero-resource.cognitiveservices.azure.com",
+        AZURE_API_VERSION: "2025-04-01-preview",
+        AZURE_DEPLOYMENT_NAME: "deployment-one",
+        AZURE_BASE_MODEL: "gpt-5.6-sol",
+      }),
+    });
+    expect(cognitiveServicesEndpoint.filter((item) => item.status === "fail")).toEqual([]);
 
     const unsafe = validateEnvForProfile({
       profileId: "local-docker",

@@ -12,12 +12,14 @@ type CredentialMode = "env-or-user" | "user-required" | "env-only";
 
 let credentialMode: CredentialMode;
 let savedProviderKeys: Array<Record<string, unknown>>;
+let unavailableModelAliases: Set<string>;
 
 describe("ProviderSettingsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     credentialMode = "env-or-user";
     savedProviderKeys = [];
+    unavailableModelAliases = new Set();
     vi.stubGlobal("fetch", vi.fn(fetchMock));
   });
 
@@ -39,6 +41,8 @@ describe("ProviderSettingsPanel", () => {
     expect(screen.queryByText("Ollama", { selector: "button *" })).not.toBeInTheDocument();
     expect(screen.queryByText("http://litellm:4000")).not.toBeInTheDocument();
     expect(screen.queryByText("sk-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live check")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Setup required").length).toBeGreaterThan(0);
 
     expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-azure-openai");
     expect(Array.from(chatSelect!.options, (option) => option.value)).toContain("kavero-chat-openai-gpt-5-6");
@@ -236,6 +240,29 @@ describe("ProviderSettingsPanel", () => {
     });
   });
 
+  it("locks unavailable models and unlocks them immediately after credentials are saved", async () => {
+    unavailableModelAliases.add("kavero-chat-openai-gpt-5-6");
+    unavailableModelAliases.add("kavero-image-openai-gpt-image-2");
+    const user = userEvent.setup();
+    render(<ProviderSettingsPanel />);
+
+    const selectors = await screen.findAllByRole("combobox");
+    expect(option(selectors[0] as HTMLSelectElement, "kavero-chat-openai-gpt-5-6")).toBeDisabled();
+    expect(option(selectors[1] as HTMLSelectElement, "kavero-image-openai-gpt-image-2")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "OpenAI provider settings" }));
+    await user.type(screen.getByLabelText("OpenAI API key"), "sk-openai-012345678901234567890");
+    await user.click(screen.getByRole("button", { name: "Check key" }));
+    await screen.findByText("Live check passed. Credentials are ready to save.");
+    await user.click(screen.getByRole("button", { name: "Save credentials" }));
+
+    await waitFor(() => {
+      expect(option(selectors[0] as HTMLSelectElement, "kavero-chat-openai-gpt-5-6")).not.toBeDisabled();
+      expect(option(selectors[1] as HTMLSelectElement, "kavero-image-openai-gpt-image-2")).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "OpenAI provider settings" })).toHaveTextContent("Active");
+    });
+  });
+
   it("saves GPT Image 2 independently from the orchestration model", async () => {
     const user = userEvent.setup();
     render(<ProviderSettingsPanel />);
@@ -277,6 +304,10 @@ async function fetchMock(input: string | URL | Request, init?: RequestInit) {
   }
   if (url === "/api/provider-keys" && init?.method === "POST") {
     const body = JSON.parse(String(init.body)) as { providerId: string };
+    if (body.providerId === "openai") {
+      unavailableModelAliases.delete("kavero-chat-openai-gpt-5-6");
+      unavailableModelAliases.delete("kavero-image-openai-gpt-image-2");
+    }
     return jsonResponse({
       providerKey: {
         id: `key-${body.providerId}`,
@@ -317,7 +348,9 @@ function modelSettings(selected = {
     gateway: { status: "configured", gateway: "litellm", configured: true, issues: [] },
     credentialMode,
     selected,
-    catalog: modelCatalog,
+    catalog: modelCatalog.map((entry) => unavailableModelAliases.has(entry.modelAlias)
+      ? { ...entry, availability: { active: false, source: null, reason: "credentials-required", message: `Add an active ${entry.providerLabel} key to use this model.` } }
+      : entry),
   };
 }
 
@@ -387,6 +420,7 @@ function model(providerId: string, providerLabel: string, providerKeyId: string,
     providerKeyId,
     modelAlias,
     displayLabel,
+    availability: { active: true, source: "saved-key", reason: null, message: null },
     capabilities: { slots: [slot], requirements: [] },
   };
 }
@@ -395,6 +429,12 @@ function requestBodies(url: string) {
   return vi.mocked(global.fetch).mock.calls.flatMap(([input, init]) =>
     String(input) === url && init?.body ? [JSON.parse(String(init.body))] : [],
   );
+}
+
+function option(select: HTMLSelectElement, value: string) {
+  const result = Array.from(select.options).find((entry) => entry.value === value);
+  if (!result) throw new Error(`Missing option: ${value}`);
+  return result;
 }
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {

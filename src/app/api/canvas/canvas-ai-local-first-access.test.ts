@@ -361,6 +361,7 @@ function imageGenerateRequest() {
     prompt: "Create a clean app icon.",
     count: 4,
     thinking: "fast",
+    modelAlias: "kavero-image-generation-default",
     model: "gemini-3.1-flash-image-preview",
   });
 }

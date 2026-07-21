@@ -235,7 +235,7 @@ function logGenerationFailures(message: string, failures: unknown[]) {
   );
 }
 
-async function handleDirectGeminiGeneration(request: Request, userId: string): Promise<Response> {
+async function handleDirectGeminiGeneration(request: Request, userId: string, selection: ImageModelSelection): Promise<Response> {
   let apiKey: string | null;
   try {
     apiKey = await getUserProviderApiKey(userId, "google-gemini");
@@ -251,6 +251,7 @@ async function handleDirectGeminiGeneration(request: Request, userId: string): P
   if ("response" in parsed) return parsed.response;
 
   const { input, inputReferenceImages, references } = parsed;
+  if (input.modelAlias !== selection.modelAlias) return staleModelSelectionResponse(selection);
   if (getImageModelCapabilitiesByLegacyModel(input.model)?.provider !== "gemini") {
     return jsonError("The selected image model requires the configured model gateway.", 503);
   }
@@ -390,29 +391,23 @@ async function handleDirectGeminiGeneration(request: Request, userId: string): P
 
 async function handleGatewayGeneration({
   request,
-  supabase,
   userId,
   config,
+  selection,
 }: {
   request: Request;
-  supabase: Awaited<ReturnType<typeof createClient>>;
   userId: string;
   config: Extract<ModelGatewayConfig, { status: "configured" }>;
+  selection: ImageModelSelection;
 }): Promise<Response> {
   const parsed = await parseGenerateInput(request);
   if ("response" in parsed) return parsed.response;
 
   const { input, inputReferenceImages } = parsed;
-  const loadedSelection = await loadImageModelSelection({ supabase, userId });
-  if (!loadedSelection) {
-    return jsonError("Unable to load image generation model settings.", 500);
-  }
-  const selection: ImageModelSelection = loadedSelection;
   const requestCapability = getImageModelCapabilitiesByLegacyModel(input.model);
   const selectedCapability = getImageModelCapabilities(selection.modelAlias);
-  if (!requestCapability || !selectedCapability || requestCapability.provider !== selectedCapability.provider) {
-    return jsonError("The requested image model does not match the image provider selected in Settings.", 400);
-  }
+  if (input.modelAlias !== selection.modelAlias) return staleModelSelectionResponse(selection);
+  if (!requestCapability || !selectedCapability || requestCapability.modelAlias !== selectedCapability.modelAlias) return staleModelSelectionResponse(selection);
   const runtimeCapability = selectedCapability;
 
   const credentials = await resolveImageGenerationRuntimeCredentials({
@@ -603,9 +598,11 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError("Sign in to generate images.", 401);
   }
 
+  const selection = await loadImageModelSelection({ supabase, userId: user.id });
+  if (!selection) return jsonError("Unable to load image generation model settings.", 500);
   const gatewayConfig = getModelGatewayConfig();
   if (gatewayConfig.status === "disabled") {
-    return handleDirectGeminiGeneration(request, user.id);
+    return handleDirectGeminiGeneration(request, user.id, selection);
   }
 
   if (gatewayConfig.status === "error") {
@@ -616,8 +613,16 @@ export async function POST(request: Request): Promise<Response> {
 
   return handleGatewayGeneration({
     request,
-    supabase,
     userId: user.id,
     config: gatewayConfig,
+    selection,
   });
+}
+
+function staleModelSelectionResponse(selection: ImageModelSelection) {
+  return jsonError(
+    "Your default image model changed. Kavero refreshed the selection; review it and try again.",
+    409,
+    { code: "model-selection-stale", selectedModelAlias: selection.modelAlias },
+  );
 }

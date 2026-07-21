@@ -100,7 +100,10 @@ describe("/api/provider-keys/check", () => {
 
   it("runs Azure connectivity through the signed dynamic route without exposing credentials", async () => {
     configureGateway();
-    const credentials = azureCredentials();
+    const credentials = {
+      ...azureCredentials(),
+      apiBase: "https://kavero-resource.cognitiveservices.azure.com",
+    };
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ choices: [], usage: {} }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -122,6 +125,7 @@ describe("/api/provider-keys/check", () => {
     });
     expect(outbound).toMatchObject({
       model: "kavero-chat-azure-openai",
+      max_tokens: 256,
       user_config: {
         model_list: [{
           model_name: "kavero-chat-azure-openai",

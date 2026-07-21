@@ -41,11 +41,13 @@ export function ProviderKeyManager({
   providers,
   savedKeys,
   loading,
+  providerStates,
   onSaved,
 }: {
   providers: BrowserProviderKeyCatalogEntry[];
   savedKeys: ProviderKeyMetadata[];
   loading: boolean;
+  providerStates: Record<string, string>;
   onSaved: (providerKey: ProviderKeyMetadata) => void;
 }) {
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>("google-gemini");
@@ -225,18 +227,21 @@ export function ProviderKeyManager({
                 <span
                   className={cn(
                     "rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide",
-                    provider.checkMode === "live"
+                    providerStates[provider.id] === "Active" || providerStates[provider.id] === "Managed by admin"
                       ? "border-accent/30 bg-accent/10 text-blue-100"
                       : "border-white/[0.1] bg-white/[0.04] text-white/46",
                   )}
                 >
-                  {provider.checkMode === "live" ? "Live check" : "Validation only"}
+                  {providerStates[provider.id] ?? "Setup required"}
                 </span>
                 <ChevronDown size={16} className={cn("text-white/36 transition", expanded && "rotate-180")} />
               </button>
 
               {expanded ? (
                 <div className="grid gap-3 border-t border-white/[0.07] p-3">
+                  <p className="m-0 text-[11px] font-medium text-white/38">
+                    {provider.checkMode === "live" ? "Credentials are checked with the provider before saving." : "Credentials are validated locally before saving."}
+                  </p>
                   {provider.credentialFields.map((field) => {
                     const visibilityKey = `${provider.id}:${field.id}`;
                     const showSecret = Boolean(visibleSecrets[visibilityKey]);

@@ -132,6 +132,13 @@ describe("provider key registry", () => {
       baseModel: "gpt-4o",
     };
     expect(parseProviderCredentials("azure-openai", valid)).toEqual(valid);
+    expect(parseProviderCredentials("azure-openai", {
+      ...valid,
+      apiBase: "https://kavero-resource.cognitiveservices.azure.com",
+    })).toEqual({
+      ...valid,
+      apiBase: "https://kavero-resource.cognitiveservices.azure.com",
+    });
     expect(parseProviderCredentials("azure-openai", { ...valid, baseModel: "gpt-5.6-sol" })).toEqual({
       ...valid,
       baseModel: "gpt-5.6-sol",

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildSetupValues } from "./setup-flow.mjs";
+import {
+  buildSetupValues,
+  promptForGatewayProviders,
+  setupGatewayProviders,
+} from "./setup-flow.mjs";
 
 function localDockerSecrets() {
   return {
@@ -15,6 +19,53 @@ function localDockerSecrets() {
 }
 
 describe("setup flow values", () => {
+  it("offers only supported gateway providers", () => {
+    expect(setupGatewayProviders.map((provider) => provider.value)).toEqual([
+      "gemini",
+      "openai",
+      "groq",
+      "azure-openai",
+      "azure-openai-image",
+    ]);
+  });
+
+  it("prompts only for the selected gateway providers", async () => {
+    const calls = [];
+    const prompts = {
+      isCancel: () => false,
+      multiselect: async (options) => {
+        calls.push(["multiselect", options]);
+        return ["openai", "azure-openai-image"];
+      },
+      password: async (options) => {
+        calls.push(["password", options]);
+        return options.message.startsWith("OpenAI") ? "openai-key" : "azure-image-key";
+      },
+      text: async (options) => {
+        calls.push(["text", options]);
+        if (options.message.endsWith("endpoint")) return "https://images.openai.azure.com";
+        if (options.message.endsWith("API version")) return "2024-02-01";
+        return "image-deployment";
+      },
+    };
+    const inputs = {};
+
+    await promptForGatewayProviders({ prompts, inputs });
+
+    expect(inputs).toEqual({
+      OPENAI_API_KEY: "openai-key",
+      AZURE_IMAGE_API_KEY: "azure-image-key",
+      AZURE_IMAGE_API_BASE: "https://images.openai.azure.com",
+      AZURE_IMAGE_API_VERSION: "2024-02-01",
+      AZURE_IMAGE_DEPLOYMENT_NAME: "image-deployment",
+      AZURE_IMAGE_BASE_MODEL: "gpt-image-2",
+    });
+    expect(calls[0][1].options.some((option) => option.value === "ollama")).toBe(false);
+    expect(calls.some(([, options]) => options.message?.includes("Gemini"))).toBe(false);
+    expect(calls.some(([, options]) => options.message?.includes("Groq"))).toBe(false);
+    expect(calls.some(([, options]) => options.message === "Azure OpenAI endpoint")).toBe(false);
+  });
+
   it("builds local Docker env values", () => {
     const values = buildSetupValues({
       profileId: "local-docker",
