@@ -1,114 +1,170 @@
 <div align="center">
 
-```txt
-██╗  ██╗ █████╗ ██╗   ██╗███████╗██████╗  ██████╗  ███████╗████████╗██╗   ██╗██████╗ ██╗ ██████╗
-██║ ██╔╝██╔══██╗██║   ██║██╔════╝██╔══██╗██╔═══██╗ ██╔════╝╚══██╔══╝██║   ██║██╔══██╗██║██╔═══██╗
-█████╔╝ ███████║██║   ██║█████╗  ██████╔╝██║   ██║ ███████╗   ██║   ██║   ██║██║  ██║██║██║   ██║
-██╔═██╗ ██╔══██║╚██╗ ██╔╝██╔══╝  ██╔══██╗██║   ██║ ╚════██║   ██║   ██║   ██║██║  ██║██║██║   ██║
-██║  ██╗██║  ██║ ╚████╔╝ ███████╗██║  ██║╚██████╔╝ ███████║   ██║   ╚██████╔╝██████╔╝██║╚██████╔╝
-╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝ ╚═════╝  ╚══════╝   ╚═╝    ╚═════╝ ╚═════╝ ╚═╝ ╚═════╝
-```
+# Kavero Studio
 
-### The open-source Canva alternative for AI design.
+### The open-source Canva alternative for AI design
 
-**bring your own models &middot; own your files &middot; canvas AI &middot; self-hostable &middot; local-first**
+**Bring your own models · own your files · canvas AI · self-hostable · local-first**
 
 The open design workspace for the AI era.
 
-Canva made design easy. Kavero makes it yours.
+**Canva made design easy. Kavero makes it yours.**
 
 </div>
 
-Kavero is an open-source design workspace for people who want AI-powered creative tools without being locked inside one closed platform. It gives you a familiar visual canvas, generated asset history, AI-assisted editing workflows, provider-key control, and a local-first path you can run on your own machine.
-
-## Why Kavero
-
-Creative tools are turning into closed bundles: their models, their storage, their workflow, their pricing. Kavero is built around a different idea.
-
-You should be able to bring your own models, keep control of your files, run the core product yourself, and still get a polished design workspace that feels approachable from the first click.
-
-Kavero is for creators, founders, marketers, small agencies, and builders who need to make social posts, launch graphics, ads, thumbnails, pitch visuals, and client assets without handing the whole workflow to a closed suite.
+Kavero is an open-source design workspace where creators can generate visual assets, place them into a real editable canvas, collaborate with an AI canvas copilot, and keep control of their models, credentials, files, and deployment.
 
 ## Highlights
 
-- **Familiar canvas**: create designs with text, shapes, images, pages, assets, and PNG export.
-- **AI generation**: generate visuals with prompt presets, references, model settings, and saved history.
-- **Canvas AI**: use AI workflows for layout help, segmentation, asset generation, and image judging.
-- **Gallery**: keep generated images organized and bring them back into your work.
-- **BYOK provider keys**: keep AI access tied to your own provider accounts.
-- **Own your storage**: use local managed storage or connect external storage flows.
-- **Local-first setup**: run Kavero with the bundled Docker Compose Supabase stack.
-- **Self-hostable foundation**: configure Kavero against your own Supabase-backed deployment.
+- Creates editable designs with text, shapes, images, layers, pages, and uploaded assets.
+- Generates images, refines prompts, and saves results in Gallery.
+- Uses Canvas Copilot for controlled, structured canvas actions.
+- Supports independent orchestration and image-generation models.
+- Supports bring-your-own-key providers and local managed storage.
 
-## Get Started
+## Run Locally — Recommended for Judges
 
-Prerequisites:
+> [!IMPORTANT]
+> **Docker is required.** The hosted/cloud environment is not the recommended judging path. Please run Kavero locally with the bundled Docker Compose stack.
 
-- Node.js 22+ or 24+
+The OpenAI API key needed for AI features is supplied separately in the Devpost submission. Do not add it to the repository.
+
+### Prerequisites
+
+- Docker Desktop or Docker Engine with Docker Compose
+- Node.js 22 or 24
 - pnpm
-- Docker Desktop or Docker Engine
+
+### 1. Install and configure
 
 ```bash
 pnpm install
 pnpm setup
+```
+
+Choose **Local Docker** at the first prompt, then use all default settings:
+
+- Email/password authentication
+- Kavero-managed local filesystem storage
+- App port `3000`
+- Supabase port `54321`
+- No model providers selected during setup
+- Do not overwrite existing non-secret values
+- Do not start immediately when the final prompt appears
+
+Leaving the model-provider selection empty is intentional. The supplied OpenAI key can be added securely inside Kavero after creating the local judge account.
+
+The wizard generates `.env.docker.local`, including the local database, authentication, storage, LiteLLM, and routing secrets required by the Docker stack.
+
+### 2. Start Kavero
+
+Make sure Docker is running, then execute:
+
+```bash
 pnpm setup:run
 ```
 
-Open Kavero:
+The first run builds the containers and can take several minutes. When the services are ready, open:
 
 ```txt
 http://127.0.0.1:3000
 ```
 
-The setup wizard creates local env files safely, protects existing secrets, and can start the local Docker stack for you.
+### 3. Add the supplied OpenAI key
 
-## Choose Your Setup
+1. Create a local account with any test email and password.
+2. Open **Settings → API Providers**.
+3. Add the OpenAI API key supplied with the Devpost submission.
+4. Select **GPT-5.6** as the orchestration model.
+5. Select **GPT Image 2** as the image-generation model.
 
-### Local Docker
+The local profile does not require Google OAuth, Google Drive, a hosted Supabase project, or cloud deployment.
 
-Recommended for trying Kavero with the full local stack.
+### 4. Suggested judge walkthrough
 
-```bash
-pnpm setup
-pnpm setup:run
-```
+1. Open **Generate**.
+2. Enter a rough prompt such as: `A launch graphic for an open-source AI design workspace`.
+3. Use **Refine prompt** to exercise GPT-5.6 orchestration.
+4. Generate an image with GPT Image 2.
+5. Open **Gallery** and confirm the generation and its settings were saved.
+6. Open **Canvas**, create a design, and add or upload an image.
+7. Open **Copilot** and ask it to add or arrange content on the design.
+8. Edit the result and export the design as PNG.
 
-Local Docker runs:
+No sample dataset is required. A new local account starts with an empty workspace so the complete Generate → Gallery → Canvas workflow can be evaluated directly.
 
-- Kavero app
-- LiteLLM gateway, internal to the Docker network
-- Supabase Auth
-- Postgres
-- PostgREST
-- Supabase Storage
-- Supabase bootstrap checks
-- Local managed file storage through a Docker volume
+### Stop the local stack
 
-Local Docker uses email/password sign-in and this storage contract:
-
-```env
-KAVERO_DEPLOYMENT_PROFILE=local-first
-KAVERO_AUTH_MODE=password
-KAVERO_STORAGE_PROVIDER=kavero-managed
-KAVERO_MANAGED_STORAGE_BACKEND=local-filesystem
-KAVERO_LOCAL_STORAGE_ROOT=/data/kavero-storage
-```
-
-`/data/kavero-storage` is a container path backed by the `kavero-local-storage` Docker volume.
-
-Manual Docker command:
+Press `Ctrl+C` in the terminal running Compose. To stop the containers from another terminal:
 
 ```bash
-docker compose --env-file .env.docker.local up --build
+docker compose --env-file .env.docker.local down
 ```
 
-The LiteLLM service is not published to the host by default. Kavero receives only server-side gateway envs inside the Docker network.
+The named Docker volumes retain local database and file data. Do not add `-v` unless you intentionally want to delete that local data.
 
-`pnpm setup` generates the local LiteLLM secrets and can collect optional server-side Gemini, OpenAI, Groq, and Ollama values for the gateway. Normal setup does not require editing `docker/litellm/config.yaml`.
+## How GPT-5.6 Is Used
 
-### Host Development
+GPT-5.6 is an orchestration model in Kavero rather than an image renderer.
 
-Use this path when you want to run the Next.js dev server on your host machine while keeping LiteLLM in Docker as a local dependency.
+- **Prompt Refiner:** interprets an incomplete creative brief, asks focused questions when necessary, and returns a structured refined prompt.
+- **Canvas Copilot:** reasons over the current canvas context and selects validated editor tools to modify the design.
+- **Provider architecture:** GPT-5.6 is exposed through stable Kavero model aliases and routed through the server-side LiteLLM boundary.
+- **Capability-aware controls:** the UI exposes only controls supported by the selected model and omits incompatible request parameters.
+
+GPT Image 2 handles image generation independently. Keeping orchestration and image generation in separate slots allows users to select the best provider and model for each task without hard-coding the product to one vendor.
+
+## How Codex Was Used
+
+I used Codex throughout Build Week to:
+
+- Inspect the existing architecture and trace dependencies across a large codebase.
+- Plan module boundaries that preserved canvas, authentication, storage, and history behavior.
+- Implement the model catalog, provider routing, runtime availability, and credential boundaries.
+- Integrate GPT-5.6 and GPT Image 2 across Generate and Canvas workflows.
+- Debug real provider differences, including unsupported GPT-5.6 sampling parameters and Azure tool-call routing behavior.
+- Generate focused regression tests and verify changes with TypeScript, Vitest, production builds, Docker, and credentialed provider smokes.
+- Maintain evidence-based implementation reports and roadmap decisions throughout the work.
+
+Codex was most valuable as an engineering collaborator across connected surfaces: it helped identify risky boundaries, make focused changes, and verify that foundational AI work did not casually rewrite unrelated product behavior.
+
+The final Build Week repair and verification pass covered **101 test files and 825 tests**, a successful production build, and credentialed Prompt Refiner, image-generation, and Canvas Copilot provider smokes.
+
+## Architecture
+
+Kavero is built with Next.js, React, TypeScript, Fabric.js, Tailwind CSS, Supabase, PostgreSQL, and LiteLLM.
+
+```txt
+src/app                    Next.js routes and API entrypoints
+src/modules/canvas         Canvas editor runtime
+src/modules/canvas/ai      Canvas Copilot and other Canvas AI workflows
+src/modules/generation     Standalone Generate workspace
+src/modules/gallery        Generated-image history and Gallery
+src/modules/model-providers Model catalogs, capabilities, routing, and transport
+src/modules/storage        Managed and connected storage foundation
+src/modules/assets         Canvas asset helpers
+src/modules/editor-panels  Canvas panel UI
+src/lib                    Shared auth, Supabase, Drive, plans, and utilities
+supabase                   Schema and local foundation SQL
+docker                     Local Supabase and LiteLLM support
+scripts                    Setup, bootstrap, and verification helpers
+```
+
+Important boundaries:
+
+- Provider credentials and routing secrets remain server-side.
+- Dynamic provider routes are signed and validated at the LiteLLM boundary.
+- Product UI consumes capability and availability metadata instead of embedding provider-specific rules.
+- Orchestration and image-generation models are configured independently.
+- Local-first storage uses a Docker volume and does not require Google Drive.
+
+## Other Setup Options
+
+The local Docker path above is the supported judging path. The following options are intended for contributors and self-hosters.
+
+### Host development
+
+Run the Next.js development server on the host while keeping LiteLLM in Docker:
 
 ```bash
 cp .env.local.example .env.local
@@ -124,41 +180,15 @@ pnpm gateway:up
 pnpm dev
 ```
 
-Host development uses:
-
-- `.env.local` for the Next.js app running on your machine
-- `compose.dev.yml` to publish only LiteLLM on `127.0.0.1:4000`
-- `compose.yml` for the same LiteLLM config used by Local Docker
-
-Set these in `.env.local`:
-
-```env
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
-KAVERO_API_ORIGIN=http://localhost:3000
-KAVERO_MODEL_GATEWAY=litellm
-KAVERO_LITELLM_BASE_URL=http://127.0.0.1:4000
-KAVERO_LITELLM_API_KEY=sk-change-me
-LITELLM_MASTER_KEY=sk-change-me
-GEMINI_API_KEY=
-```
-
-For the current local dev gateway, `KAVERO_LITELLM_API_KEY` should match `LITELLM_MASTER_KEY`. Add a real `GEMINI_API_KEY` or another provider key for live model calls.
-
-If you use Google auth while developing on `localhost:3000`, add this redirect URL in Supabase Auth:
-
-```txt
-http://localhost:3000/auth/callback
-```
-
-Stop the dev gateway when finished:
+The gateway is published only on `127.0.0.1:4000`. Stop it with:
 
 ```bash
 pnpm gateway:down
 ```
 
-### Cloud / Self-Host
+### Cloud / self-host
 
-Use this path when you already have a Supabase project or a hosted Supabase-compatible stack.
+Use this only with an existing Supabase project or compatible hosted stack:
 
 ```bash
 pnpm setup
@@ -167,163 +197,36 @@ pnpm build
 pnpm start
 ```
 
-Minimum env shape:
+The cloud path requires deployment-specific Supabase, authentication, storage, and model-gateway configuration. It is not required for judging this submission.
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-NEXT_PUBLIC_SITE_URL=
-KAVERO_DEPLOYMENT_PROFILE=cloud
-KAVERO_AUTH_MODE=google
-```
-
-Optional provider-owned storage:
-
-```env
-GOOGLE_DRIVE_CLIENT_ID=
-GOOGLE_DRIVE_CLIENT_SECRET=
-```
-
-Optional Kavero-managed storage:
-
-```env
-KAVERO_STORAGE_PROVIDER=kavero-managed
-KAVERO_MANAGED_STORAGE_BACKEND=supabase-storage
-```
-
-Optional hosted LiteLLM gateway:
-
-```env
-KAVERO_MODEL_GATEWAY=litellm
-KAVERO_LITELLM_BASE_URL=
-KAVERO_LITELLM_API_KEY=
-KAVERO_LITELLM_ROUTING_SECRET=
-```
-
-Keep LiteLLM credentials, the routing secret, upstream provider keys, and internal gateway URLs server-only. A hosted external LiteLLM service must run the matching Kavero custom-auth hook with the same routing secret and pinned LiteLLM contract; an unmodified LiteLLM endpoint is not supported for dynamic client routing.
-
-Azure OpenAI orchestration and image generation use independent logical configurations. Orchestration uses the `AZURE_API_*` record; Azure GPT Image 2 uses the `AZURE_IMAGE_*` record. The same resource URL and key may be entered explicitly in both records, but values are never copied or inferred between them. See [Azure OpenAI setup](docs/azure-openai-setup.md).
-
-OpenAI orchestration offers stable Kavero aliases for `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
-
-## First Run
-
-1. Open `http://127.0.0.1:3000`.
-2. Create an account.
-3. Go to Settings -> API keys.
-4. Add your AI provider key.
-5. Open `/generate` or `/canvas`.
-
-From there, generate assets, keep them in Gallery, place them into the canvas, edit the design, and export when ready.
-
-## Configuration
+## Configuration Files
 
 | File | Purpose |
 |---|---|
-| `.env.docker.local` | Local Docker stack. Created by `pnpm setup`. |
-| `.env.local` | Local development or Cloud/self-host env. |
-| `.env.local.example` | Host development reference for `pnpm dev` plus Docker LiteLLM. |
-| `.env.example` | Manual Cloud/self-host reference. |
+| `.env.docker.local` | Local Docker stack; created by `pnpm setup`. |
 | `.env.docker.local.example` | Manual Local Docker reference. |
-| `compose.dev.yml` | Host development override that publishes LiteLLM to localhost. |
+| `.env.local` | Host development or Cloud/self-host environment. |
+| `.env.local.example` | Host development reference. |
+| `.env.example` | Manual Cloud/self-host reference. |
+| `compose.yml` | Local Docker stack and shared LiteLLM configuration. |
+| `compose.dev.yml` | Host-development override that publishes LiteLLM locally. |
 
-Important envs:
-
-| Env | Used for |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Browser-facing Supabase URL. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Browser/server Supabase client key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Admin-backed app flows and provider-key storage. |
-| `NEXT_PUBLIC_SITE_URL` | Public Kavero app origin. |
-| `KAVERO_DEPLOYMENT_PROFILE` | `cloud` or `local-first`. |
-| `KAVERO_AUTH_MODE` | `google`, `password`, or `google-password`. |
-| `KAVERO_STORAGE_PROVIDER` | Selects new-write storage behavior. |
-| `KAVERO_MANAGED_STORAGE_BACKEND` | `supabase-storage` or `local-filesystem`. |
-| `KAVERO_LOCAL_STORAGE_ROOT` | Absolute storage root, or `/data/kavero-storage` in Docker. |
-| `KAVERO_MODEL_GATEWAY` | Server-side model gateway selector for LiteLLM-backed model calls. |
-| `KAVERO_LITELLM_BASE_URL` | Server-side LiteLLM base URL. Uses `http://litellm:4000` in Docker and `http://127.0.0.1:4000` for host development. |
-| `KAVERO_LITELLM_API_KEY` | Server-side Kavero-to-LiteLLM credential. |
-| `KAVERO_LITELLM_ROUTING_SECRET` | Separate server-only HMAC secret shared with the matching Kavero LiteLLM custom-auth hook. |
-| `KAVERO_MODEL_GATEWAY_CREDENTIAL_MODE` | Server-side credential policy: `env-or-user` (default), `user-required`, or `env-only`. |
-| `LITELLM_MASTER_KEY` | Local LiteLLM service master key. Generated by setup for Local Docker. |
-| `GEMINI_API_KEY` | Optional server-side Gemini key for the LiteLLM gateway. |
-| `OPENAI_API_KEY` | Optional server-side OpenAI key for the LiteLLM gateway. |
-| `GROQ_API_KEY` | Optional server-side Groq key for the LiteLLM gateway. |
-| `AZURE_API_KEY` | Optional server-side Azure OpenAI key; requires all other Azure values. |
-| `AZURE_API_BASE` | Azure OpenAI HTTPS endpoint such as `https://resource.openai.azure.com`. |
-| `AZURE_API_VERSION` | Azure OpenAI API version used for orchestration requests. |
-| `AZURE_DEPLOYMENT_NAME` | Account-specific Azure OpenAI deployment name; kept server-only. |
-| `AZURE_BASE_MODEL` | Curated routing family: `gpt-4o`, `gpt-4.1`, `gpt-5`, `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`. GPT-5 families use LiteLLM's explicit `azure/gpt5_series/<deployment>` route. |
-| `AZURE_IMAGE_API_KEY` | Azure image-slot key, supplied independently even when identical to `AZURE_API_KEY`. |
-| `AZURE_IMAGE_API_BASE` | Azure image-slot resource URL, supplied independently even when identical to `AZURE_API_BASE`. |
-| `AZURE_IMAGE_API_VERSION` | Validated Azure GPT Image 2 API version: `2024-02-01`. |
-| `AZURE_IMAGE_DEPLOYMENT_NAME` | Azure GPT Image 2 deployment name; kept server-only. |
-| `AZURE_IMAGE_BASE_MODEL` | Validated image family: `gpt-image-2`. |
-| `OLLAMA_BASE_URL` | Optional server-side Ollama URL for the LiteLLM gateway. |
-
-The setup CLI keeps existing non-empty values by default, asks before replacing secrets, writes through a backup, and never echoes secrets back to your terminal.
+The setup CLI keeps existing non-empty values by default, asks before replacing secrets, writes through a backup, and never echoes secrets back to the terminal.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `pnpm setup` | Guided setup wizard. |
+| `pnpm setup` | Run the guided setup wizard. |
 | `pnpm setup:doctor` | Check Local Docker configuration. |
-| `pnpm kavero doctor cloud-self-host` | Check Cloud/self-host configuration. |
-| `pnpm setup:run` | Run Local Docker with `docker compose up --build`. |
-| `pnpm gateway:up` | Start the LiteLLM Docker dependency for host development. |
-| `pnpm gateway:down` | Stop the LiteLLM Docker dependency for host development. |
+| `pnpm setup:run` | Build and run the Local Docker stack. |
+| `pnpm gateway:up` | Start the LiteLLM dependency for host development. |
+| `pnpm gateway:down` | Stop the host-development gateway. |
 | `pnpm dev` | Start the Next.js development server. |
-| `pnpm build` | Build for production. |
+| `pnpm build` | Create a production build. |
 | `pnpm start` | Start the production server. |
-| `pnpm test` | Run Vitest. |
+| `pnpm test` | Run the Vitest suite. |
 | `pnpm test:smoke` | Run Playwright smoke tests. |
-
-## Architecture
-
-```txt
-src/app                    Next.js routes and API route entrypoints
-src/modules/canvas         Canvas editor runtime
-src/modules/canvas/ai      Canvas AI workflows
-src/modules/generation     Standalone /generate runtime
-src/modules/gallery        Generated image history and Gallery runtime
-src/modules/storage        Managed and connected storage foundation
-src/modules/assets         Canvas asset helpers
-src/modules/editor-panels  Canvas panel UI
-src/lib                    Shared auth, Supabase, Drive, provider-key, and utility code
-supabase                   Schema and local foundation SQL
-docker                     Local Supabase Compose support
-scripts                    Setup, bootstrap, and verification helpers
-```
-
-## Development
-
-```bash
-pnpm install
-cp .env.local.example .env.local
-pnpm gateway:up
-pnpm dev
-```
-
-`pnpm dev` runs the app on the host. If you want LiteLLM-backed AI features during host development, keep `pnpm gateway:up` running and point `.env.local` at `http://127.0.0.1:4000`.
-
-Useful checks:
-
-```bash
-pnpm exec vitest run scripts/setup
-pnpm exec vitest run src/modules/generation
-pnpm exec tsc --noEmit
-pnpm build
-```
-
-Local Supabase helper scripts are available when you want to work outside the Docker Compose app flow:
-
-```bash
-pnpm supabase:local:start
-pnpm supabase:local:bootstrap
-pnpm supabase:local:smoke
-```
 
 ## License
 
