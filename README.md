@@ -1,21 +1,12 @@
 <div align="center">
 
-```txt
-██╗  ██╗ █████╗ ██╗   ██╗███████╗██████╗  ██████╗  ███████╗████████╗██╗   ██╗██████╗ ██╗ ██████╗
-██║ ██╔╝██╔══██╗██║   ██║██╔════╝██╔══██╗██╔═══██╗ ██╔════╝╚══██╔══╝██║   ██║██╔══██╗██║██╔═══██╗
-█████╔╝ ███████║██║   ██║█████╗  ██████╔╝██║   ██║ ███████╗   ██║   ██║   ██║██║  ██║██║██║   ██║
-██╔═██╗ ██╔══██║╚██╗ ██╔╝██╔══╝  ██╔══██╗██║   ██║ ╚════██║   ██║   ██║   ██║██║  ██║██║██║   ██║
-██║  ██╗██║  ██║ ╚████╔╝ ███████╗██║  ██║╚██████╔╝ ███████║   ██║   ╚██████╔╝██████╔╝██║╚██████╔╝
-╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝ ╚═════╝  ╚══════╝   ╚═╝    ╚═════╝ ╚═════╝ ╚═╝ ╚═════╝
-```
+<img src="demo/kavero.banner.png" alt="Kavero Studio — AI-powered open-source canvas alternative" width="100%" />
 
-### The open-source Canva alternative for AI design.
+### From prompt to polished design.
 
-**bring your own models &middot; own your files &middot; canvas AI &middot; self-hostable &middot; local-first**
+Generate with your own models, create on an AI-assisted canvas, and keep every file under your control.
 
-The open design workspace for the AI era.
-
-Canva made design easy. Kavero makes it yours.
+<img src="demo/kavero-trailer.webp" alt="Kavero Studio product demo" width="100%" />
 
 </div>
 
