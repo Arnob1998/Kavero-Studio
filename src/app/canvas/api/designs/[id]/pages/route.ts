@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  CANVAS_LIMITS,
   getCanvasUser,
   jsonError,
   mapPage,
@@ -42,11 +41,8 @@ export async function POST(request: Request, { params }: DesignPagesRouteContext
     .eq("design_id", id)
     .eq("user_id", user.id);
 
-  if (countError) return jsonError("Unable to check page quota.", 500);
+  if (countError) return jsonError("Unable to count design pages.", 500);
   const pageCount = count ?? 0;
-  if (pageCount >= CANVAS_LIMITS.pagesPerDesign) {
-    return jsonError(`Canvas page limit reached (${CANVAS_LIMITS.pagesPerDesign}).`, 409);
-  }
 
   let insertOrder = pageCount;
   if (parsed.data.after_sort_order !== undefined) {

@@ -36,7 +36,6 @@ const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[ke
 type WorkspaceStatusOptions = {
   user?: { id: string } | null;
   providerKey?: Record<string, unknown> | null;
-  metadata?: { plan?: string | null } | null;
   generationCount?: number | null;
   driveConnection?: { status?: string | null; folder_status?: string | null } | null;
 };
@@ -94,7 +93,6 @@ describe("/api/workspace/status", () => {
   it("preserves authenticated Cloud active Drive status and reports ready", async () => {
     configureWorkspaceStatusMocks({
       providerKey: { id: "key-1", status: "active" },
-      metadata: { plan: "premium" },
       generationCount: 3,
       driveConnection: { status: "active", folder_status: "ready" },
     });
@@ -105,7 +103,6 @@ describe("/api/workspace/status", () => {
     expect(body).toMatchObject({
       authenticated: true,
       hasGeminiKey: true,
-      plan: "premium",
       drive: {
         connected: true,
         reconnectRequired: false,
@@ -305,10 +302,6 @@ function createSupabaseClient(options: WorkspaceStatusOptions) {
       getUser: vi.fn(async () => ({ data: { user: options.user ?? null } })),
     },
     from: vi.fn((table: string) => {
-      if (table === "user_metadata") {
-        return maybeSingleQuery({ data: options.metadata ?? { plan: "free" } });
-      }
-
       if (table === "generation_runs") {
         return countQuery({ count: options.generationCount ?? 0 });
       }

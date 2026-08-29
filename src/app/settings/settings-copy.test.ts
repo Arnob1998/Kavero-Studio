@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import { getSettingsCopy } from "./settings-copy";
 
 describe("settings copy", () => {
-  it("uses Cloud storage and subscription copy by default", () => {
+  it("uses connected Cloud storage copy without subscription language by default", () => {
     const copy = getSettingsCopy();
 
     expect(copy.deploymentProfile).toBe("cloud");
-    expect(copy.overviewDescription).toContain("subscription");
+    expect(copy.overviewDescription).toContain("connected storage");
     expect(copy.storageStat).toEqual({
       value: "Drive",
-      helper: "Free plan archive",
+      helper: "Connected storage",
     });
     expect(copy.storageQuickActionLabel).toBe("Connect storage");
-    expect(copy.subscriptionQuickActionLabel).toBe("View subscription");
     expect(copy.storagePageDescription).toContain("Google Drive");
+    expect(copy.storagePanel.summaryTitle).toBe("Gallery storage");
   });
 
   it("uses Local-first Kavero storage copy when explicitly configured", () => {
@@ -26,7 +26,6 @@ describe("settings copy", () => {
       helper: "Managed storage",
     });
     expect(copy.storageQuickActionLabel).toBe("Review storage");
-    expect(copy.subscriptionQuickActionLabel).toBe("View account details");
     expect(copy.storagePanel.title).toBe("Kavero storage");
     expect(copy.storagePanel.summaryDescription).toContain("Google Drive is not required");
   });

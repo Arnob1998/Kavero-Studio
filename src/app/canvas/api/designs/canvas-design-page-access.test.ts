@@ -140,19 +140,17 @@ describe("canvas design/page route access", () => {
     expect(admin.__mocks.from).toHaveBeenCalledWith("canvas_pages");
   });
 
-  it("keeps Cloud/default free users blocked by the premium gate", async () => {
+  it("allows Cloud/default users with connected Drive regardless of stored plan", async () => {
     const admin = createCanvasAdmin({ plan: "free", driveStatus: "active" });
     mocks.createAdminClient.mockReturnValue(admin);
 
     const response = await listDesigns();
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: "Canvas is available on the premium plan.",
-    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject([{ id: "design-1" }]);
   });
 
-  it("keeps Cloud/default premium users without Google Drive blocked by the Drive gate", async () => {
+  it("keeps Cloud/default users without Google Drive blocked by the Drive gate", async () => {
     const admin = createCanvasAdmin({ plan: "premium", driveStatus: null });
     mocks.createAdminClient.mockReturnValue(admin);
 
@@ -177,7 +175,7 @@ describe("canvas design/page route access", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
-      error: "Canvas is available on the premium plan.",
+      error: "Connect Google Drive to use Canvas.",
     });
   });
 });

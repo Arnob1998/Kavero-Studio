@@ -3,7 +3,6 @@ import Link from "next/link";
 import {
   Activity,
   ArrowRight,
-  CreditCard,
   HardDrive,
   KeyRound,
   Mail,
@@ -12,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { brand } from "@/lib/brand";
 import { getDeploymentProfile } from "@/lib/deployment-profile";
-import { normalizeUserPlan } from "@/lib/plans";
 import { createClient } from "@/lib/supabase/server";
 import { getSettingsCopy } from "./settings-copy";
 import { SettingsPanel, SettingsPanelHeader, SettingsShell, StatCard } from "./settings-shell";
@@ -32,11 +30,6 @@ export default async function SettingsPage() {
   const displayName =
     user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? user?.email ?? "Account";
   const avatarUrl = user?.user_metadata?.avatar_url ?? user?.user_metadata?.picture;
-  const { data: metadata } = user
-    ? await supabase.from("user_metadata").select("plan").eq("user_id", user.id).maybeSingle()
-    : { data: null };
-  const plan = normalizeUserPlan(metadata?.plan);
-  const planLabel = plan === "premium" ? "Premium" : "Free";
   const settingsCopy = getSettingsCopy(getDeploymentProfile());
 
   return (
@@ -46,7 +39,7 @@ export default async function SettingsPage() {
       description={settingsCopy.overviewDescription}
     >
       <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Plan" value={planLabel} helper="Personal workspace" icon={CreditCard} />
+        <StatCard label="Workspace" value="Full access" helper="No subscription limits" icon={Palette} />
         <StatCard label="API access" value="Ready" helper="Connect provider keys" icon={KeyRound} />
         <StatCard
           label="Storage"
@@ -97,11 +90,6 @@ export default async function SettingsPage() {
               href="/settings/storage"
               icon={HardDrive}
               label={settingsCopy.storageQuickActionLabel}
-            />
-            <QuickLink
-              href="/subscription"
-              icon={CreditCard}
-              label={settingsCopy.subscriptionQuickActionLabel}
             />
             <QuickLink href="/generate" icon={Palette} label="Open workspace" />
           </div>

@@ -5,24 +5,6 @@ import { deleteCanvasDraftsForDesign, getCanvasDraft, markCanvasDraftSynced } fr
 
 const CLOUD_SAVE_DEBOUNCE_MS = 10000;
 
-function toCanvasFeedbackMessage(message: string) {
-  const designLimit = message.match(/Canvas design limit reached \((\d+)\)/i);
-  if (designLimit) {
-    return `Canvas limit reached. You can keep up to ${designLimit[1]} designs. Delete an old design to create a new one.`;
-  }
-
-  const pageLimit = message.match(/Canvas page limit reached \((\d+)\)/i);
-  if (pageLimit) {
-    return `Page limit reached. This design can have up to ${pageLimit[1]} pages. Delete a page before adding another.`;
-  }
-
-  return message;
-}
-
-function isHandledCanvasLimitMessage(message: string) {
-  return /Canvas (design|page) limit reached \(\d+\)/i.test(message);
-}
-
 export function useDesigns(
   getCanvasJSONForPage: (pageId: string) => string,
   enabled = true,
@@ -43,9 +25,8 @@ export function useDesigns(
 
   const reportError = useCallback(
     (message: string) => {
-      const feedbackMessage = toCanvasFeedbackMessage(message);
-      setError(feedbackMessage);
-      onError?.(feedbackMessage);
+      setError(message);
+      onError?.(message);
     },
     [onError],
   );
@@ -135,7 +116,7 @@ export function useDesigns(
       return d.id;
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unable to create design.";
-      if (!isHandledCanvasLimitMessage(message)) console.error("Failed to create design:", e);
+      console.error("Failed to create design:", e);
       reportError(message);
     }
   }, [reportError]);
@@ -153,7 +134,7 @@ export function useDesigns(
       return d.id;
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unable to create design from template.";
-      if (!isHandledCanvasLimitMessage(message)) console.error("Failed to create from template:", e);
+      console.error("Failed to create from template:", e);
       reportError(message);
     }
   }, [reportError]);
@@ -223,7 +204,7 @@ export function useDesigns(
       setActivePageId(page.id);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unable to add page.";
-      if (!isHandledCanvasLimitMessage(message)) console.error("Failed to add page:", e);
+      console.error("Failed to add page:", e);
       reportError(message);
     }
   }, [pages, reportError]);
@@ -249,7 +230,7 @@ export function useDesigns(
         setActivePageId(page.id);
       } catch (e) {
         const message = e instanceof Error ? e.message : "Unable to duplicate page.";
-        if (!isHandledCanvasLimitMessage(message)) console.error("Failed to duplicate page:", e);
+        console.error("Failed to duplicate page:", e);
         reportError(message);
       }
     },

@@ -102,7 +102,7 @@ const privacyFaqItems = [
   {
     question: "What data does Kavero store?",
     answer: [
-      "Kavero stores only the information needed to run your workspace, including your account details, plan status, connection metadata, prompt templates, generation history, gallery records, and Google Drive file IDs used by your Gallery.",
+      "Kavero stores only the information needed to run your workspace, including your account details, connection metadata, prompt templates, generation history, gallery records, and Google Drive file IDs used by your Gallery.",
       "Sensitive secrets, such as full API keys and Google refresh tokens, are stored separately through secure server-side secret storage.",
     ],
   },

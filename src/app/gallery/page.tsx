@@ -5,7 +5,6 @@ import { ArrowLeft, ExternalLink, FolderLock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { brand } from "@/lib/brand";
 import { getDeploymentProfile, isLocalFirstDeploymentProfile } from "@/lib/deployment-profile";
-import { getGenerationLimit, normalizeUserPlan } from "@/lib/plans";
 import { createClient } from "@/lib/supabase/server";
 
 import { GalleryShell } from "@/modules/gallery/components/gallery-shell";
@@ -51,14 +50,14 @@ export default async function GalleryPage({
     );
   }
 
-  const { connection, runs, metadata, generationCount } = await getGalleryData(supabase, user.id);
+  const { connection, runs, generationCount } = await getGalleryData(supabase, user.id);
 
   if (!connection && !isLocalFirst) {
     return (
       <GalleryShell>
         <EmptyState
           title="Connect Google Drive"
-          description="Free plan generations are saved to a scoped Drive folder before they appear here."
+          description="Generations are saved to a scoped Drive folder before they appear here."
           actionHref="/api/google-drive/connect?next=/gallery"
           actionLabel="Connect Drive"
         />
@@ -71,8 +70,6 @@ export default async function GalleryPage({
     ? folders.find((folder) => folder.id === selectedGenerationId)
     : null;
   const visibleImages = selectedFolder?.images ?? [];
-  const plan = normalizeUserPlan(metadata?.plan);
-  const generationLimit = getGenerationLimit(plan);
   const usedGenerations = generationCount ?? folders.length;
   const storageLabel = isLocalFirst ? "Kavero storage" : connection?.folder_name;
   const galleryDescription = isLocalFirst
@@ -121,9 +118,7 @@ export default async function GalleryPage({
               {selectedFolder ? selectedFolder.prompt : galleryDescription}
             </p>
             <p className="m-0 mt-3 text-[12px] font-semibold text-white/36">
-              {generationLimit === null
-                ? "Premium storage is active."
-                : `${usedGenerations}/${generationLimit} generations used.`}
+              {usedGenerations} saved generation{usedGenerations === 1 ? "" : "s"}.
             </p>
           </div>
         </div>

@@ -6,8 +6,6 @@ const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
   getUserProviderApiKey: vi.fn(),
   getUserProviderCredentials: vi.fn(),
-  normalizeUserPlan: vi.fn(),
-  getGenerationLimit: vi.fn(),
   getGoogleDriveConnection: vi.fn(),
   getGoogleDriveAccessTokenForUser: vi.fn(),
   uploadGoogleDriveFile: vi.fn(),
@@ -40,11 +38,6 @@ vi.mock("@/lib/supabase/server", () => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mocks.createAdminClient,
-}));
-
-vi.mock("@/lib/plans", () => ({
-  normalizeUserPlan: mocks.normalizeUserPlan,
-  getGenerationLimit: mocks.getGenerationLimit,
 }));
 
 vi.mock("@/lib/google-drive", () => ({
@@ -335,8 +328,6 @@ describe("/api/generate POST", () => {
     mocks.createAdminClient.mockReturnValue(admin);
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
     mocks.getUserProviderCredentials.mockResolvedValue(null);
-    mocks.normalizeUserPlan.mockReturnValue("premium");
-    mocks.getGenerationLimit.mockReturnValue(null);
     mocks.getGoogleDriveConnection.mockResolvedValue({
       folder_id: "folder-1",
     });
@@ -1535,40 +1526,17 @@ describe("/api/generate POST", () => {
     expect(mocks.uploadGoogleDriveFile).not.toHaveBeenCalled();
   });
 
-  it("preserves current quota full warning behavior", async () => {
+  it("persists generated images when saved history is at the former plan cap", async () => {
     supabase = createSupabaseClient({ countResult: { count: 20, error: null } });
     mocks.createClient.mockResolvedValue(supabase);
-    mocks.normalizeUserPlan.mockReturnValue("free");
-    mocks.getGenerationLimit.mockReturnValue(20);
 
     const response = await POST(request(validBody()));
     const body = await json(response);
 
     expect(response.status).toBe(200);
-    expect(body.warnings).toEqual([
-      "Free plan gallery storage is full (20/20 generations). Remove a generation from Gallery or upgrade before saving more.",
-    ]);
-    expect(mocks.getGoogleDriveConnection).not.toHaveBeenCalled();
-    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
-  });
-
-  it("preserves current quota count failure warning behavior", async () => {
-    supabase = createSupabaseClient({
-      countResult: { count: null, error: new Error("count failed") },
-    });
-    mocks.createClient.mockResolvedValue(supabase);
-    mocks.normalizeUserPlan.mockReturnValue("free");
-    mocks.getGenerationLimit.mockReturnValue(20);
-
-    const response = await POST(request(validBody()));
-    const body = await json(response);
-
-    expect(response.status).toBe(200);
-    expect(body.warnings).toEqual([
-      "Generated images are ready, but Kavero could not check your gallery generation limit.",
-    ]);
-    expect(mocks.getGoogleDriveConnection).not.toHaveBeenCalled();
-    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+    expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+    expect(mocks.getGoogleDriveConnection).toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalled();
   });
 
   it("preserves current missing Drive token warning behavior", async () => {

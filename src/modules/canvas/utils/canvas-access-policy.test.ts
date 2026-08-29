@@ -5,21 +5,15 @@ import {
 } from "./canvas-access-policy";
 
 describe("canvas client access policy", () => {
-  it("keeps Cloud/default gated on authentication, premium plan, and connected Drive", () => {
+  it("keeps Cloud/default gated on authentication and connected Drive only", () => {
     expect(decision(status({ authenticated: false })).allowed).toBe(false);
-    expect(decision(status({ authenticated: true, plan: "free", driveConnected: true }))).toMatchObject({
-      allowed: false,
-      title: "Canvas is premium",
-      actionHref: "/pricing",
-      actionLabel: "View plans",
-    });
-    expect(decision(status({ authenticated: true, plan: "premium", driveConnected: false }))).toMatchObject({
+    expect(decision(status({ authenticated: true, driveConnected: false }))).toMatchObject({
       allowed: false,
       title: "Connect Google Drive",
       actionHref: "/api/google-drive/connect?next=/canvas",
       actionLabel: "Connect Drive",
     });
-    expect(decision(status({ authenticated: true, plan: "premium", driveConnected: true }))).toMatchObject({
+    expect(decision(status({ authenticated: true, driveConnected: true }))).toMatchObject({
       allowed: true,
     });
   });
@@ -29,7 +23,6 @@ describe("canvas client access policy", () => {
       decision(
         status({
           authenticated: true,
-          plan: "premium",
           driveConnected: false,
           driveReconnectRequired: true,
         }),
@@ -42,13 +35,12 @@ describe("canvas client access policy", () => {
     });
   });
 
-  it("allows authenticated Local-first users without premium plan or Drive", () => {
+  it("allows authenticated Local-first users without Drive", () => {
     expect(
       decision(
         status({
           authenticated: true,
           deploymentProfile: "local-first",
-          plan: "free",
           driveConnected: false,
         }),
       ),
@@ -61,7 +53,6 @@ describe("canvas client access policy", () => {
         status({
           authenticated: false,
           deploymentProfile: "local-first",
-          plan: "free",
           driveConnected: false,
         }),
       ),
@@ -80,26 +71,24 @@ describe("canvas client access policy", () => {
         status({
           authenticated: true,
           deploymentProfile: undefined,
-          plan: "free",
           driveConnected: false,
         }),
       ),
     ).toMatchObject({
       allowed: false,
-      title: "Canvas is premium",
+      title: "Connect Google Drive",
     });
     expect(
       decision(
         status({
           authenticated: true,
           deploymentProfile: "LOCAL-FIRST",
-          plan: "free",
           driveConnected: false,
         }),
       ),
     ).toMatchObject({
       allowed: false,
-      title: "Canvas is premium",
+      title: "Connect Google Drive",
     });
   });
 });
@@ -111,20 +100,17 @@ function decision(status: CanvasAccessPolicyStatus) {
 function status({
   authenticated,
   deploymentProfile = "cloud",
-  plan = "premium",
   driveConnected = false,
   driveReconnectRequired = false,
 }: {
   authenticated: boolean;
   deploymentProfile?: CanvasAccessPolicyStatus["deploymentProfile"];
-  plan?: CanvasAccessPolicyStatus["plan"];
   driveConnected?: boolean;
   driveReconnectRequired?: boolean;
 }): CanvasAccessPolicyStatus {
   return {
     authenticated,
     deploymentProfile,
-    plan,
     drive: {
       connected: driveConnected,
       reconnectRequired: driveReconnectRequired,

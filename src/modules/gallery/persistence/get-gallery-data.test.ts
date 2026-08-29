@@ -10,12 +10,10 @@ describe("getGalleryData", () => {
   const createMockSupabase = ({
     connectionData = null,
     runsData = [],
-    metadataData = null,
     generationCount = 0,
   }: {
     connectionData?: any;
     runsData?: any;
-    metadataData?: any;
     generationCount?: any;
   } = {}) => {
     const generationRunsSelectMock = vi.fn((selector) => {
@@ -44,13 +42,6 @@ describe("getGalleryData", () => {
           select: generationRunsSelectMock,
         };
       }
-      if (table === "user_metadata") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({ data: metadataData }),
-        };
-      }
       return {};
     });
 
@@ -65,12 +56,10 @@ describe("getGalleryData", () => {
   it("returns data correctly when all queries succeed", async () => {
     const mockConnection = { folder_name: "Test", google_email: "test@test.com", status: "active" };
     const mockRuns = [{ id: "run-1" }];
-    const mockMetadata = { plan: "pro" };
     
     const supabase = createMockSupabase({
       connectionData: mockConnection,
       runsData: mockRuns,
-      metadataData: mockMetadata,
       generationCount: 10,
     });
 
@@ -78,7 +67,6 @@ describe("getGalleryData", () => {
 
     expect(result.connection).toEqual(mockConnection);
     expect(result.runs).toEqual(mockRuns);
-    expect(result.metadata).toEqual(mockMetadata);
     expect(result.generationCount).toBe(10);
   });
 
@@ -201,7 +189,6 @@ describe("getGalleryData", () => {
     const supabase = createMockSupabase({
       connectionData: null,
       runsData: null as any,
-      metadataData: null,
       generationCount: null as any,
     });
 
@@ -209,7 +196,6 @@ describe("getGalleryData", () => {
 
     expect(result.connection).toBeNull();
     expect(result.runs).toEqual([]);
-    expect(result.metadata).toBeNull();
     expect(result.generationCount).toBeNull();
   });
 });

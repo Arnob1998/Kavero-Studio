@@ -3,7 +3,7 @@ import type { GalleryRun } from "../types";
 import { withResolvedGalleryImageStorageRefs } from "../utils/gallery-storage-refs";
 
 export async function getGalleryData(supabase: SupabaseClient, userId: string) {
-  const [{ data: connection }, { data: runs }, { data: metadata }, { count: generationCount }] =
+  const [{ data: connection }, { data: runs }, { count: generationCount }] =
     await Promise.all([
       supabase
         .from("user_drive_connections")
@@ -20,7 +20,6 @@ export async function getGalleryData(supabase: SupabaseClient, userId: string) {
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(80),
-      supabase.from("user_metadata").select("plan").eq("user_id", userId).maybeSingle(),
       supabase
         .from("generation_runs")
         .select("id", { count: "exact", head: true })
@@ -30,7 +29,6 @@ export async function getGalleryData(supabase: SupabaseClient, userId: string) {
   return {
     connection,
     runs: normalizeGalleryRuns((runs ?? []) as GalleryRun[]),
-    metadata,
     generationCount,
   };
 }

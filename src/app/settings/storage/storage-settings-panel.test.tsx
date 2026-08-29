@@ -12,8 +12,7 @@ describe("StorageSettingsPanel", () => {
         ok: true,
         json: vi.fn().mockResolvedValue({
           connected: false,
-          plan: "free",
-          usage: { used: 0, limit: 20 },
+          usage: { used: 0, limit: null },
           connection: null,
         }),
       } as unknown as Response),
@@ -33,7 +32,7 @@ describe("StorageSettingsPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Google Drive" })).toBeInTheDocument();
     expect(screen.getByText(/Kavero creates a dedicated folder/i)).toBeInTheDocument();
-    expect(screen.getByText("Free plan storage")).toBeInTheDocument();
+    expect(screen.getByText("Gallery storage")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Connect Drive/i })).toHaveAttribute(
       "href",
       "/api/google-drive/connect?next=/settings/storage",

@@ -10,7 +10,6 @@ import { getSettingsCopy } from "../settings-copy";
 
 type DriveStatus = {
   connected: boolean;
-  plan: "free" | "premium";
   usage: {
     used: number;
     limit: number | null;
@@ -72,8 +71,7 @@ export function StorageSettingsPanel({
     if (response.ok) {
       setStatus((current) => ({
         connected: false,
-        plan: current?.plan ?? "free",
-        usage: current?.usage ?? { used: 0, limit: 20 },
+        usage: current?.usage ?? { used: 0, limit: null },
         connection: null,
       }));
     }
@@ -96,9 +94,7 @@ export function StorageSettingsPanel({
             <p className="m-0 mt-1 max-w-[70ch] text-[13px] font-medium leading-5 text-white/48">
               {settingsCopy.storagePanel.description}
               {status?.usage
-                ? status.usage.limit === null
-                  ? " Premium storage is active."
-                  : ` Free storage: ${status.usage.used}/${status.usage.limit} images used.`
+                ? ` ${status.usage.used} saved generation${status.usage.used === 1 ? "" : "s"}.`
                 : ""}
             </p>
           </div>

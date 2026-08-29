@@ -7,8 +7,6 @@ const mocks = vi.hoisted(() => ({
   getGoogleDriveAccessTokenForUser: vi.fn(),
   getGoogleDriveRefreshToken: vi.fn(),
   revokeGoogleOAuthToken: vi.fn(),
-  normalizeUserPlan: vi.fn(),
-  getGenerationLimit: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -24,11 +22,6 @@ vi.mock("@/lib/google-drive", () => ({
   getGoogleDriveAccessTokenForUser: mocks.getGoogleDriveAccessTokenForUser,
   getGoogleDriveRefreshToken: mocks.getGoogleDriveRefreshToken,
   revokeGoogleOAuthToken: mocks.revokeGoogleOAuthToken,
-}));
-
-vi.mock("@/lib/plans", () => ({
-  normalizeUserPlan: mocks.normalizeUserPlan,
-  getGenerationLimit: mocks.getGenerationLimit,
 }));
 
 import { GET as connectGET } from "./connect/route";
@@ -49,7 +42,6 @@ type DriveConnection = {
 
 type GoogleDriveRouteOptions = {
   user?: { id: string } | null;
-  metadata?: { plan?: string | null } | null;
   generationCount?: number | null;
   driveConnection?: DriveConnection;
 };
@@ -66,12 +58,6 @@ describe("Google Drive Cloud regression routes", () => {
     mocks.createAdminClient.mockReturnValue({
       rpc: vi.fn().mockResolvedValue({ error: null }),
     });
-    mocks.normalizeUserPlan.mockImplementation((plan?: string | null) =>
-      plan === "premium" ? "premium" : "free",
-    );
-    mocks.getGenerationLimit.mockImplementation((plan: "free" | "premium") =>
-      plan === "premium" ? null : 20,
-    );
     configureGoogleDriveMocks();
   });
 
@@ -114,9 +100,8 @@ describe("Google Drive Cloud regression routes", () => {
     expect(body).toEqual({ error: "Unauthorized" });
   });
 
-  it("preserves active Drive status response shape with plan and usage", async () => {
+  it("preserves active Drive status response shape with unrestricted usage", async () => {
     configureGoogleDriveMocks({
-      metadata: { plan: "premium" },
       generationCount: 7,
       driveConnection: activeDriveConnection(),
     });
@@ -127,7 +112,6 @@ describe("Google Drive Cloud regression routes", () => {
     expect(body).toEqual({
       connected: true,
       reconnectRequired: false,
-      plan: "premium",
       usage: { used: 7, limit: null },
       connection: {
         googleEmail: "user@example.com",
@@ -152,8 +136,7 @@ describe("Google Drive Cloud regression routes", () => {
     expect(await reconnectResponse.json()).toMatchObject({
       connected: false,
       reconnectRequired: true,
-      plan: "free",
-      usage: { used: 2, limit: 20 },
+      usage: { used: 2, limit: null },
       connection: {
         status: "reconnect_required",
       },
@@ -165,8 +148,7 @@ describe("Google Drive Cloud regression routes", () => {
     expect(await disconnectedResponse.json()).toEqual({
       connected: false,
       reconnectRequired: false,
-      plan: "free",
-      usage: { used: 0, limit: 20 },
+      usage: { used: 0, limit: null },
       connection: null,
     });
   });
@@ -190,7 +172,7 @@ describe("Google Drive Cloud regression routes", () => {
       connected: false,
       reconnectRequired: false,
       quotaFull: false,
-      usage: { used: 1, limit: 20 },
+      usage: { used: 1, limit: null },
       warning:
         "Google Drive is not connected. This generation will not be saved to Gallery, so download any images you want to keep.",
     });
@@ -206,13 +188,13 @@ describe("Google Drive Cloud regression routes", () => {
       connected: true,
       reconnectRequired: true,
       quotaFull: false,
-      usage: { used: 1, limit: 20 },
+      usage: { used: 1, limit: null },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
     });
   });
 
-  it("preserves Drive preflight token failure, quota-full, and can-save semantics", async () => {
+  it("preserves Drive token failures and allows saving regardless of generation count", async () => {
     configureGoogleDriveMocks({ generationCount: 1, driveConnection: activeDriveConnection() });
     mocks.getGoogleDriveAccessTokenForUser.mockRejectedValueOnce(new Error("token expired"));
 
@@ -222,22 +204,21 @@ describe("Google Drive Cloud regression routes", () => {
       connected: true,
       reconnectRequired: true,
       quotaFull: false,
-      usage: { used: 1, limit: 20 },
+      usage: { used: 1, limit: null },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
     });
 
     configureGoogleDriveMocks({ generationCount: 20, driveConnection: activeDriveConnection() });
 
-    const quotaFull = await preflightGET();
-    expect(await quotaFull.json()).toEqual({
-      canSave: false,
+    const unlimited = await preflightGET();
+    expect(await unlimited.json()).toEqual({
+      canSave: true,
       connected: true,
       reconnectRequired: false,
-      quotaFull: true,
-      usage: { used: 20, limit: 20 },
-      warning:
-        "Free plan Gallery storage is full (20/20 generations). This generation will not be saved unless you free a folder first.",
+      quotaFull: false,
+      usage: { used: 20, limit: null },
+      warning: null,
     });
 
     configureGoogleDriveMocks({ generationCount: 3, driveConnection: activeDriveConnection() });
@@ -248,7 +229,7 @@ describe("Google Drive Cloud regression routes", () => {
       connected: true,
       reconnectRequired: false,
       quotaFull: false,
-      usage: { used: 3, limit: 20 },
+      usage: { used: 3, limit: null },
       warning: null,
     });
   });
@@ -298,10 +279,6 @@ function createSupabaseClient(options: GoogleDriveRouteOptions) {
     from: vi.fn((table: string) => {
       if (table === "user_drive_connections") {
         return maybeSingleQuery({ data: options.driveConnection ?? null });
-      }
-
-      if (table === "user_metadata") {
-        return maybeSingleQuery({ data: options.metadata ?? { plan: "free" } });
       }
 
       if (table === "generation_runs") {

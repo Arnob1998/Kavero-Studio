@@ -24,26 +24,24 @@ describe("SettingsPage", () => {
     vi.unstubAllEnvs();
   });
 
-  it("keeps Cloud/default settings overview Drive and subscription oriented", async () => {
+  it("keeps Cloud/default settings overview Drive-oriented without subscription controls", async () => {
     mockSupabaseUser({ id: "user-1", email: "user@example.com" });
 
     await renderSettingsPage();
 
     expect(screen.getByText("Drive")).toBeInTheDocument();
-    expect(screen.getByText("Free plan archive")).toBeInTheDocument();
+    expect(screen.getByText("Connected storage")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Connect storage/i })).toHaveAttribute(
       "href",
       "/settings/storage",
     );
-    expect(screen.getByRole("link", { name: /View subscription/i })).toHaveAttribute(
-      "href",
-      "/subscription",
-    );
+    expect(screen.getByText("Full access")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /subscription/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Managed storage")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /View account details/i })).not.toBeInTheDocument();
   });
 
-  it("uses Local-first managed storage copy without upgrade-oriented quick actions", async () => {
+  it("uses Local-first managed storage copy without subscription quick actions", async () => {
     vi.stubEnv("KAVERO_DEPLOYMENT_PROFILE", "local-first");
     mockSupabaseUser({ id: "user-1", email: "user@example.com" });
 
@@ -55,10 +53,7 @@ describe("SettingsPage", () => {
       "href",
       "/settings/storage",
     );
-    expect(screen.getByRole("link", { name: /View account details/i })).toHaveAttribute(
-      "href",
-      "/subscription",
-    );
+    expect(screen.queryByRole("link", { name: /subscription/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Connect storage/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /View subscription/i })).not.toBeInTheDocument();
   });

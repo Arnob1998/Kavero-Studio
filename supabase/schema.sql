@@ -946,30 +946,8 @@ create trigger canvas_assets_delete_storage_object
   after delete on public.canvas_assets
   for each row execute function public.delete_canvas_asset_storage_object();
 
-create or replace function public.enforce_canvas_asset_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  asset_count integer;
-begin
-  select count(*)
-  into asset_count
-  from public.canvas_assets
-  where user_id = new.user_id;
-
-  if asset_count >= 200 then
-    raise exception 'Canvas asset limit reached';
-  end if;
-
-  return new;
-end;
-$$;
-
 drop trigger if exists canvas_assets_limit on public.canvas_assets;
-create trigger canvas_assets_limit
-  before insert on public.canvas_assets
-  for each row execute function public.enforce_canvas_asset_limit();
+drop function if exists public.enforce_canvas_asset_limit();
 
 create or replace function public.shift_canvas_pages_after(
   p_design_id uuid,
@@ -1038,67 +1016,10 @@ revoke all on function public.delete_stale_canvas_assets(interval) from anon;
 revoke all on function public.delete_stale_canvas_assets(interval) from authenticated;
 grant execute on function public.delete_stale_canvas_assets(interval) to service_role;
 
-create or replace function public.delete_inactive_free_canvas_data(p_older_than interval default interval '180 days')
-returns integer
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  deleted_count integer;
-begin
-  delete from public.canvas_assets asset
-  using public.user_metadata metadata
-  where metadata.user_id = asset.user_id
-    and metadata.plan = 'free'
-    and not exists (
-      select 1
-      from public.canvas_designs design
-      where design.user_id = asset.user_id
-        and design.updated_at >= now() - p_older_than
-    )
-    and asset.created_at < now() - p_older_than;
-
-  delete from public.canvas_designs design
-  using public.user_metadata metadata
-  where metadata.user_id = design.user_id
-    and metadata.plan = 'free'
-    and design.updated_at < now() - p_older_than;
-
-  get diagnostics deleted_count = row_count;
-  return deleted_count;
-end;
-$$;
-
-revoke all on function public.delete_inactive_free_canvas_data(interval) from public;
-revoke all on function public.delete_inactive_free_canvas_data(interval) from anon;
-revoke all on function public.delete_inactive_free_canvas_data(interval) from authenticated;
-grant execute on function public.delete_inactive_free_canvas_data(interval) to service_role;
-
-create or replace function public.enforce_prompt_template_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  template_count integer;
-begin
-  select count(*)
-  into template_count
-  from public.prompt_templates
-  where user_id = new.user_id;
-
-  if template_count >= 3 then
-    raise exception 'Prompt template limit reached';
-  end if;
-
-  return new;
-end;
-$$;
+drop function if exists public.delete_inactive_free_canvas_data(interval);
 
 drop trigger if exists prompt_templates_limit on public.prompt_templates;
-create trigger prompt_templates_limit
-  before insert on public.prompt_templates
-  for each row execute function public.enforce_prompt_template_limit();
+drop function if exists public.enforce_prompt_template_limit();
 
 create or replace function public.upsert_provider_key(
   p_user_id uuid,

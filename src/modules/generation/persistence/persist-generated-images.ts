@@ -1,6 +1,4 @@
-import { getGenerationLimit, normalizeUserPlan } from "@/lib/plans";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { parseBase64DataUrl } from "@/modules/generation/utils/data-url";
 import type { ManagedStorageEnv } from "@/modules/storage/managed/config";
 import type { ManagedStorageBackend } from "@/modules/storage/managed/kavero-managed-storage";
@@ -125,15 +123,6 @@ export async function persistGeneratedImagesToDrive({
   settings,
   referenceImages,
 }: PersistGeneratedImagesInput): Promise<PersistGeneratedImagesResult> {
-  const quotaResult = await checkGenerationQuota(userId);
-  if (!quotaResult.ok) {
-    return {
-      saved: 0,
-      warning: quotaResult.warning,
-      storageLabel: "Google Drive",
-    };
-  }
-
   const storage = await prepareGoogleDriveGeneratedImageStorage(userId);
   if (!storage.ready) {
     return {
@@ -252,15 +241,6 @@ async function persistGeneratedImagesToManagedStorage(
   }: PersistGeneratedImagesInput,
   dependencies: PersistGeneratedImagesDependencies,
 ): Promise<PersistGeneratedImagesResult> {
-  const quotaResult = await checkGenerationQuota(userId);
-  if (!quotaResult.ok) {
-    return {
-      saved: 0,
-      warning: quotaResult.warning,
-      storageLabel: "Kavero storage",
-    };
-  }
-
   const admin = createAdminClient();
   const backend = resolveManagedGeneratedImageBackend({ admin, dependencies });
   if (!backend) {
@@ -491,50 +471,6 @@ function dedupeStoredObjectRefs(refs: StoredObjectRef[]) {
   }
 
   return uniqueRefs;
-}
-
-async function checkGenerationQuota(userId: string): Promise<
-  | { ok: true }
-  | {
-      ok: false;
-      warning: string;
-    }
-> {
-  const supabase = await createClient();
-  const { data: metadata } = await supabase
-    .from("user_metadata")
-    .select("plan")
-    .eq("user_id", userId)
-    .maybeSingle();
-  const plan = normalizeUserPlan(metadata?.plan);
-  const generationLimit = getGenerationLimit(plan);
-
-  if (generationLimit === null) {
-    return { ok: true };
-  }
-
-  const { count, error: countError } = await supabase
-    .from("generation_runs")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  if (countError) {
-    console.error("Unable to check generated image quota", countError);
-    return {
-      ok: false,
-      warning: "Generated images are ready, but Kavero could not check your gallery generation limit.",
-    };
-  }
-
-  const used = count ?? 0;
-  if (used >= generationLimit) {
-    return {
-      ok: false,
-      warning: `Free plan gallery storage is full (${used}/${generationLimit} generations). Remove a generation from Gallery or upgrade before saving more.`,
-    };
-  }
-
-  return { ok: true };
 }
 
 function createPersistenceContext({

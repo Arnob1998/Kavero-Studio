@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { CANVAS_LIMITS, getCanvasUser, jsonError, mapPage, requireCanvasAccess, requireCanvasAdmin } from "@/lib/canvas/api";
+import { getCanvasUser, jsonError, mapPage, requireCanvasAccess, requireCanvasAdmin } from "@/lib/canvas/api";
 
 interface DuplicatePageRouteContext {
   params: Promise<{ pageId: string }>;
@@ -25,17 +25,6 @@ export async function POST(request: Request, { params }: DuplicatePageRouteConte
 
   if (originalError) return jsonError("Unable to load page.", 500);
   if (!original) return jsonError("Not found", 404);
-
-  const { count, error: countError } = await admin
-    .from("canvas_pages")
-    .select("id", { count: "exact", head: true })
-    .eq("design_id", original.design_id)
-    .eq("user_id", user.id);
-
-  if (countError) return jsonError("Unable to check page quota.", 500);
-  if ((count ?? 0) >= CANVAS_LIMITS.pagesPerDesign) {
-    return jsonError(`Canvas page limit reached (${CANVAS_LIMITS.pagesPerDesign}).`, 409);
-  }
 
   const { error: shiftError } = await admin.rpc("shift_canvas_pages_after", {
     p_design_id: original.design_id,
