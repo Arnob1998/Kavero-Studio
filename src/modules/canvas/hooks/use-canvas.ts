@@ -1451,6 +1451,32 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
     [findLayerObjectById, getActiveCanvas, refreshLayers, saveHistory],
   );
 
+  const replaceImageObjectSource = useCallback(
+    async (objectId: string, assetUrl: string) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId || !isAllowedCanvasImageUrl(assetUrl)) return false;
+      const target = findLayerObjectById(canvas, objectId);
+      if (!(target instanceof fabric.FabricImage) || isBackgroundImageObject(target)) return false;
+      try {
+        await target.setSrc(assetUrl, { crossOrigin: "anonymous" });
+        target.set({ kaveroAssetSrc: assetUrl, crossOrigin: "anonymous" } as any);
+        target.setCoords();
+        canvas.setActiveObject(target);
+        canvas.requestRenderAll();
+        saveHistory(pageId);
+        setSelectedObject(target);
+        refreshLayers(pageId);
+        refreshSelectedObject((version) => version + 1);
+        return true;
+      } catch (error) {
+        console.error("Failed to replace image source:", error);
+        return false;
+      }
+    },
+    [findLayerObjectById, getActiveCanvas, refreshLayers, saveHistory],
+  );
+
   const cropImageObject = useCallback(
     (objectId: string, crop: ImageCropInput, options?: { outputFit?: "preserve-frame" | "resize-frame-to-crop" }) => {
       const canvas = getActiveCanvas();
@@ -2651,6 +2677,7 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
     setBackgroundImageFit,
     updateSelectedObject,
     setImageBorderRadius,
+    replaceImageObjectSource,
     cropImageObject,
     resetImageCrop,
     getImageCropInfo,

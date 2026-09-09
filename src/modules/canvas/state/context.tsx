@@ -159,6 +159,7 @@ export interface EditorContextValue {
   backgroundImageFit: BackgroundImageFit;
   updateSelectedObject: (props: Record<string, unknown>) => void;
   setImageBorderRadius: (objectId: string, radius: number) => boolean;
+  replaceImageObjectSource: (objectId: string, assetUrl: string) => Promise<boolean>;
   cropImageObject: (objectId: string, crop: ImageCropInput, options?: { outputFit?: "preserve-frame" | "resize-frame-to-crop" }) => boolean;
   resetImageCrop: (objectId: string) => boolean;
   getImageCropInfo: (objectId: string) => {

@@ -20,6 +20,8 @@ import {
   Crop,
   Check,
   X,
+  WandSparkles,
+  Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import * as fabric from "fabric";
@@ -27,6 +29,18 @@ import { useEditor } from "@/modules/canvas/state/context";
 import { roundSignedRotationDegrees } from "@/modules/canvas/utils/rotation";
 import { PageCanvas } from "@/modules/canvas/components/page-canvas";
 import { uploadCanvasAsset } from "@/modules/assets/canvas-assets";
+import {
+  BUILTIN_BACKGROUND_REMOVAL_MODELS,
+  formatModelSize,
+  getSelectedBackgroundRemovalModelId,
+  listBackgroundRemovalModels,
+  removeImageBackground,
+  resolveSelectedBackgroundRemovalModel,
+  setSelectedBackgroundRemovalModelId,
+  type BackgroundRemovalModel,
+} from "@/modules/assets/background-removal";
+import { BackgroundRemovalModelDialog } from "@/modules/canvas/components/background-removal-model-dialog";
+import { isBackgroundRemovalTarget } from "@/modules/canvas/utils/background-removal-target";
 
 export function CanvasArea() {
   const {
@@ -40,6 +54,7 @@ export function CanvasArea() {
     cropImageObject,
     getImageCropInfo,
     updateSelectedObject,
+    replaceImageObjectSource,
   } = useEditor();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -49,8 +64,38 @@ export function CanvasArea() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [rotationBadge, setRotationBadge] = useState<{ x: number; y: number; angle: number } | null>(null);
   const [canvasLocked, setCanvasLocked] = useState(false);
+  const [backgroundRemovalBusy, setBackgroundRemovalBusy] = useState(false);
+  const [backgroundRemovalModels, setBackgroundRemovalModels] = useState<BackgroundRemovalModel[]>([
+    ...BUILTIN_BACKGROUND_REMOVAL_MODELS,
+  ]);
+  const [selectedBackgroundRemovalModelId, setSelectedBackgroundRemovalModel] = useState(
+    getSelectedBackgroundRemovalModelId,
+  );
+  const [showBackgroundRemovalModels, setShowBackgroundRemovalModels] = useState(false);
   const [lockOverlayBounds, setLockOverlayBounds] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
+
+  const refreshBackgroundRemovalModels = useCallback(async () => {
+    try {
+      const models = await listBackgroundRemovalModels();
+      setBackgroundRemovalModels(models);
+      const selected = resolveSelectedBackgroundRemovalModel(models, getSelectedBackgroundRemovalModelId());
+      setSelectedBackgroundRemovalModel(selected.id);
+      setSelectedBackgroundRemovalModelId(selected.id);
+    } catch (error) {
+      console.error("Unable to load imported background-removal models:", error);
+      setBackgroundRemovalModels([...BUILTIN_BACKGROUND_REMOVAL_MODELS]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBackgroundRemovalModels();
+  }, [refreshBackgroundRemovalModels]);
+
+  const selectBackgroundRemovalModel = useCallback((modelId: string) => {
+    setSelectedBackgroundRemovalModel(modelId);
+    setSelectedBackgroundRemovalModelId(modelId);
+  }, []);
 
   const openContextMenu = useCallback(
     (event: MouseEvent) => {
@@ -379,6 +424,53 @@ export function CanvasArea() {
     openContextMenu(event.nativeEvent);
   };
 
+  const handleRemoveBackground = useCallback(
+    async (model: BackgroundRemovalModel) => {
+      if (backgroundRemovalBusy || !canvas) return;
+      const target = canvas.getActiveObject();
+      if (!isBackgroundRemovalTarget(target)) {
+        showError("Background removal works only on image objects.");
+        return;
+      }
+      const objectId = String((target as any).kaveroId ?? "");
+      const imageUrl = String((target as any).kaveroAssetSrc ?? target.getSrc?.() ?? "");
+      if (!objectId || !imageUrl) {
+        showError("Unable to read the selected image source.");
+        return;
+      }
+
+      selectBackgroundRemovalModel(model.id);
+      setBackgroundRemovalBusy(true);
+      setContextMenu(null);
+      try {
+        const result = await removeImageBackground({
+          imageUrl,
+          model,
+          onProgress: ({ label, progress }) => {
+            setCanvasUpload({ label, progress: Math.min(88, Math.round(progress * 0.88)) });
+          },
+        });
+        const safeModelName = model.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        const outputFile = new File([result.blob], `background-removed-${safeModelName || "model"}.png`, {
+          type: "image/png",
+        });
+        setCanvasUpload({ label: "Saving transparent image", progress: 89 });
+        const asset = await uploadCanvasAsset(outputFile, (progress) => {
+          setCanvasUpload({ label: "Saving transparent image", progress: 89 + Math.round(progress * 0.11) });
+        });
+        const replaced = await replaceImageObjectSource(objectId, asset.public_url);
+        if (!replaced) throw new Error("The image changed before the result could be applied.");
+        window.dispatchEvent(new CustomEvent("kavero:canvas-asset-uploaded", { detail: asset }));
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "Unable to remove the image background.");
+      } finally {
+        setBackgroundRemovalBusy(false);
+        setCanvasUpload(null);
+      }
+    },
+    [backgroundRemovalBusy, canvas, replaceImageObjectSource, selectBackgroundRemovalModel, showError],
+  );
+
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
@@ -448,11 +540,28 @@ export function CanvasArea() {
               if (!result.ok) showError(result.errors[0] ?? "Unable to set that image as the background.");
             });
           }}
+          backgroundRemovalModels={backgroundRemovalModels}
+          selectedBackgroundRemovalModelId={selectedBackgroundRemovalModelId}
+          backgroundRemovalBusy={backgroundRemovalBusy}
+          onRemoveBackground={(model) => void handleRemoveBackground(model)}
+          onManageBackgroundRemovalModels={() => {
+            setContextMenu(null);
+            setShowBackgroundRemovalModels(true);
+          }}
           onAlign={alignSelected}
           onArrange={arrangeSelected}
           layerInfo={getSelectedLayerInfo()}
         />
       ) : null}
+      <BackgroundRemovalModelDialog
+        open={showBackgroundRemovalModels}
+        models={backgroundRemovalModels}
+        selectedModelId={selectedBackgroundRemovalModelId}
+        onClose={() => setShowBackgroundRemovalModels(false)}
+        onSelect={selectBackgroundRemovalModel}
+        onModelsChanged={refreshBackgroundRemovalModels}
+        onError={showError}
+      />
       {rotationBadge ? (
         <div
           className="pointer-events-none fixed z-[90] rounded-lg bg-zinc-950 px-2 py-1 text-xs font-black text-white shadow-[0_10px_26px_rgb(0_0_0_/_0.35)]"
@@ -946,6 +1055,11 @@ function ObjectContextMenu({
   onPaste,
   onDelete,
   onSetAsBackground,
+  backgroundRemovalModels,
+  selectedBackgroundRemovalModelId,
+  backgroundRemovalBusy,
+  onRemoveBackground,
+  onManageBackgroundRemovalModels,
   onAlign,
   onArrange,
   layerInfo,
@@ -961,6 +1075,11 @@ function ObjectContextMenu({
   onPaste: () => void;
   onDelete: () => void;
   onSetAsBackground: () => void;
+  backgroundRemovalModels: BackgroundRemovalModel[];
+  selectedBackgroundRemovalModelId: string;
+  backgroundRemovalBusy: boolean;
+  onRemoveBackground: (model: BackgroundRemovalModel) => void;
+  onManageBackgroundRemovalModels: () => void;
   onAlign: (alignment: "left" | "center" | "right" | "top" | "middle" | "bottom") => void;
   onArrange: (action: "front" | "forward" | "backward" | "back") => void;
   layerInfo: { level: number; min: number; max: number } | null;
@@ -975,11 +1094,7 @@ function ObjectContextMenu({
     middle: near(bounds.top + bounds.height / 2, canvasHeight / 2),
     bottom: near(bounds.top + bounds.height, canvasHeight),
   };
-  const canSetAsBackground =
-    selectedObject instanceof fabric.FabricImage &&
-    !(selectedObject as any)._isBgImage &&
-    (selectedObject as any).kaveroKind !== "background-image" &&
-    !Boolean((selectedObject as any).kaveroBgSrc);
+  const canSetAsBackground = isBackgroundRemovalTarget(selectedObject);
 
   const itemClass =
     "flex h-9 w-full items-center gap-2 rounded-xl px-3 text-left text-[13px] font-semibold text-white/72 transition hover:bg-white/[0.09] hover:text-white disabled:pointer-events-none disabled:opacity-35";
@@ -1065,6 +1180,45 @@ function ObjectContextMenu({
       <div className="my-1 h-px bg-white/[0.1]" />
       {canSetAsBackground ? (
         <>
+          <div className="group relative">
+            <button className={itemClass} disabled={backgroundRemovalBusy}>
+              <WandSparkles size={16} className="text-accent/82" />
+              Remove background
+              <span className="ml-auto text-white/42">›</span>
+            </button>
+            <div className="invisible absolute left-full top-0 ml-1 min-w-[270px] rounded-2xl border border-white/[0.12] bg-black/92 p-1.5 opacity-0 shadow-[0_24px_80px_rgb(0_0_0_/_0.62)] backdrop-blur-2xl transition group-hover:visible group-hover:opacity-100">
+              <div className="px-3 pb-1.5 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-white/28">
+                Remove with
+              </div>
+              {backgroundRemovalModels.map((model) => {
+                const selected = model.id === selectedBackgroundRemovalModelId;
+                return (
+                  <button
+                    key={model.id}
+                    className={itemClass}
+                    disabled={backgroundRemovalBusy}
+                    onClick={() => run(() => onRemoveBackground(model))}
+                    title={model.description}
+                  >
+                    <span
+                      className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                        selected ? "border-accent bg-accent text-white" : "border-white/24"
+                      }`}
+                    >
+                      {selected ? <Check size={10} strokeWidth={4} /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{model.name}</span>
+                    <span className="text-[10px] text-white/30">{formatModelSize(model.sizeBytes)}</span>
+                  </button>
+                );
+              })}
+              <div className="my-1 h-px bg-white/[0.1]" />
+              <button className={itemClass} onClick={() => run(onManageBackgroundRemovalModels)}>
+                <Settings2 size={16} className="text-white/48" />
+                Manage / import models
+              </button>
+            </div>
+          </div>
           <button className={itemClass} onClick={() => run(onSetAsBackground)}>
             <ImageIcon size={16} className="text-white/58" />
             Set as background
