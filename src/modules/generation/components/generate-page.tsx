@@ -85,6 +85,7 @@ import {
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "../utils/prompt-refiner-policy";
 import { ModelQuickPicker } from "./model-quick-picker";
+import { GenerationResultsWorkspace } from "./generation-results-workspace";
 
 // TEMP: Hide the prompt chatbox/hover only on the generation workspace. Set this to false to restore it there.
 const hidePromptComposerDuringGeneration = true;
@@ -924,7 +925,6 @@ export function GeneratePage() {
   const [generationHistory, setGenerationHistory] = useState<GenerationRun[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generatedPanelMode, setGeneratedPanelMode] = useState<GeneratedPanelMode>("split");
   const [isComposerRaised, setIsComposerRaised] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [promptSearch, setPromptSearch] = useState("");
@@ -1651,7 +1651,6 @@ export function GeneratePage() {
     setActiveRun(draftRun);
     setGenerationError(null);
     setSettingsOpen(false);
-    setGeneratedPanelMode("split");
     setIsComposerRaised(false);
     setIsGenerating(true);
 
@@ -1726,6 +1725,20 @@ export function GeneratePage() {
     if (!preflightResponse.ok) return null;
     return (await preflightResponse.json()) as DrivePreflightResponse;
   }
+
+  const startNewPrompt = () => {
+    setActiveRun(null);
+    setGenerationError(null);
+    setIsComposerRaised(true);
+  };
+
+  const returnToLatestResults = () => {
+    const latestRun = generationHistory[0];
+    if (!latestRun) return;
+    setActiveRun(latestRun);
+    setGenerationError(null);
+    setIsComposerRaised(false);
+  };
 
   const promptRefinerPanel = hasPromptRefinerPanel ? (
     <div className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-2.5 text-left">
@@ -2550,13 +2563,12 @@ export function GeneratePage() {
               exit={{ opacity: 0, y: 12, scale: 0.99 }}
               transition={{ duration: 0.42, ease: "easeOut" }}
             >
-              <GenerationWorkspace
+              <GenerationResultsWorkspace
                 run={activeRun}
                 isGenerating={isGenerating}
                 loadingPhrase={loadingPhrase}
                 error={generationError}
-                panelMode={generatedPanelMode}
-                onPanelModeChange={setGeneratedPanelMode}
+                onStartNewPrompt={startNewPrompt}
               />
             </motion.div>
           ) : (
@@ -2573,6 +2585,16 @@ export function GeneratePage() {
               <p className="mt-4 text-[clamp(17px,1.35vw,24px)] font-semibold tracking-normal text-white/88 sm:mt-5">
                 Start by describing your picture
               </p>
+              {generationHistory.length > 0 ? (
+                <button
+                  className="mx-auto mt-5 inline-flex h-10 items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.055] px-4 text-[12px] font-extrabold text-white/72 transition hover:bg-white/[0.1] hover:text-white"
+                  type="button"
+                  onClick={returnToLatestResults}
+                >
+                  <Images size={15} />
+                  Return to results
+                </button>
+              ) : null}
             </motion.div>
           )}
         </AnimatePresence>
