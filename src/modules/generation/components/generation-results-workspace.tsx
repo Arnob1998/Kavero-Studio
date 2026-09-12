@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Download, Images, PanelLeftOpen, Plus, X } from "lucide-react";
+import { Download, Images, Loader2, PanelLeftOpen, Plus, Send, X } from "lucide-react";
 import { brand } from "@/lib/brand";
+import { getBrowserImageModelByAlias, getBrowserImageModelByLegacyId } from "@/modules/model-providers/image-browser";
 import type { GeneratedImage, GenerationRun, ReferenceImage } from "../types";
 import { formatBytes } from "../utils/client-helpers";
 
@@ -47,15 +48,17 @@ function ResultCollage({
   focusedImage,
   onFocus,
   onClearFocus,
+  reserveComposerSpace,
 }: {
   images: GeneratedImage[];
   focusedImage: GeneratedImage | null;
   onFocus: (image: GeneratedImage) => void;
   onClearFocus: () => void;
+  reserveComposerSpace: boolean;
 }) {
   if (focusedImage) {
     return (
-      <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] px-4 pb-4 pt-14 sm:px-6 sm:pb-6">
+      <div className={`grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] px-4 pt-14 sm:px-6 ${reserveComposerSpace ? "pb-28" : "pb-4 sm:pb-6"}`}>
         <div className="relative grid min-h-0 place-items-center">
           <button
             className="absolute left-0 top-0 z-10 inline-flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] bg-black/58 px-3 text-[11px] font-bold text-white/70 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white"
@@ -151,22 +154,59 @@ export function GenerationResultsWorkspace({
   loadingPhrase,
   error,
   onStartNewPrompt,
+  onEditImage,
+  iterationRuns = [],
+  onSelectRun,
+  requestedFocusedImageId = null,
 }: {
   run: GenerationRun | null;
   isGenerating: boolean;
   loadingPhrase: string;
   error: string | null;
   onStartNewPrompt: () => void;
+  onEditImage: (image: GeneratedImage, prompt: string) => Promise<void>;
+  iterationRuns?: GenerationRun[];
+  onSelectRun?: (run: GenerationRun) => void;
+  requestedFocusedImageId?: string | null;
 }) {
   const [focusedImageId, setFocusedImageId] = useState<string | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
+  const [editPrompt, setEditPrompt] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const sourceButtonRef = useRef<HTMLButtonElement>(null);
   const focusedImage = run?.images.find((image) => image.id === focusedImageId) ?? null;
+  const runModel = run
+    ? getBrowserImageModelByAlias(run.model) ?? getBrowserImageModelByLegacyId(run.settings.model)
+    : null;
+  const canEditFocusedImage = Boolean(
+    focusedImage && runModel?.provider === "gemini" && runModel.supportsReferenceEditing,
+  );
 
   useEffect(() => {
-    setFocusedImageId(null);
+    setFocusedImageId(
+      requestedFocusedImageId && run?.images.some((image) => image.id === requestedFocusedImageId)
+        ? requestedFocusedImageId
+        : null,
+    );
     setSourceOpen(false);
-  }, [run?.id]);
+    setEditPrompt("");
+    setEditError(null);
+  }, [requestedFocusedImageId, run?.id, run?.images]);
+
+  const submitEdit = async () => {
+    const prompt = editPrompt.trim();
+    if (!focusedImage || !canEditFocusedImage || !prompt || isEditing) return;
+    setIsEditing(true);
+    setEditError(null);
+    try {
+      await onEditImage(focusedImage, prompt);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Image editing failed.");
+    } finally {
+      setIsEditing(false);
+    }
+  };
 
   useEffect(() => {
     if (!sourceOpen) return;
@@ -225,10 +265,68 @@ export function GenerationResultsWorkspace({
             focusedImage={focusedImage}
             onFocus={(image) => setFocusedImageId(image.id)}
             onClearFocus={() => setFocusedImageId(null)}
+            reserveComposerSpace={Boolean(focusedImage)}
           />
         ) : (
           <div className="grid h-full place-items-center text-[13px] font-semibold text-white/46">Waiting for output</div>
         )}
+
+        {focusedImage ? (
+          <div className="absolute inset-x-3 bottom-3 z-30 mx-auto w-[min(760px,calc(100%-24px))]">
+            {canEditFocusedImage ? (
+              <form
+                className="rounded-2xl border border-white/[0.1] bg-black/76 p-2 shadow-[0_20px_70px_rgb(0_0_0_/_0.62)] backdrop-blur-2xl"
+                aria-label="Edit focused image"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitEdit();
+                }}
+              >
+                <div className="flex items-end gap-2">
+                  <label className="min-w-0 flex-1 text-left">
+                    <span className="sr-only">Describe the image edit</span>
+                    <textarea
+                      className="block max-h-28 min-h-12 w-full resize-none bg-transparent px-3 py-2 text-[13px] font-semibold leading-5 text-white outline-none placeholder:text-white/42"
+                      value={editPrompt}
+                      placeholder="Describe what to change..."
+                      disabled={isEditing}
+                      onChange={(event) => setEditPrompt(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-45"
+                    type="submit"
+                    aria-label={isEditing ? "Editing image" : "Edit image"}
+                    disabled={isEditing || !editPrompt.trim()}
+                  >
+                    {isEditing ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                  </button>
+                </div>
+                {editError ? <p className="px-3 pb-1 text-left text-[11px] font-semibold text-red-200">{editError}</p> : null}
+              </form>
+            ) : (
+              <p className="rounded-xl border border-white/[0.08] bg-black/68 px-3 py-2 text-center text-[11px] font-semibold text-white/52 backdrop-blur-xl">
+                Iterative editing is not available for {runModel?.displayLabel ?? "this model"}.
+              </p>
+            )}
+            {iterationRuns.length > 1 ? (
+              <div className="mt-2 flex justify-center gap-1.5 overflow-x-auto">
+                {iterationRuns.map((iteration, index) => (
+                  <button
+                    key={iteration.id}
+                    className={`h-7 shrink-0 rounded-lg border px-2 text-[10px] font-bold transition ${iteration.id === run?.id ? "border-accent/60 bg-accent/18 text-white" : "border-white/[0.08] bg-black/54 text-white/52 hover:text-white"}`}
+                    type="button"
+                    aria-label={`Open iteration ${index + 1}`}
+                    aria-current={iteration.id === run?.id ? "step" : undefined}
+                    onClick={() => onSelectRun?.(iteration)}
+                  >
+                    {index === 0 ? "Original" : `Edit ${index}`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {sourceOpen ? (
           <>

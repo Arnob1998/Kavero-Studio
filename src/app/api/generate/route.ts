@@ -357,6 +357,9 @@ async function handleDirectGeminiGeneration(request: Request, userId: string, se
         aspectRatio: input.aspectRatio,
         imageSize: input.imageSize,
         schema: input.schema,
+        sourceGenerationId: input.sourceGenerationId,
+        sourceImageId: input.sourceImageId,
+        clientRunId: input.clientRunId,
       },
     });
 
@@ -385,6 +388,9 @@ async function handleDirectGeminiGeneration(request: Request, userId: string, se
       aspectRatio: input.aspectRatio,
       imageSize: input.imageSize,
       schema: input.schema,
+      sourceGenerationId: input.sourceGenerationId,
+      sourceImageId: input.sourceImageId,
+      clientRunId: input.clientRunId,
     },
   });
 }
@@ -553,6 +559,9 @@ async function handleGatewayGeneration({
         quality: input.quality,
         background: input.background,
         schema: input.schema,
+        sourceGenerationId: input.sourceGenerationId,
+        sourceImageId: input.sourceImageId,
+        clientRunId: input.clientRunId,
       },
     });
 
@@ -583,6 +592,9 @@ async function handleGatewayGeneration({
       quality: input.quality,
       background: input.background,
       schema: input.schema,
+      sourceGenerationId: input.sourceGenerationId,
+      sourceImageId: input.sourceImageId,
+      clientRunId: input.clientRunId,
     },
   });
 }

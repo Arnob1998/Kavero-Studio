@@ -63,6 +63,9 @@ export interface GenerationRun {
   createdAt: string;
   settings: Record<SettingKey, string>;
   warnings: string[];
+  parentRunId?: string;
+  sourceImageId?: string;
+  iterationRootId?: string;
 }
 
 export interface GenerateApiResponse {

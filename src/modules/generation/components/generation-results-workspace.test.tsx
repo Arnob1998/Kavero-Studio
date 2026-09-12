@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GenerationRun } from "../types";
 import { GenerationResultsWorkspace } from "./generation-results-workspace";
@@ -39,6 +39,7 @@ describe("GenerationResultsWorkspace", () => {
         loadingPhrase="Rendering image"
         error={null}
         onStartNewPrompt={vi.fn()}
+        onEditImage={vi.fn()}
       />,
     );
 
@@ -56,6 +57,7 @@ describe("GenerationResultsWorkspace", () => {
         loadingPhrase="Rendering image"
         error={null}
         onStartNewPrompt={vi.fn()}
+        onEditImage={vi.fn()}
       />,
     );
 
@@ -68,7 +70,7 @@ describe("GenerationResultsWorkspace", () => {
     expect(screen.queryByRole("complementary", { name: "Source prompt and references" })).not.toBeInTheDocument();
   });
 
-  it("switches between collage and focused-image modes and exposes no edit composer", () => {
+  it("switches between collage and focused-image modes and gates the edit composer to focus mode", () => {
     render(
       <GenerationResultsWorkspace
         run={run}
@@ -76,16 +78,57 @@ describe("GenerationResultsWorkspace", () => {
         loadingPhrase="Rendering image"
         error={null}
         onStartNewPrompt={vi.fn()}
+        onEditImage={vi.fn()}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Focus generated image 2" }));
     expect(screen.getByAltText("Generated variation 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Collage" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Describe the image edit" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Collage" }));
     expect(screen.getByRole("button", { name: "Focus generated image 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Describe the image edit" })).not.toBeInTheDocument();
+  });
+
+  it("submits exactly the focused image with a prompt through the edit callback", async () => {
+    const onEditImage = vi.fn(async () => undefined);
+    render(
+      <GenerationResultsWorkspace
+        run={run}
+        isGenerating={false}
+        loadingPhrase="Rendering image"
+        error={null}
+        onStartNewPrompt={vi.fn()}
+        onEditImage={onEditImage}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus generated image 2" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Describe the image edit" }), {
+      target: { value: "Make the windows glow warmly" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit image" }));
+
+    await waitFor(() => expect(onEditImage).toHaveBeenCalledWith(run.images[1], "Make the windows glow warmly"));
+  });
+
+  it("keeps unverified GPT Image 2 editing unavailable", () => {
+    render(
+      <GenerationResultsWorkspace
+        run={{ ...run, model: "kavero-image-openai-gpt-image-2", settings: { ...run.settings, model: "gpt-image-2" } }}
+        isGenerating={false}
+        loadingPhrase="Rendering image"
+        error={null}
+        onStartNewPrompt={vi.fn()}
+        onEditImage={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus generated image 1" }));
+    expect(screen.queryByRole("textbox", { name: "Describe the image edit" })).not.toBeInTheDocument();
+    expect(screen.getByText("Iterative editing is not available for GPT Image 2.")).toBeInTheDocument();
   });
 
   it("offers an explicit new-prompt action", () => {
@@ -97,6 +140,7 @@ describe("GenerationResultsWorkspace", () => {
         loadingPhrase="Rendering image"
         error={null}
         onStartNewPrompt={onStartNewPrompt}
+        onEditImage={vi.fn()}
       />,
     );
 

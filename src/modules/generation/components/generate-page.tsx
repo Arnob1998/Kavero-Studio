@@ -925,6 +925,7 @@ export function GeneratePage() {
   const [generationHistory, setGenerationHistory] = useState<GenerationRun[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [requestedFocusedImageId, setRequestedFocusedImageId] = useState<string | null>(null);
   const [isComposerRaised, setIsComposerRaised] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [promptSearch, setPromptSearch] = useState("");
@@ -992,6 +993,12 @@ export function GeneratePage() {
   const hasComposerTopPanel = hasReferencePanel || hasPromptRefinerPanel;
   const composerHasDraft = promptText.trim().length > 0 || referenceImages.length > 0;
   const isPromptComposerCollapsed = generationActive && !isComposerRaised && !composerHasDraft;
+  const activeIterationRootId = activeRun?.iterationRootId ?? activeRun?.id ?? null;
+  const activeIterationRuns = activeIterationRootId
+    ? generationHistory
+        .filter((run) => (run.iterationRootId ?? run.id) === activeIterationRootId)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    : [];
 
   async function loadWorkspaceStatus() {
     try {
@@ -1649,6 +1656,7 @@ export function GeneratePage() {
     setUploadMessage("");
     setPreviewReference(null);
     setActiveRun(draftRun);
+    setRequestedFocusedImageId(null);
     setGenerationError(null);
     setSettingsOpen(false);
     setIsComposerRaised(false);
@@ -1670,6 +1678,7 @@ export function GeneratePage() {
           background: settings.background,
           schema: "none",
           referenceImages: submittedReferenceImages,
+          clientRunId: runId,
         }),
       });
 
@@ -1728,6 +1737,7 @@ export function GeneratePage() {
 
   const startNewPrompt = () => {
     setActiveRun(null);
+    setRequestedFocusedImageId(null);
     setGenerationError(null);
     setIsComposerRaised(true);
   };
@@ -1736,8 +1746,101 @@ export function GeneratePage() {
     const latestRun = generationHistory[0];
     if (!latestRun) return;
     setActiveRun(latestRun);
+    setRequestedFocusedImageId(null);
     setGenerationError(null);
     setIsComposerRaised(false);
+  };
+
+  const editGeneratedImage = async (sourceImage: GeneratedImage, editPrompt: string) => {
+    const sourceRun = activeRun;
+    if (!sourceRun) throw new Error("The source generation is no longer available.");
+
+    const runModel = getBrowserImageModelByAlias(sourceRun.model)
+      ?? getBrowserImageModelByLegacyId(sourceRun.settings.model);
+    if (!runModel || runModel.provider !== "gemini" || !runModel.supportsReferenceEditing) {
+      throw new Error(`${runModel?.displayLabel ?? "This model"} does not support verified iterative editing.`);
+    }
+    if (!runModel.supportedReferenceMimeTypes.includes(sourceImage.mimeType)) {
+      throw new Error(`${runModel.displayLabel} cannot edit ${sourceImage.mimeType} images.`);
+    }
+
+    const selectedImageAlias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    if (selectedImageAlias !== runModel.modelAlias) {
+      throw new Error(`Restore ${runModel.displayLabel} as the active image model before editing this result.`);
+    }
+
+    const status = await loadWorkspaceStatus();
+    if (!(await requireSignedIn(status))) throw new Error("Sign in to edit generated images.");
+    if (!(await requireGeminiKey(status))) throw new Error("Add your Gemini API key before editing images.");
+    const storageReady = await ensureGenerateStorageReady({ workspaceStatus: status, loadDrivePreflight, openGateDialog });
+    if (!storageReady) throw new Error("Connect supported storage before editing images.");
+
+    const editRunId = `${Date.now()}`;
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: editPrompt,
+        modelAlias: runModel.modelAlias,
+        model: runModel.legacyModelId,
+        count: 1,
+        thinking: sourceRun.settings.thinking,
+        aspectRatio: sourceRun.settings.aspect,
+        imageSize: sourceRun.settings.quality,
+        quality: sourceRun.settings.providerQuality,
+        background: sourceRun.settings.background,
+        schema: "none",
+        referenceImages: [{
+          dataUrl: sourceImage.dataUrl,
+          mimeType: sourceImage.mimeType,
+          name: `generation-${sourceRun.id}-image-${sourceImage.id}.png`,
+        }],
+        sourceGenerationId: sourceRun.id,
+        sourceImageId: sourceImage.id,
+        clientRunId: editRunId,
+      }),
+    });
+    const payload = (await response.json()) as Partial<GenerateApiResponse> & GenerateApiError;
+    if (!response.ok) {
+      if (response.status === 409 && (payload.details as { code?: string } | undefined)?.code === "model-selection-stale") {
+        await modelProvider.refresh();
+      }
+      if (shouldOpenImageGenerationGeminiKeyGate(response.status, payload.error)) {
+        await openImageModelKeyDialog();
+      }
+      throw new Error(payload.error || "Image editing failed.");
+    }
+    if (!payload.images?.length) throw new Error("Image editing returned no output.");
+
+    const nextRun: GenerationRun = {
+      id: editRunId,
+      prompt: editPrompt,
+      model: payload.model ?? runModel.modelAlias,
+      modelLabel: payload.modelLabel ?? runModel.displayLabel,
+      kind: "image",
+      images: payload.images,
+      text: payload.text ?? "",
+      referenceImages: [{
+        dataUrl: sourceImage.dataUrl,
+        mimeType: sourceImage.mimeType as ReferenceImage["mimeType"],
+        name: `Generated variation ${sourceImage.variant}`,
+        size: Math.ceil((sourceImage.dataUrl.split(",")[1]?.length ?? 0) * 0.75),
+      }],
+      createdAt: new Date().toISOString(),
+      settings: { ...sourceRun.settings, count: "1", model: runModel.legacyModelId },
+      warnings: payload.warnings ?? [],
+      parentRunId: sourceRun.id,
+      sourceImageId: sourceImage.id,
+      iterationRootId: sourceRun.iterationRootId ?? sourceRun.id,
+    };
+
+    setGenerationHistory((current) => [
+      nextRun,
+      sourceRun,
+      ...current.filter((item) => item.id !== nextRun.id && item.id !== sourceRun.id),
+    ].slice(0, 10));
+    setRequestedFocusedImageId(nextRun.images[0]?.id ?? null);
+    setActiveRun(nextRun);
   };
 
   const promptRefinerPanel = hasPromptRefinerPanel ? (
@@ -2569,6 +2672,13 @@ export function GeneratePage() {
                 loadingPhrase={loadingPhrase}
                 error={generationError}
                 onStartNewPrompt={startNewPrompt}
+                onEditImage={editGeneratedImage}
+                iterationRuns={activeIterationRuns}
+                requestedFocusedImageId={requestedFocusedImageId}
+                onSelectRun={(run) => {
+                  setRequestedFocusedImageId(run.images[0]?.id ?? null);
+                  setActiveRun(run);
+                }}
               />
             </motion.div>
           ) : (

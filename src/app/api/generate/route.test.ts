@@ -481,6 +481,29 @@ describe("/api/generate POST", () => {
     expect(body.details).toMatchObject({ fieldErrors: { referenceImages: expect.any(Array) } });
   });
 
+  it("rejects incomplete image-edit lineage before provider traffic", async () => {
+    const response = await POST(request(validBody({ sourceGenerationId: "run-source" })));
+    const body = await json(response);
+
+    expect(response.status).toBe(400);
+    expect(body.details).toMatchObject({ fieldErrors: { sourceGenerationId: expect.any(Array) } });
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("rejects edit lineage without exactly one source image", async () => {
+    const response = await POST(request(validBody({
+      sourceGenerationId: "run-source",
+      sourceImageId: "image-source",
+      clientRunId: "run-edit",
+      referenceImages: [],
+    })));
+    const body = await json(response);
+
+    expect(response.status).toBe(400);
+    expect(body.details).toMatchObject({ fieldErrors: { referenceImages: ["Iterative editing requires exactly one source image."] } });
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
   it("enforces the current reference image limit for gemini-2.5-flash-image", async () => {
     const response = await POST(
       request(
@@ -575,6 +598,35 @@ describe("/api/generate POST", () => {
       }),
     ]);
     expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+  });
+
+  it("persists Gemini edit lineage and the selected source reference without mutating the source", async () => {
+    const response = await POST(request(validBody({
+      prompt: "Make the windows glow warmly",
+      count: 1,
+      referenceImages: [referenceImage(1)],
+      sourceGenerationId: "run-source",
+      sourceImageId: "image-source",
+      clientRunId: "run-edit",
+    })));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateContent).toHaveBeenCalledOnce();
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "Make the windows glow warmly",
+      settings: expect.objectContaining({
+        sourceGenerationId: "run-source",
+        sourceImageId: "image-source",
+        clientRunId: "run-edit",
+      }),
+      reference_images: [{ mimeType: "image/png", name: "reference-1.png" }],
+    }));
+    expect(body.settings).toMatchObject({
+      sourceGenerationId: "run-source",
+      sourceImageId: "image-source",
+      clientRunId: "run-edit",
+    });
   });
 
   it("uses the selected image-generation alias through LiteLLM when the gateway is configured", async () => {
