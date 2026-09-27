@@ -27,6 +27,7 @@ export interface PromptTemplateRecord {
 export type { SelectableLegacyImageModelId as ModelId } from "@/modules/model-providers/image-capabilities";
 
 export interface ReferenceImage {
+  clientId?: string;
   dataUrl: string;
   mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/heic" | "image/heif";
   name: string;
@@ -75,6 +76,10 @@ export interface GenerateApiResponse {
   images: GeneratedImage[];
   text: string;
   warnings: string[];
+  persistence: {
+    generationId: string;
+    generatedImageIds: string[];
+  } | null;
   settings: {
     count: number;
     thinking: string;

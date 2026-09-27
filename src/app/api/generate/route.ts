@@ -258,6 +258,7 @@ async function handleDirectGeminiGeneration(request: Request, userId: string, se
   const ai = new GoogleGenAI({ apiKey });
 
   const warnings: string[] = [];
+  let persistence: { generationId: string; generatedImageIds: string[] } | null = null;
   const fixedResolutionWarning = getModelFixedResolutionWarning(input.model);
   if (fixedResolutionWarning) {
     warnings.push(fixedResolutionWarning);
@@ -360,8 +361,16 @@ async function handleDirectGeminiGeneration(request: Request, userId: string, se
         sourceGenerationId: input.sourceGenerationId,
         sourceImageId: input.sourceImageId,
         clientRunId: input.clientRunId,
+        sequenceContext: input.sequenceContext,
       },
     });
+
+    if (persistResult.generationId && persistResult.generatedImageIds.length > 0) {
+      persistence = {
+        generationId: persistResult.generationId,
+        generatedImageIds: persistResult.generatedImageIds,
+      };
+    }
 
     if (persistResult.warning) {
       warnings.push(persistResult.warning);
@@ -382,6 +391,7 @@ async function handleDirectGeminiGeneration(request: Request, userId: string, se
     images,
     text,
     warnings,
+    persistence,
     settings: {
       count: runCount,
       thinking: input.thinking,
@@ -391,6 +401,7 @@ async function handleDirectGeminiGeneration(request: Request, userId: string, se
       sourceGenerationId: input.sourceGenerationId,
       sourceImageId: input.sourceImageId,
       clientRunId: input.clientRunId,
+      sequenceContext: input.sequenceContext,
     },
   });
 }
@@ -430,6 +441,7 @@ async function handleGatewayGeneration({
   const { transformRequestBody, credentialSource } = prepared;
 
   const warnings: string[] = [];
+  let persistence: { generationId: string; generatedImageIds: string[] } | null = null;
   const runCount = input.count;
 
   async function generateOne(variant: number) {
@@ -562,8 +574,16 @@ async function handleGatewayGeneration({
         sourceGenerationId: input.sourceGenerationId,
         sourceImageId: input.sourceImageId,
         clientRunId: input.clientRunId,
+        sequenceContext: input.sequenceContext,
       },
     });
+
+    if (persistResult.generationId && persistResult.generatedImageIds.length > 0) {
+      persistence = {
+        generationId: persistResult.generationId,
+        generatedImageIds: persistResult.generatedImageIds,
+      };
+    }
 
     if (persistResult.warning) {
       warnings.push(persistResult.warning);
@@ -584,6 +604,7 @@ async function handleGatewayGeneration({
     images,
     text,
     warnings,
+    persistence,
     settings: {
       count: runCount,
       thinking: input.thinking,
@@ -595,6 +616,7 @@ async function handleGatewayGeneration({
       sourceGenerationId: input.sourceGenerationId,
       sourceImageId: input.sourceImageId,
       clientRunId: input.clientRunId,
+      sequenceContext: input.sequenceContext,
     },
   });
 }

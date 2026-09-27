@@ -41,6 +41,8 @@ export type PersistGeneratedImagesResult = {
   saved: number;
   warning: string | null;
   storageLabel: string;
+  generationId: string | null;
+  generatedImageIds: string[];
 };
 
 export type GeneratedImageStorageEnv = ManagedStorageEnv & {
@@ -129,6 +131,8 @@ export async function persistGeneratedImagesToDrive({
       saved: 0,
       warning: storage.warning,
       storageLabel: "Google Drive",
+      generationId: null,
+      generatedImageIds: [],
     };
   }
   const readyStorage = storage;
@@ -155,10 +159,13 @@ export async function persistGeneratedImagesToDrive({
       saved: 0,
       warning: "Generated images are ready, but Kavero could not save the generation metadata.",
       storageLabel: "Google Drive",
+      generationId: null,
+      generatedImageIds: [],
     };
   }
 
   async function saveImage(image: (typeof images)[number]) {
+    const generatedImageId = crypto.randomUUID();
     try {
       const fileBase = getFileBase(context, image.variant);
       const upload = await uploadGoogleDriveGeneratedImageWithMetadata({
@@ -176,9 +183,10 @@ export async function persistGeneratedImagesToDrive({
           createdAt: context.createdAt,
         },
       });
-      if (!upload) return false;
+      if (!upload) return null;
 
       const { error } = await admin.from("generated_images").insert({
+        id: generatedImageId,
         user_id: userId,
         generation_id: context.generationId,
         variant: image.variant,
@@ -205,13 +213,13 @@ export async function persistGeneratedImagesToDrive({
 
       if (error) {
         console.error("Unable to save generated image metadata", error);
-        return false;
+        return null;
       }
 
-      return true;
+      return generatedImageId;
     } catch (saveError) {
       console.error("Unable to save generated image to Google Drive", saveError);
-      return false;
+      return null;
     }
   }
 
@@ -248,6 +256,8 @@ async function persistGeneratedImagesToManagedStorage(
       saved: 0,
       warning: MANAGED_STORAGE_SAVE_WARNING,
       storageLabel: "Kavero storage",
+      generationId: null,
+      generatedImageIds: [],
     };
   }
 
@@ -260,6 +270,8 @@ async function persistGeneratedImagesToManagedStorage(
       saved: 0,
       warning: MANAGED_STORAGE_SAVE_WARNING,
       storageLabel: "Kavero storage",
+      generationId: null,
+      generatedImageIds: [],
     };
   }
   const readyBackend = backend;
@@ -284,16 +296,19 @@ async function persistGeneratedImagesToManagedStorage(
       saved: 0,
       warning: "Generated images are ready, but Kavero could not save the generation metadata.",
       storageLabel: "Kavero storage",
+      generationId: null,
+      generatedImageIds: [],
     };
   }
 
   async function saveImage(image: (typeof images)[number]) {
     const uploadedRefs: StoredObjectRef[] = [];
+    const generatedImageId = crypto.randomUUID();
 
     try {
       const fileBase = getFileBase(context, image.variant);
       const parsed = parseBase64DataUrl(image.dataUrl);
-      if (!parsed) return false;
+      if (!parsed) return null;
 
       const imageName = `${fileBase}.${extensionForMimeType(parsed.mimeType)}`;
       const metadataName = `${fileBase}.json`;
@@ -345,6 +360,7 @@ async function persistGeneratedImagesToManagedStorage(
       uploadedRefs.push(metadataObject.ref);
 
       const { error } = await admin.from("generated_images").insert({
+        id: generatedImageId,
         user_id: userId,
         generation_id: context.generationId,
         variant: image.variant,
@@ -377,10 +393,10 @@ async function persistGeneratedImagesToManagedStorage(
           backend: readyBackend,
           refs: uploadedRefs,
         });
-        return false;
+        return null;
       }
 
-      return true;
+      return generatedImageId;
     } catch (saveError) {
       console.error("Unable to save generated image to managed storage", saveError);
       await cleanupUploadedManagedGeneratedImageRefs({
@@ -388,7 +404,7 @@ async function persistGeneratedImagesToManagedStorage(
         backend: readyBackend,
         refs: uploadedRefs,
       });
-      return false;
+      return null;
     }
   }
 
@@ -504,10 +520,13 @@ async function finishImageSaves(input: {
   storageLabel: string;
   zeroSavedWarning: string;
   partialWarning: (saved: number) => string;
-  saveImage: (image: PersistGeneratedImage) => Promise<boolean>;
+  saveImage: (image: PersistGeneratedImage) => Promise<string | null>;
 }): Promise<PersistGeneratedImagesResult> {
   const saveResults = await Promise.allSettled(input.images.map((image) => input.saveImage(image)));
-  const saved = saveResults.filter((result) => result.status === "fulfilled" && result.value).length;
+  const generatedImageIds = saveResults
+    .filter((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled" && Boolean(result.value))
+    .map((result) => result.value);
+  const saved = generatedImageIds.length;
 
   if (saved === 0) {
     await input.admin
@@ -520,6 +539,8 @@ async function finishImageSaves(input: {
   return {
     saved,
     storageLabel: input.storageLabel,
+    generationId: saved > 0 ? input.generationId : null,
+    generatedImageIds,
     warning:
       saved === 0
         ? input.zeroSavedWarning

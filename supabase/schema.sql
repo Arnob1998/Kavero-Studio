@@ -99,6 +99,17 @@ create table if not exists public.generation_runs (
   constraint generation_runs_reference_images_array check (jsonb_typeof(reference_images) = 'array')
 );
 
+create table if not exists public.sequence_runs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  version integer not null default 1,
+  record jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint sequence_runs_version_positive check (version > 0),
+  constraint sequence_runs_record_object check (jsonb_typeof(record) = 'object')
+);
+
 create table if not exists public.canvas_designs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -595,6 +606,7 @@ alter table public.canvas_assets enable row level security;
 alter table public.canvas_templates enable row level security;
 alter table public.generation_runs enable row level security;
 alter table public.generated_images enable row level security;
+alter table public.sequence_runs enable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 
@@ -611,6 +623,7 @@ grant select, insert, update, delete on public.canvas_assets to authenticated, s
 grant select on public.canvas_templates to anon, authenticated, service_role;
 grant select, insert, update, delete on public.generation_runs to authenticated, service_role;
 grant select, insert, update, delete on public.generated_images to authenticated, service_role;
+grant select, insert, update, delete on public.sequence_runs to authenticated, service_role;
 revoke all on vault.decrypted_secrets from anon;
 revoke all on vault.decrypted_secrets from authenticated;
 revoke all on vault.decrypted_secrets from service_role;
@@ -641,6 +654,9 @@ create index if not exists idx_canvas_templates_sort
 
 create index if not exists idx_generation_runs_user_created
   on public.generation_runs (user_id, created_at desc);
+
+create index if not exists idx_sequence_runs_user_updated
+  on public.sequence_runs (user_id, updated_at desc);
 
 create index if not exists idx_generated_images_user_created
   on public.generated_images (user_id, created_at desc);
@@ -855,6 +871,31 @@ create policy "Generation runs are deletable by owner"
   to authenticated
   using ((select auth.uid()) = user_id);
 
+drop policy if exists "Sequence runs are viewable by owner" on public.sequence_runs;
+create policy "Sequence runs are viewable by owner"
+  on public.sequence_runs for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "Sequence runs are insertable by owner" on public.sequence_runs;
+create policy "Sequence runs are insertable by owner"
+  on public.sequence_runs for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Sequence runs are updatable by owner" on public.sequence_runs;
+create policy "Sequence runs are updatable by owner"
+  on public.sequence_runs for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Sequence runs are deletable by owner" on public.sequence_runs;
+create policy "Sequence runs are deletable by owner"
+  on public.sequence_runs for delete
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -888,6 +929,11 @@ create trigger user_drive_connections_set_updated_at
 drop trigger if exists prompt_templates_set_updated_at on public.prompt_templates;
 create trigger prompt_templates_set_updated_at
   before update on public.prompt_templates
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists sequence_runs_set_updated_at on public.sequence_runs;
+create trigger sequence_runs_set_updated_at
+  before update on public.sequence_runs
   for each row execute function public.set_updated_at();
 
 drop trigger if exists canvas_designs_set_updated_at on public.canvas_designs;

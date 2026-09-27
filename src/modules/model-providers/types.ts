@@ -8,6 +8,23 @@ export type ModelCapabilitySlot = (typeof modelCapabilitySlots)[number];
 
 export type ModelRequirement = "provider-key" | "local-runtime";
 
+export type CapabilityLimit<T> =
+  | { source: "provider-verified" | "application-cap"; value: T }
+  | { source: "unknown"; value: null };
+
+export type SequencePlannerCapabilities = {
+  eligible: boolean;
+  eligibility: "verified" | "not-verified";
+  supportsSchemaConstrainedOutput: boolean;
+  imageInput: {
+    eligible: boolean;
+    maximumImages: CapabilityLimit<number>;
+    supportedMimeTypes: readonly string[];
+    maximumBytesPerImage: CapabilityLimit<number>;
+    maximumTotalBytes: CapabilityLimit<number>;
+  };
+};
+
 export type ModelCapabilities = {
   slots: readonly ModelCapabilitySlot[];
   supportsTools: boolean;
@@ -16,6 +33,7 @@ export type ModelCapabilities = {
   supportsImageOutput: boolean;
   supportsStreaming: boolean;
   requirements: readonly ModelRequirement[];
+  sequencePlanner: SequencePlannerCapabilities;
 };
 
 export type ModelCatalogEntry = {

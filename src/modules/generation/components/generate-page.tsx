@@ -86,9 +86,27 @@ import {
 } from "../utils/prompt-refiner-policy";
 import { ModelQuickPicker } from "./model-quick-picker";
 import { GenerationResultsWorkspace } from "./generation-results-workspace";
+import { SequencePlannerPanel, SequenceToggle, type SequenceExecutionViewState, type SequenceExecutionVisual, type SequencePlannerViewState } from "./sequence-planner-panel";
+import { buildSequenceFramePrompt, SEQUENCE_PRODUCT_LIMITS, selectSequenceReferences, shouldSuggestSequence, type SequencePersistenceRecord, type SequencePlanDraft, type SequencePlannerReferenceInput, type SequenceReferenceRole } from "../sequence";
 
 // TEMP: Hide the prompt chatbox/hover only on the generation workspace. Set this to false to restore it there.
 const hidePromptComposerDuringGeneration = true;
+
+function createReferenceClientId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `reference-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getSequenceReferenceId(image: ReferenceImage, index: number) {
+  return image.clientId ?? `sequence-reference-${index + 1}`;
+}
+
+class SequenceFrameError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message);
+  }
+}
 
 const llmProviderReferenceImages: PresetReferenceImage[] = [
   {
@@ -925,6 +943,13 @@ export function GeneratePage() {
   const [generationHistory, setGenerationHistory] = useState<GenerationRun[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [sequenceEnabled, setSequenceEnabled] = useState(false);
+  const [sequencePlannerState, setSequencePlannerState] = useState<SequencePlannerViewState>({ status: "idle" });
+  const [sequencePlannerCalls, setSequencePlannerCalls] = useState(0);
+  const [sequenceExecution, setSequenceExecution] = useState<SequenceExecutionViewState>({ status: "idle" });
+  const sequenceCancelRequestedRef = useRef(false);
+  const sequencePlanRevisionRef = useRef(0);
+  const [sequenceReferenceRoles, setSequenceReferenceRoles] = useState<Record<string, SequenceReferenceRole>>({});
   const [requestedFocusedImageId, setRequestedFocusedImageId] = useState<string | null>(null);
   const [isComposerRaised, setIsComposerRaised] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
@@ -986,7 +1011,10 @@ export function GeneratePage() {
   const generationActive = Boolean(activeRun || isGenerating || generationError);
   const activeModel = settings.model as ModelId;
   const activeModelMetadata = getBrowserImageModelByLegacyId(activeModel);
-  const referenceImageLimit = activeModelMetadata?.maximumReferenceImages ?? 0;
+  const modelReferenceImageLimit = activeModelMetadata?.maximumReferenceImages ?? 0;
+  const referenceImageLimit = sequenceEnabled
+    ? Math.min(modelReferenceImageLimit, 8)
+    : modelReferenceImageLimit;
   const supportsReferenceImages = activeModelMetadata?.supportsReferenceEditing ?? false;
   const hasReferencePanel = referenceImages.length > 0 || Boolean(uploadMessage);
   const hasPromptRefinerPanel = promptRefiner.status !== "idle";
@@ -999,6 +1027,55 @@ export function GeneratePage() {
         .filter((run) => (run.iterationRootId ?? run.id) === activeIterationRootId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     : [];
+  const selectedChatModel = modelProvider.settings?.catalog.find((model) =>
+    model.modelAlias === modelProvider.settings?.selected.chatOrchestrationModelAlias,
+  );
+  const sequencePlannerEligible = Boolean(
+    selectedChatModel?.availability.active && selectedChatModel.capabilities.sequencePlanner.eligible,
+  );
+  const sequenceReferences: SequencePlannerReferenceInput[] = referenceImages.map((image, index) => {
+    const id = getSequenceReferenceId(image, index);
+    return {
+      id,
+      label: image.name,
+      role: sequenceReferenceRoles[id] ?? "frame-specific",
+      dataUrl: image.dataUrl,
+      mimeType: image.mimeType,
+      byteSize: image.size,
+    };
+  });
+  const showSequenceSuggestion = !sequenceEnabled && shouldSuggestSequence(promptText);
+
+  function invalidateSequenceApproval() {
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    setSequencePlannerState((current) => {
+      if (current.status !== "review") return current;
+      return { ...current, approved: false, revision: nextSequencePlanRevision() };
+    });
+  }
+
+  function nextSequencePlanRevision() {
+    sequencePlanRevisionRef.current += 1;
+    return sequencePlanRevisionRef.current;
+  }
+
+  function discardSequencePlan() {
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    setSequencePlannerState((current) => current.status === "review" || current.status === "error" ? { status: "idle" } : current);
+  }
+
+  function setSequenceMode(enabled: boolean) {
+    setSequenceEnabled(enabled);
+    setSequencePlannerState({ status: "idle" });
+    setSequencePlannerCalls(0);
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    sequencePlanRevisionRef.current = 0;
+    setGenerationError(null);
+    if (!enabled) setSequenceReferenceRoles({});
+  }
 
   async function loadWorkspaceStatus() {
     try {
@@ -1059,6 +1136,7 @@ export function GeneratePage() {
 
   const handlePromptTextChange = (value: string) => {
     setPromptText(value);
+    discardSequencePlan();
     setPromptBeforeRefineReplacement(null);
     if (generationActive && value.trim()) {
       setIsComposerRaised(true);
@@ -1086,6 +1164,7 @@ export function GeneratePage() {
     const alias = modelProvider.settings?.selected?.imageGenerationModelAlias;
     const selected = alias ? getBrowserImageModelByAlias(alias) : null;
     if (!selected || selected.legacyModelId === settings.model) return;
+    discardSequencePlan();
     setSettings((current) => {
       const normalized = normalizeBrowserImageUiSettings({
         model: current.model,
@@ -1099,6 +1178,13 @@ export function GeneratePage() {
       return { ...current, model: normalized.model, count: String(normalized.count), aspect: normalized.aspectRatio, quality: normalized.imageSize, thinking: normalized.reasoning, providerQuality: normalized.quality ?? "auto", background: normalized.background ?? "auto" };
     });
   }, [modelProvider.settings?.selected?.imageGenerationModelAlias, settings.model]);
+
+  useEffect(() => {
+    discardSequencePlan();
+  }, [
+    modelProvider.settings?.selected?.chatOrchestrationModelAlias,
+    modelProvider.settings?.selected?.imageGenerationModelAlias,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1206,6 +1292,7 @@ export function GeneratePage() {
   const resolvePresetReferenceImage = async (image: PresetReferenceImage): Promise<ReferenceImage> => {
     if (image.dataUrl) {
       return {
+        clientId: createReferenceClientId(),
         dataUrl: image.dataUrl,
         mimeType: image.mimeType,
         name: image.name,
@@ -1224,6 +1311,7 @@ export function GeneratePage() {
 
     const blob = await response.blob();
     return {
+      clientId: createReferenceClientId(),
       dataUrl: await readFileAsDataUrl(blob),
       mimeType: image.mimeType,
       name: image.name,
@@ -1232,6 +1320,7 @@ export function GeneratePage() {
   };
 
   const usePrompt = async (preset: PromptPreset) => {
+    discardSequencePlan();
     const presetPrompt = preset.prompt.trim();
     setPromptText((current) => {
       const currentPrompt = current.trim();
@@ -1369,6 +1458,21 @@ export function GeneratePage() {
   };
 
   const removeReferenceImage = (index: number) => {
+    const removedId = sequenceReferences[index]?.id;
+    setSequencePlannerState((current) => current.status === "review"
+      ? {
+          ...current,
+          approved: false,
+          revision: nextSequencePlanRevision(),
+          plan: {
+            ...current.plan,
+            frames: current.plan.frames.map((frame) => ({
+              ...frame,
+              referenceIds: removedId ? frame.referenceIds.filter((id) => id !== removedId) : frame.referenceIds,
+            })),
+          },
+        }
+      : current);
     setReferenceImages((current) => {
       const next = current.filter((_, itemIndex) => itemIndex !== index);
       clearUploadFeedbackIfEmpty(next.length);
@@ -1377,6 +1481,9 @@ export function GeneratePage() {
   };
 
   const clearReferenceImages = () => {
+    setSequencePlannerState((current) => current.status === "review"
+      ? { ...current, approved: false, revision: nextSequencePlanRevision(), plan: { ...current.plan, frames: current.plan.frames.map((frame) => ({ ...frame, referenceIds: [] })) } }
+      : current);
     setReferenceImages([]);
     setUploadStatus("idle");
     setUploadMessage("");
@@ -1402,6 +1509,7 @@ export function GeneratePage() {
     const skippedCount = imageFiles.length - acceptedFiles.length;
     const images = await Promise.all(
       acceptedFiles.map(async (file) => ({
+        clientId: createReferenceClientId(),
         dataUrl: await readFileAsDataUrl(file),
         mimeType: file.type as ReferenceImage["mimeType"],
         name: file.name,
@@ -1454,6 +1562,7 @@ export function GeneratePage() {
     try {
       const { images: nextImages, skippedCount } = await convertFilesToReferenceImages(files, remainingSlots);
 
+      invalidateSequenceApproval();
       setReferenceImages((current) => [...current, ...nextImages]);
       setGenerationError(null);
       setUploadStatus("success");
@@ -1604,12 +1713,14 @@ export function GeneratePage() {
 
   const replacePromptWithRefinement = () => {
     if (promptRefiner.status !== "refined") return;
+    discardSequencePlan();
     setPromptBeforeRefineReplacement(promptRefiner.originalPrompt);
     setPromptText(promptRefiner.refinedPrompt);
   };
 
   const undoPromptRefinementReplacement = () => {
     if (promptBeforeRefineReplacement === null) return;
+    discardSequencePlan();
     setPromptText(promptBeforeRefineReplacement);
     setPromptBeforeRefineReplacement(null);
   };
@@ -1740,6 +1851,306 @@ export function GeneratePage() {
     setRequestedFocusedImageId(null);
     setGenerationError(null);
     setIsComposerRaised(true);
+  };
+
+  const requestSequencePlan = async (value = promptText) => {
+    const goal = value.trim();
+    if (!sequenceEnabled || sequencePlannerState.status === "loading") return;
+    if (!goal) {
+      setSequencePlannerState({ status: "error", message: "Describe the sequence goal before planning." });
+      return;
+    }
+    if (!sequencePlannerEligible) {
+      setSequencePlannerState({ status: "error", message: "Choose an active sequence-eligible chat model in Settings." });
+      return;
+    }
+    if (sequencePlannerCalls >= SEQUENCE_PRODUCT_LIMITS.maximumPlannerCalls) {
+      setSequencePlannerState({ status: "error", message: "This draft has reached its planner-call limit. Turn Sequence off and on to start a new draft." });
+      return;
+    }
+    const selectedImageAlias = modelProvider.settings?.selected.imageGenerationModelAlias;
+    if (!selectedImageAlias) {
+      setSequencePlannerState({ status: "error", message: "Choose an active image model before planning." });
+      return;
+    }
+    const status = await loadWorkspaceStatus();
+    if (!(await requireSignedIn(status))) return;
+
+    const plannerCallNumber = sequencePlannerCalls + 1;
+    setSequencePlannerCalls(plannerCallNumber);
+    setSequencePlannerState({ status: "loading" });
+    try {
+      const response = await fetch("/api/sequence/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal,
+          imageModelAlias: selectedImageAlias,
+          plannerCallNumber,
+          references: sequenceReferences,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { plan?: SequencePlanDraft; error?: string } | null;
+      if (response.status === 401) {
+        await requireSignedIn();
+        throw new Error("Sign in to plan a sequence.");
+      }
+      if (shouldOpenPromptRefinerGeminiKeyGate(response.status, payload?.error)) {
+        await requireGeminiKey();
+        throw new Error("Add your Gemini API key before planning a sequence.");
+      }
+      if (!response.ok || !payload?.plan) throw new Error(payload?.error ?? "Sequence planning failed.");
+      const revision = nextSequencePlanRevision();
+      setSequencePlannerState({ status: "review", plan: payload.plan, approved: false, revision });
+    } catch (error) {
+      setSequencePlannerState({ status: "error", message: error instanceof Error ? error.message : "Sequence planning failed." });
+    }
+  };
+
+  const handleSequencePlanChange = (plan: SequencePlanDraft) => {
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    const revision = nextSequencePlanRevision();
+    setSequencePlannerState({ status: "review", plan, approved: false, revision });
+  };
+
+  const moveSequenceReference = (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= referenceImages.length) return;
+    invalidateSequenceApproval();
+    setReferenceImages((current) => {
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const changeSequenceReferenceRole = (id: string, role: SequenceReferenceRole) => {
+    invalidateSequenceApproval();
+    setSequenceReferenceRoles((current) => ({ ...current, [id]: role }));
+  };
+
+  const removeSequenceReference = (id: string) => {
+    const index = sequenceReferences.findIndex((reference) => reference.id === id);
+    if (index >= 0) removeReferenceImage(index);
+  };
+
+  const checkpointSequence = async (record: SequencePersistenceRecord, action: Record<string, unknown>) => {
+    const response = await fetch("/api/sequence/runs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sequenceId: record.id,
+        expectedVersion: record.version,
+        ...action,
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as {
+      sequence?: SequencePersistenceRecord;
+      error?: string;
+      details?: { code?: string; currentVersion?: number };
+    } | null;
+    if (!response.ok || !payload?.sequence) {
+      throw new SequenceFrameError(payload?.error ?? "Unable to save sequence progress.", response.status >= 500);
+    }
+    return payload.sequence;
+  };
+
+  const runSequence = async (
+    initialRecord: SequencePersistenceRecord,
+    initialVisuals: Record<string, SequenceExecutionVisual>,
+  ) => {
+    let record = initialRecord;
+    let visuals = { ...initialVisuals };
+    if (record.execution.status === "awaiting-approval") {
+      record = await checkpointSequence(record, { action: "start" });
+    }
+
+    while (record.execution.status === "running") {
+      if (sequenceCancelRequestedRef.current) {
+        record = await checkpointSequence(record, { action: "cancel" });
+        setSequenceExecution({ status: "cancelled", record, visuals, message: "Execution stopped before the next frame." });
+        return;
+      }
+
+      const plan = record.planRevisions.find((candidate) => candidate.id === record.execution.activePlanRevisionId);
+      const frame = plan?.frames.find((candidate) => candidate.id === record.execution.nextFrameId);
+      if (!plan || !frame) {
+        setSequenceExecution({ status: "error", record, visuals, message: "The frozen sequence has no executable next frame." });
+        return;
+      }
+
+      const selectedReferences = selectSequenceReferences({
+        frame,
+        references: plan.references,
+        outputs: record.outputs,
+        maximumReferences: modelReferenceImageLimit,
+      });
+      const attemptId = crypto.randomUUID();
+      record = await checkpointSequence(record, { action: "attempt-start", frameId: frame.id, attemptId });
+      setSequenceExecution({ status: "running", record, visuals, message: `Generating frame ${frame.position} of ${plan.frames.length}…` });
+
+      try {
+        const frameReferences = selectedReferences.map((selected) => {
+          if (selected.kind === "reference") {
+            const reference = sequenceReferences.find((candidate) => candidate.id === selected.id);
+            if (!reference) throw new SequenceFrameError("An approved reference is no longer available in this browser session.", false);
+            return { id: reference.id, dataUrl: reference.dataUrl, mimeType: reference.mimeType, name: reference.label };
+          }
+          const output = record.outputs.find((candidate) => candidate.id === selected.id);
+          const visual = output ? visuals[output.frameId] : null;
+          if (!output || !visual) throw new SequenceFrameError("A continuity frame is no longer available for reference.", false);
+          return { id: output.id, dataUrl: visual.dataUrl, mimeType: visual.mimeType, name: `Accepted frame ${output.frameId}` };
+        });
+        const sourceOutputIds = selectedReferences.filter((selected) => selected.kind === "prior-output").map((selected) => selected.id);
+        const prompt = buildSequenceFramePrompt(plan, frame);
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            modelAlias: plan.imageModelAlias,
+            model: settings.model,
+            count: 1,
+            thinking: settings.thinking,
+            aspectRatio: settings.aspect,
+            imageSize: settings.quality,
+            quality: settings.providerQuality,
+            background: settings.background,
+            schema: "none",
+            referenceImages: frameReferences.map(({ dataUrl, mimeType, name }) => ({ dataUrl, mimeType, name })),
+            clientRunId: `${record.id}-${frame.id}-${attemptId}`,
+            sequenceContext: {
+              sequenceId: record.id,
+              planRevisionId: plan.id,
+              frameId: frame.id,
+              framePosition: frame.position,
+              attemptId,
+              referenceIds: selectedReferences.filter((selected) => selected.kind === "reference").map((selected) => selected.id),
+              sourceOutputIds,
+            },
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as (Partial<GenerateApiResponse> & GenerateApiError) | null;
+        if (!response.ok) {
+          const retryable = response.status === 429 || response.status === 502 || response.status === 503;
+          throw new SequenceFrameError(payload?.error ?? `Frame ${frame.position} generation failed.`, retryable);
+        }
+        const image = payload?.images?.[0];
+        const generatedImageId = payload?.persistence?.generatedImageIds?.[0];
+        if (!image || !generatedImageId || !payload?.persistence?.generationId) {
+          throw new SequenceFrameError("The frame was generated but was not durably saved, so execution stopped.", true);
+        }
+        record = await checkpointSequence(record, {
+          action: "attempt-success",
+          attemptId,
+          generatedImageId,
+          modelAlias: plan.imageModelAlias,
+          prompt,
+          referenceIds: selectedReferences.filter((selected) => selected.kind === "reference").map((selected) => selected.id),
+          sourceOutputIds,
+        });
+        visuals = {
+          ...visuals,
+          [frame.id]: { dataUrl: image.dataUrl, mimeType: image.mimeType, generatedImageId },
+        };
+        const frameRun: GenerationRun = {
+          id: payload.persistence.generationId,
+          prompt,
+          model: payload.model ?? plan.imageModelAlias,
+          modelLabel: payload.modelLabel ?? activeModelOption.label,
+          kind: "image",
+          images: [image],
+          text: payload.text ?? "",
+          referenceImages: frameReferences.map(({ dataUrl, mimeType, name }) => ({ dataUrl, mimeType: mimeType as ReferenceImage["mimeType"], name, size: 0 })),
+          createdAt: new Date().toISOString(),
+          settings: { ...settings },
+          warnings: payload.warnings ?? [],
+        };
+        setGenerationHistory((current) => [frameRun, ...current.filter((item) => item.id !== frameRun.id)].slice(0, 10));
+        setSequenceExecution({
+          status: record.execution.status === "complete" ? "complete" : "running",
+          record,
+          visuals,
+          message: record.execution.status === "complete" ? "Sequence complete. Every frame was saved independently." : `Saved frame ${frame.position}.`,
+        });
+      } catch (error) {
+        const failure = error instanceof SequenceFrameError ? error : new SequenceFrameError("Sequence frame generation failed.", true);
+        try {
+          record = await checkpointSequence(record, {
+            action: "attempt-failure",
+            attemptId,
+            errorCode: failure.retryable ? "provider_error" : "invalid_reference_state",
+            retryable: failure.retryable,
+          });
+        } catch (checkpointError) {
+          setSequenceExecution({ status: "error", record, visuals, message: checkpointError instanceof Error ? checkpointError.message : failure.message });
+          return;
+        }
+        setSequenceExecution({ status: "partial", record, visuals, message: failure.message });
+        return;
+      }
+    }
+  };
+
+  const executeApprovedSequence = async () => {
+    if (sequencePlannerState.status !== "review" || !sequencePlannerState.approved || sequenceExecution.status === "saving") return;
+    const plannerModelAlias = modelProvider.settings?.selected.chatOrchestrationModelAlias;
+    const imageModelAlias = modelProvider.settings?.selected.imageGenerationModelAlias;
+    if (!plannerModelAlias || !imageModelAlias) {
+      setSequenceExecution({ status: "startup-error", message: "Select active planner and image models first." });
+      return;
+    }
+    const status = await loadWorkspaceStatus();
+    if (!(await requireSignedIn(status))) return;
+    if (activeModelMetadata?.provider === "gemini" && !(await requireGeminiKey(status))) return;
+    if (!(await ensureGenerateStorageReady({ workspaceStatus: status, loadDrivePreflight, openGateDialog }))) return;
+    sequenceCancelRequestedRef.current = false;
+    setSequenceExecution({ status: "saving", message: "Freezing the approved plan before generation…" });
+    try {
+      const response = await fetch("/api/sequence/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: promptText.trim(),
+          plannerModelAlias,
+          imageModelAlias,
+          plannerCallsUsed: sequencePlannerCalls,
+          revision: sequencePlannerState.revision,
+          plan: sequencePlannerState.plan,
+          references: sequenceReferences,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { sequence?: SequencePersistenceRecord; error?: string } | null;
+      if (!response.ok || !payload?.sequence) throw new SequenceFrameError(payload?.error ?? "Unable to freeze the approved sequence.", response.status >= 500);
+      await runSequence(payload.sequence, {});
+    } catch (error) {
+      setSequenceExecution({ status: "startup-error", message: error instanceof Error ? error.message : "Unable to start sequence execution." });
+    }
+  };
+
+  const cancelSequenceExecution = () => {
+    sequenceCancelRequestedRef.current = true;
+    setSequenceExecution((current) => current.status === "running" ? { ...current, cancelRequested: true, message: "Stopping after the current frame…" } : current);
+  };
+
+  const resumeSequence = async () => {
+    if (!(sequenceExecution.status === "partial" || sequenceExecution.status === "cancelled")) return;
+    sequenceCancelRequestedRef.current = false;
+    try {
+      const resumed = await checkpointSequence(sequenceExecution.record, { action: "resume" });
+      await runSequence(resumed, sequenceExecution.visuals);
+    } catch (error) {
+      setSequenceExecution({ ...sequenceExecution, status: "error", message: error instanceof Error ? error.message : "Unable to resume sequence." });
+    }
+  };
+
+  const handlePrimarySubmit = (value: string) => {
+    if (sequenceEnabled) {
+      void requestSequencePlan(value);
+      return;
+    }
+    void handleGenerate(value);
   };
 
   const returnToLatestResults = () => {
@@ -2695,6 +3106,35 @@ export function GeneratePage() {
               <p className="mt-4 text-[clamp(17px,1.35vw,24px)] font-semibold tracking-normal text-white/88 sm:mt-5">
                 Start by describing your picture
               </p>
+              <SequenceToggle enabled={sequenceEnabled} onToggle={setSequenceMode} />
+              {showSequenceSuggestion ? (
+                <button
+                  type="button"
+                  className="mx-auto mt-2 block text-[11px] font-bold text-accent/88 underline decoration-accent/35 underline-offset-4 hover:text-white"
+                  onClick={() => setSequenceMode(true)}
+                >
+                  This sounds like an ordered set. Enable Sequence?
+                </button>
+              ) : null}
+              {sequenceEnabled ? (
+                <SequencePlannerPanel
+                  state={sequencePlannerState}
+                  references={sequenceReferences}
+                  plannerLabel={selectedChatModel?.displayLabel ?? "No planner selected"}
+                  plannerEligible={sequencePlannerEligible}
+                  callsUsed={sequencePlannerCalls}
+                  onRequestPlan={() => void requestSequencePlan()}
+                  onChangePlan={handleSequencePlanChange}
+                  onApprove={() => setSequencePlannerState((current) => current.status === "review" ? { ...current, approved: true } : current)}
+                  onMoveReference={moveSequenceReference}
+                  onChangeReferenceRole={changeSequenceReferenceRole}
+                  onRemoveReference={removeSequenceReference}
+                  execution={sequenceExecution}
+                  onExecute={() => void executeApprovedSequence()}
+                  onCancel={cancelSequenceExecution}
+                  onResume={() => void resumeSequence()}
+                />
+              ) : null}
               {generationHistory.length > 0 ? (
                 <button
                   className="mx-auto mt-5 inline-flex h-10 items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.055] px-4 text-[12px] font-extrabold text-white/72 transition hover:bg-white/[0.1] hover:text-white"
@@ -2828,8 +3268,8 @@ export function GeneratePage() {
             ariaLabel="Prompt"
             value={promptText}
             onValueChange={handlePromptTextChange}
-            onSubmit={handleGenerate}
-            isLoading={isGenerating}
+            onSubmit={handlePrimarySubmit}
+            isLoading={isGenerating || sequencePlannerState.status === "loading"}
             onDragEnter={handleReferenceDragEnter}
             onDragOver={handleReferenceDragOver}
             onDragLeave={handleReferenceDragLeave}
@@ -2976,8 +3416,8 @@ export function GeneratePage() {
                     },
                   ]
             }
-            submitLabel={isGenerating ? "Generating" : "Generate"}
-            submitIcon={<SubmitGlyph isGenerating={isGenerating} />}
+            submitLabel={sequenceEnabled ? (sequencePlannerState.status === "loading" ? "Planning sequence" : "Plan sequence") : (isGenerating ? "Generating" : "Generate")}
+            submitIcon={<SubmitGlyph isGenerating={isGenerating || sequencePlannerState.status === "loading"} />}
           />
         </>
       )}

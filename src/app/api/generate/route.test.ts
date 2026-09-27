@@ -598,6 +598,37 @@ describe("/api/generate POST", () => {
       }),
     ]);
     expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+    expect(body.persistence).toEqual({
+      generationId: expect.any(String),
+      generatedImageIds: [expect.any(String)],
+    });
+  });
+
+  it("persists bounded sequence lineage metadata and returns the stable history IDs", async () => {
+    const sequenceContext = {
+      sequenceId: "11111111-1111-4111-8111-111111111111",
+      planRevisionId: "22222222-2222-4222-8222-222222222222",
+      frameId: "frame-1",
+      framePosition: 1,
+      attemptId: "33333333-3333-4333-8333-333333333333",
+      referenceIds: ["reference-1"],
+      sourceOutputIds: [],
+    };
+    const response = await POST(request(validBody({ sequenceContext })));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(body.persistence).toEqual({
+      generationId: expect.any(String),
+      generatedImageIds: [expect.any(String)],
+    });
+    const persistence = body.persistence as { generatedImageIds: string[] };
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ sequenceContext }),
+    }));
+    expect(admin.__mocks.generatedImageInsert).toHaveBeenCalledWith(expect.objectContaining({
+      id: persistence.generatedImageIds[0],
+    }));
   });
 
   it("persists Gemini edit lineage and the selected source reference without mutating the source", async () => {

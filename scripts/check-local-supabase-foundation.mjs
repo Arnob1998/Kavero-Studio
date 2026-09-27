@@ -156,7 +156,7 @@ async function main() {
 
   const { createClient } = await loadSupabase();
   const { anon, service } = createClients(createClient, url, publishableKey, serviceRoleKey);
-  const cleanup = { userIds: [], promptTemplateIds: [] };
+  const cleanup = { userIds: [], promptTemplateIds: [], sequenceRunIds: [] };
 
   try {
     console.log("Checking Auth password signup/signin...");
@@ -230,6 +230,56 @@ async function main() {
     );
     assert(anonRead === null, "Anon RLS allowed reading a user prompt template.");
 
+    console.log("Checking sequence aggregate ownership and optimistic versions...");
+    const sequenceId = randomUUID();
+    const sequenceRecord = {
+      schemaVersion: 1,
+      id: sequenceId,
+      userId: primary.user.id,
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      planRevisions: [],
+      execution: { status: "draft" },
+      attempts: [],
+      outputs: [],
+    };
+    const sequenceRun = await expectNoError(
+      "owner sequence run insert failed",
+      primaryClient.from("sequence_runs").insert({
+        id: sequenceId,
+        user_id: primary.user.id,
+        version: 1,
+        record: sequenceRecord,
+      }).select("id, version").single(),
+    );
+    cleanup.sequenceRunIds.push(sequenceRun.id);
+    assert(sequenceRun.version === 1, "Sequence run did not preserve version one.");
+
+    const sequenceOwnerRead = await expectNoError(
+      "owner sequence run read failed",
+      primaryClient.from("sequence_runs").select("id, version").eq("id", sequenceId).maybeSingle(),
+    );
+    assert(sequenceOwnerRead?.id === sequenceId, "Owner could not read owned sequence run.");
+
+    const sequenceCrossUserRead = await expectNoError(
+      "cross-user sequence run read failed",
+      authedClient(createClient, url, publishableKey, secondary.session.access_token)
+        .from("sequence_runs").select("id").eq("id", sequenceId).maybeSingle(),
+    );
+    assert(sequenceCrossUserRead === null, "Sequence RLS allowed reading another user's run.");
+
+    const versionUpdate = await expectNoError(
+      "sequence optimistic version update failed",
+      primaryClient.from("sequence_runs")
+        .update({ version: 2, record: { ...sequenceRecord, version: 2 } })
+        .eq("id", sequenceId)
+        .eq("version", 1)
+        .select("version")
+        .maybeSingle(),
+    );
+    assert(versionUpdate?.version === 2, "Sequence optimistic version update did not advance exactly once.");
+
     console.log("Checking service-role provider-key Vault RPCs...");
     const providerSecret = `local-smoke-provider-secret-${randomUUID()}`;
     await expectNoError(
@@ -296,6 +346,11 @@ async function main() {
     if (cleanup.promptTemplateIds.length > 0) {
       const result = await service.from("prompt_templates").delete().in("id", cleanup.promptTemplateIds);
       if (result.error) warnings.push(`Prompt template cleanup failed: ${result.error.message}`);
+    }
+
+    if (cleanup.sequenceRunIds.length > 0) {
+      const result = await service.from("sequence_runs").delete().in("id", cleanup.sequenceRunIds);
+      if (result.error) warnings.push(`Sequence run cleanup failed: ${result.error.message}`);
     }
 
     for (const userId of cleanup.userIds) {
