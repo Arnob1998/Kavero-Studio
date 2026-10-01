@@ -156,4 +156,37 @@ describe("Sequence planner review UI", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(screen.getByText("accepted")).toBeInTheDocument();
   });
+
+  it("offers targeted regeneration and locks the frozen plan after completion", () => {
+    const onRegenerate = vi.fn();
+    const onReplaceReference = vi.fn();
+    const record = executionRecord();
+    const completed: SequencePersistenceRecord = {
+      ...record,
+      planRevisions: [{
+        ...record.planRevisions[0],
+        references: [{ id: "ref-1", order: 0, label: "Hero product", role: "product", frameIds: ["frame-1"], source: {
+          kind: "upload", assetId: "ref-1", mimeType: "image/png", byteSize: 1,
+          sourceSequenceId: null, sourceFrameId: null, sourceOutputId: null,
+        } }],
+        frames: record.planRevisions[0].frames.map((frame) => ({ ...frame, status: "accepted", acceptedOutputId: frame.acceptedOutputId ?? "output-2" })),
+      }],
+      execution: { ...record.execution, status: "complete", nextFrameId: null },
+    };
+    render(<SequencePlannerPanel
+      state={{ status: "review", plan, approved: true, revision: 2 }} references={references} plannerLabel="Gemini" plannerEligible callsUsed={1}
+      onRequestPlan={vi.fn()} onChangePlan={vi.fn()} onApprove={vi.fn()}
+      onMoveReference={vi.fn()} onChangeReferenceRole={vi.fn()} onRemoveReference={vi.fn()}
+      execution={{ status: "complete", record: completed, visuals: {}, message: "Complete" }}
+      onRegenerate={onRegenerate} onReplaceReference={onReplaceReference}
+    />);
+    expect(screen.getByRole("textbox", { name: "Prompt for frame 1" })).toBeDisabled();
+    fireEvent.click(screen.getAllByRole("button", { name: "Regenerate from here" })[1]);
+    expect(onRegenerate).toHaveBeenCalledWith({ mode: "from-frame", frameId: "frame-2" });
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate affected by Hero product" }));
+    expect(onRegenerate).toHaveBeenCalledWith({ mode: "affected-reference", referenceId: "ref-1" });
+    const file = new File(["image"], "replacement.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Replace image"), { target: { files: [file] } });
+    expect(onReplaceReference).toHaveBeenCalledWith("ref-1", file);
+  });
 });

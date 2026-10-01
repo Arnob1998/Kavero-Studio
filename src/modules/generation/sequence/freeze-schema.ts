@@ -66,6 +66,22 @@ export const sequenceRunActionSchema = z.discriminatedUnion("action", [
   }),
   sequenceRunActionBase.extend({ action: z.literal("cancel") }),
   sequenceRunActionBase.extend({ action: z.literal("resume") }),
+  sequenceRunActionBase.extend({ action: z.literal("keep-previous") }),
+  sequenceRunActionBase.extend({ action: z.literal("recover") }),
+  sequenceRunActionBase.extend({
+    action: z.literal("regenerate"),
+    mode: z.enum(["from-frame", "affected-reference"]),
+    frameId: z.string().trim().min(1).max(80).optional(),
+    referenceId: z.string().trim().min(1).max(80).optional(),
+  }),
+  sequenceRunActionBase.extend({
+    action: z.literal("replace-reference"),
+    referenceId: z.string().trim().min(1).max(80),
+    label: z.string().trim().min(1).max(160),
+    dataUrl: z.string().min(1).max(Math.ceil(SEQUENCE_PRODUCT_LIMITS.maximumUploadBytes * 4 / 3) + 100),
+    mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"]),
+    byteSize: z.number().int().positive().max(SEQUENCE_PRODUCT_LIMITS.maximumUploadBytes),
+  }),
 ]);
 
 export type SequenceRunActionInput = z.infer<typeof sequenceRunActionSchema>;

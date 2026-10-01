@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, Check, Loader2, Play, Plus, RotateCcw, Square, Spar
 import type { ReactNode } from "react";
 import type { SequencePersistenceRecord, SequencePlanDraft, SequencePlannerReferenceInput, SequenceReferenceRole } from "../sequence";
 import { SEQUENCE_PRODUCT_LIMITS, sequenceReferenceRoles } from "../sequence";
+import { DownloadImagesButton } from "./download-images-button";
 
 export type SequencePlannerViewState =
   | { status: "idle" }
@@ -64,6 +65,10 @@ export function SequencePlannerPanel({
   onExecute,
   onCancel,
   onResume,
+  onRegenerate,
+  onReplaceReference,
+  onKeepPrevious,
+  onRecover,
 }: {
   state: SequencePlannerViewState;
   references: readonly SequencePlannerReferenceInput[];
@@ -80,9 +85,14 @@ export function SequencePlannerPanel({
   onExecute?: () => void;
   onCancel?: () => void;
   onResume?: () => void;
+  onRegenerate?: (action: { mode: "from-frame"; frameId: string } | { mode: "affected-reference"; referenceId: string }) => void;
+  onReplaceReference?: (referenceId: string, file: File) => void;
+  onKeepPrevious?: () => void;
+  onRecover?: () => void;
 }) {
   const plan = state.status === "review" ? state.plan : null;
   const canPlan = plannerEligible && callsUsed < SEQUENCE_PRODUCT_LIMITS.maximumPlannerCalls && state.status !== "loading";
+  const frozen = execution.status !== "idle" && execution.status !== "startup-error";
 
   return (
     <section
@@ -115,15 +125,16 @@ export function SequencePlannerPanel({
                   aria-label={`Role for ${reference.label}`}
                   className="mt-1 h-7 max-w-full rounded-lg border border-white/[0.08] bg-black/45 px-2 text-[10px] font-bold text-white/62 outline-none"
                   value={reference.role}
+                  disabled={frozen}
                   onChange={(event) => onChangeReferenceRole(reference.id, event.target.value as SequenceReferenceRole)}
                 >
                   {sequenceReferenceRoles.map((role) => <option key={role} value={role}>{role}</option>)}
                 </select>
               </span>
               <span className="flex gap-1">
-                <SmallButton label={`Move ${reference.label} up`} disabled={index === 0} onClick={() => onMoveReference(index, -1)}><ArrowUp size={13} /></SmallButton>
-                <SmallButton label={`Move ${reference.label} down`} disabled={index === references.length - 1} onClick={() => onMoveReference(index, 1)}><ArrowDown size={13} /></SmallButton>
-                <SmallButton label={`Remove ${reference.label}`} onClick={() => onRemoveReference(reference.id)}><Trash2 size={13} /></SmallButton>
+                <SmallButton label={`Move ${reference.label} up`} disabled={frozen || index === 0} onClick={() => onMoveReference(index, -1)}><ArrowUp size={13} /></SmallButton>
+                <SmallButton label={`Move ${reference.label} down`} disabled={frozen || index === references.length - 1} onClick={() => onMoveReference(index, 1)}><ArrowDown size={13} /></SmallButton>
+                <SmallButton label={`Remove ${reference.label}`} disabled={frozen} onClick={() => onRemoveReference(reference.id)}><Trash2 size={13} /></SmallButton>
               </span>
             </div>
           ))}
@@ -149,6 +160,10 @@ export function SequencePlannerPanel({
           onExecute={onExecute}
           onCancel={onCancel}
           onResume={onResume}
+          onRegenerate={onRegenerate}
+          onReplaceReference={onReplaceReference}
+          onKeepPrevious={onKeepPrevious}
+          onRecover={onRecover}
         />
       ) : (
         <button
@@ -164,7 +179,7 @@ export function SequencePlannerPanel({
   );
 }
 
-function PlanEditor({ plan, references, approved, onChange, onApprove, execution, onExecute, onCancel, onResume }: {
+function PlanEditor({ plan, references, approved, onChange, onApprove, execution, onExecute, onCancel, onResume, onRegenerate, onReplaceReference, onKeepPrevious, onRecover }: {
   plan: SequencePlanDraft;
   references: readonly SequencePlannerReferenceInput[];
   approved: boolean;
@@ -174,6 +189,10 @@ function PlanEditor({ plan, references, approved, onChange, onApprove, execution
   onExecute?: () => void;
   onCancel?: () => void;
   onResume?: () => void;
+  onRegenerate?: (action: { mode: "from-frame"; frameId: string } | { mode: "affected-reference"; referenceId: string }) => void;
+  onReplaceReference?: (referenceId: string, file: File) => void;
+  onKeepPrevious?: () => void;
+  onRecover?: () => void;
 }) {
   const patchFrame = (index: number, patch: Partial<SequencePlanDraft["frames"][number]>) => {
     const frames = [...plan.frames];
@@ -201,6 +220,7 @@ function PlanEditor({ plan, references, approved, onChange, onApprove, execution
 
   return (
     <div className="mt-4 grid gap-4">
+      <fieldset disabled={execution.status !== "idle" && execution.status !== "startup-error"} className="contents disabled:opacity-55">
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Sequence title" value={plan.title} onChange={(title) => onChange({ ...plan, title })} />
         <Field label="Type" value={plan.sequenceType} onChange={(sequenceType) => onChange({ ...plan, sequenceType })} />
@@ -281,6 +301,7 @@ function PlanEditor({ plan, references, approved, onChange, onApprove, execution
           </button>
         </span>
       </div>
+      </fieldset>
       {approved ? (
         <ExecutionPanel
           plan={plan}
@@ -288,18 +309,26 @@ function PlanEditor({ plan, references, approved, onChange, onApprove, execution
           onExecute={onExecute}
           onCancel={onCancel}
           onResume={onResume}
+          onRegenerate={onRegenerate}
+          onReplaceReference={onReplaceReference}
+          onKeepPrevious={onKeepPrevious}
+          onRecover={onRecover}
         />
       ) : null}
     </div>
   );
 }
 
-function ExecutionPanel({ plan, execution, onExecute, onCancel, onResume }: {
+function ExecutionPanel({ plan, execution, onExecute, onCancel, onResume, onRegenerate, onReplaceReference, onKeepPrevious, onRecover }: {
   plan: SequencePlanDraft;
   execution: SequenceExecutionViewState;
   onExecute?: () => void;
   onCancel?: () => void;
   onResume?: () => void;
+  onRegenerate?: (action: { mode: "from-frame"; frameId: string } | { mode: "affected-reference"; referenceId: string }) => void;
+  onReplaceReference?: (referenceId: string, file: File) => void;
+  onKeepPrevious?: () => void;
+  onRecover?: () => void;
 }) {
   if (execution.status === "idle" || execution.status === "startup-error") {
     return (
@@ -333,6 +362,12 @@ function ExecutionPanel({ plan, execution, onExecute, onCancel, onResume }: {
           <span className="block text-[11px] font-extrabold text-white/78">{completed} / {plan.frames.length} frames saved</span>
           <span className="mt-0.5 block text-[10px] font-bold text-white/42">{execution.record.execution.imageCallsUsed} / {SEQUENCE_PRODUCT_LIMITS.maximumImageCalls} image calls</span>
         </span>
+        {frames.some((frame) => frame.acceptedOutputId && execution.visuals[frame.id]) ? (
+          <DownloadImagesButton label="Export frames" name="kavero-sequence" images={frames.flatMap((frame) => {
+            const visual = execution.visuals[frame.id];
+            return frame.acceptedOutputId && visual ? [{ ...visual, name: `frame-${frame.position}` }] : [];
+          })} />
+        ) : null}
         {execution.status === "running" ? (
           <button type="button" className="inline-flex h-8 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-[10px] font-extrabold text-white/68 disabled:opacity-40" disabled={execution.cancelRequested} onClick={onCancel}>
             <Square size={12} /> {execution.cancelRequested ? "Stopping after this frame" : "Cancel"}
@@ -341,6 +376,12 @@ function ExecutionPanel({ plan, execution, onExecute, onCancel, onResume }: {
           <button type="button" className="inline-flex h-8 items-center gap-2 rounded-lg bg-accent px-3 text-[10px] font-extrabold text-white disabled:opacity-40" disabled={execution.status === "partial" && !retryable} onClick={onResume}>
             <RotateCcw size={12} /> {execution.status === "partial" ? "Retry failed frame" : "Resume"}
           </button>
+        ) : null}
+        {(execution.status === "partial" || execution.status === "cancelled") && frames.every((frame) => Boolean(frame.acceptedOutputId)) ? (
+          <button type="button" className="inline-flex h-8 items-center rounded-lg border border-white/[0.1] px-3 text-[10px] font-extrabold text-white/68" onClick={onKeepPrevious}>Keep previous images</button>
+        ) : null}
+        {execution.status === "error" && execution.record.execution.status === "running" ? (
+          <button type="button" className="inline-flex h-8 items-center rounded-lg border border-white/[0.1] px-3 text-[10px] font-extrabold text-white/68" onClick={onRecover}>Recover interrupted run</button>
         ) : null}
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -352,11 +393,29 @@ function ExecutionPanel({ plan, execution, onExecute, onCancel, onResume }: {
               <span className="min-w-0">
                 <span className="block truncate text-[11px] font-extrabold text-white/72">Frame {frame.position}: {frame.purpose}</span>
                 <span className="mt-1 block text-[10px] font-bold capitalize text-white/40">{frame.status}</span>
+                {execution.status === "complete" ? <button type="button" className="mt-1 text-[10px] font-bold text-accent hover:underline" onClick={() => onRegenerate?.({ mode: "from-frame", frameId: frame.id })}>Regenerate from here</button> : null}
               </span>
             </div>
           );
         })}
       </div>
+      {execution.status === "complete" && (revision?.references.length ?? 0) > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2" aria-label="Reference regeneration">
+          {revision?.references.map((reference) => (
+            <span key={reference.id} className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-white/[0.1] px-2 py-1 text-[10px] font-bold text-white/64">
+              <button type="button" className="hover:text-white" onClick={() => onRegenerate?.({ mode: "affected-reference", referenceId: reference.id })}>Regenerate affected by {reference.label}</button>
+              <label className="cursor-pointer text-accent hover:underline">
+                Replace image
+                <input type="file" className="sr-only" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) onReplaceReference?.(reference.id, file);
+                  event.target.value = "";
+                }} />
+              </label>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <p className={`mt-3 text-[11px] font-bold ${execution.status === "error" || execution.status === "partial" ? "text-red-100/72" : "text-white/52"}`}>{execution.message}</p>
     </section>
   );

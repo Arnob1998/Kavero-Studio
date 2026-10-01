@@ -7,3 +7,4 @@ export * from "./state";
 export * from "./repository";
 export * from "./freeze-schema";
 export * from "./execution";
+export * from "./local-sources";

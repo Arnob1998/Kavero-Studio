@@ -25,6 +25,7 @@ export type SelectedSequenceReference = Readonly<{
 
 export function selectSequenceReferences(input: {
   frame: SequenceFrame;
+  frames?: readonly SequenceFrame[];
   references: readonly SequenceReference[];
   outputs: readonly SequenceOutputLineage[];
   maximumReferences: number;
@@ -46,9 +47,12 @@ export function selectSequenceReferences(input: {
 
   const continuityDependencies = input.frame.dependencies.filter((dependency) => dependency.kind === "continuity");
   for (const dependency of continuityDependencies) {
-    const accepted = [...input.outputs]
-      .filter((output) => output.frameId === dependency.frameId && output.acceptedAt !== null)
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))[0];
+    const acceptedOutputId = input.frames?.find((frame) => frame.id === dependency.frameId)?.acceptedOutputId;
+    const accepted = acceptedOutputId
+      ? input.outputs.find((output) => output.id === acceptedOutputId && output.frameId === dependency.frameId && output.acceptedAt !== null)
+      : input.frames ? null : [...input.outputs]
+        .filter((output) => output.frameId === dependency.frameId && output.acceptedAt !== null)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))[0];
     if (accepted) selected.push({ kind: "prior-output", id: accepted.id, tier: "prior-accepted-frame" });
   }
 

@@ -191,6 +191,7 @@ export interface EditorContextValue {
   zoomIn: () => void;
   zoomOut: () => void;
   exportPNG: () => void;
+  getPagePNG: (pageId: string) => Promise<string | undefined>;
   getCanvasJSON: () => string;
   getCanvasJSONForPage: (pageId: string) => string;
   getCanvasSceneSnapshot: (options?: { includeHelpers?: boolean }) => CanvasSceneSnapshot | null;

@@ -7,6 +7,7 @@ import type {
   SequencePersistenceRecord,
 } from "./contracts";
 import { SEQUENCE_PRODUCT_LIMITS } from "./limits";
+import { calculateAffectedFrameIds } from "./reference-policy";
 
 function activeRevision(record: SequencePersistenceRecord) {
   return record.planRevisions.find((revision) => revision.id === record.execution.activePlanRevisionId) ?? null;
@@ -36,6 +37,116 @@ function nextIncompleteFrameId(record: SequencePersistenceRecord) {
     .slice()
     .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id))
     .find((frame) => frame.status !== "accepted")?.id ?? null;
+}
+
+export function attemptsInCurrentRound(record: SequencePersistenceRecord, frameId: SequenceFrameId) {
+  const revision = activeRevision(record);
+  const frame = revision?.frames.find((candidate) => candidate.id === frameId);
+  if (!frame) return 0;
+  const lastSuccessIndex = frame.attemptIds.findLastIndex((id) =>
+    record.attempts.some((attempt) => attempt.id === id && attempt.status === "succeeded"));
+  return frame.attemptIds.length - lastSuccessIndex - 1;
+}
+
+export function scheduleSequenceRegeneration(input: {
+  record: SequencePersistenceRecord;
+  mode: "from-frame" | "affected-reference";
+  frameId?: SequenceFrameId;
+  referenceId?: string;
+  scheduledAt: string;
+}): SequencePersistenceRecord {
+  const { record } = input;
+  const revision = activeRevision(record);
+  if (record.execution.status !== "complete" || !revision?.approvedAt) return record;
+  const startFrame = revision.frames.find((frame) => frame.id === input.frameId);
+  const affectedIds = input.mode === "from-frame" && startFrame
+    ? revision.frames.filter((frame) => frame.position >= startFrame.position).map((frame) => frame.id)
+    : input.mode === "affected-reference" && revision.references.some((reference) => reference.id === input.referenceId)
+      ? calculateAffectedFrameIds({ changedReferenceId: input.referenceId!, frames: revision.frames })
+      : [];
+  if (affectedIds.length === 0 || record.execution.imageCallsUsed + affectedIds.length > SEQUENCE_PRODUCT_LIMITS.maximumImageCalls) return record;
+  if (affectedIds.some((id) => !revision.frames.some((frame) => frame.id === id && frame.status === "accepted" && frame.acceptedOutputId))) return record;
+  const affected = new Set(affectedIds);
+  const planRevisions = record.planRevisions.map((candidate) => candidate.id !== revision.id ? candidate : {
+    ...candidate,
+    frames: candidate.frames.map((frame) => affected.has(frame.id) ? { ...frame, status: "pending" as const } : frame),
+  });
+  return {
+    ...record,
+    version: record.version + 1,
+    updatedAt: input.scheduledAt,
+    planRevisions,
+    execution: {
+      ...record.execution,
+      status: "running",
+      nextFrameId: affectedIds[0],
+      cancelRequestedAt: null,
+      lastUpdatedAt: input.scheduledAt,
+    },
+  };
+}
+
+export function replaceSequenceReference(input: {
+  record: SequencePersistenceRecord;
+  referenceId: string;
+  assetId: string;
+  revisionId: string;
+  label: string;
+  mimeType: string;
+  byteSize: number;
+  replacedAt: string;
+}): SequencePersistenceRecord {
+  const { record } = input;
+  const revision = activeRevision(record);
+  if (record.execution.status !== "complete" || !revision?.approvedAt) return record;
+  if (!revision.references.some((reference) => reference.id === input.referenceId)) return record;
+  const affectedIds = calculateAffectedFrameIds({ changedReferenceId: input.referenceId, frames: revision.frames });
+  if (affectedIds.length === 0 || record.execution.imageCallsUsed + affectedIds.length > SEQUENCE_PRODUCT_LIMITS.maximumImageCalls) return record;
+  const affected = new Set(affectedIds);
+  const nextRevision = {
+    ...revision,
+    id: input.revisionId,
+    revision: revision.revision + 1,
+    createdAt: input.replacedAt,
+    approvedAt: input.replacedAt,
+    references: revision.references.map((reference) => reference.id === input.referenceId ? {
+      ...reference,
+      label: input.label,
+      source: { ...reference.source, assetId: input.assetId, mimeType: input.mimeType, byteSize: input.byteSize },
+    } : reference),
+    frames: revision.frames.map((frame) => affected.has(frame.id) ? { ...frame, status: "pending" as const } : frame),
+  };
+  return {
+    ...record,
+    version: record.version + 1,
+    updatedAt: input.replacedAt,
+    planRevisions: [...record.planRevisions, nextRevision],
+    execution: {
+      ...record.execution,
+      status: "running",
+      activePlanRevisionId: nextRevision.id,
+      nextFrameId: affectedIds[0],
+      cancelRequestedAt: null,
+      lastUpdatedAt: input.replacedAt,
+    },
+  };
+}
+
+export function keepPreviousSequenceOutputs(record: SequencePersistenceRecord, keptAt: string): SequencePersistenceRecord {
+  if (!["partially-complete", "failed", "cancelled"].includes(record.execution.status)) return record;
+  const revision = activeRevision(record);
+  if (!revision || revision.frames.some((frame) => !frame.acceptedOutputId)) return record;
+  if (record.attempts.some((attempt) => attempt.status === "running")) return record;
+  return {
+    ...record,
+    version: record.version + 1,
+    updatedAt: keptAt,
+    planRevisions: record.planRevisions.map((candidate) => candidate.id !== revision.id ? candidate : {
+      ...candidate,
+      frames: candidate.frames.map((frame) => ({ ...frame, status: "accepted" as const })),
+    }),
+    execution: { ...record.execution, status: "complete", nextFrameId: null, cancelRequestedAt: null, lastUpdatedAt: keptAt },
+  };
 }
 
 export function beginSequenceExecution(record: SequencePersistenceRecord, startedAt: string): SequencePersistenceRecord {
@@ -73,21 +184,24 @@ export function beginSequenceAttempt(input: {
   if (frame.dependencies.some((dependency) => revision.frames.find((candidate) => candidate.id === dependency.frameId)?.status !== "accepted")) {
     return { ok: false, reason: "dependencies-incomplete" };
   }
-  if (frame.status === "accepted" && !input.replacesOutputId) return { ok: false, reason: "frame-already-complete" };
+  if (frame.status === "accepted") return { ok: false, reason: "frame-already-complete" };
+  if (frame.status === "running") return { ok: false, reason: "frame-in-progress" };
+  if (record.execution.nextFrameId !== frame.id) return { ok: false, reason: "frame-not-next" };
+  if ((frame.acceptedOutputId ?? null) !== (input.replacesOutputId ?? null)) return { ok: false, reason: "replacement-mismatch" };
   const latestAttempt = frame.attemptIds.length > 0
     ? record.attempts.find((candidate) => candidate.id === frame.attemptIds[frame.attemptIds.length - 1])
     : null;
   if (frame.status === "failed" && latestAttempt && !latestAttempt.retryable) {
     return { ok: false, reason: "frame-not-retryable" };
   }
-  if (frame.attemptIds.length >= SEQUENCE_PRODUCT_LIMITS.maximumRetryAttemptsPerFrame) {
+  if (attemptsInCurrentRound(record, frame.id) >= SEQUENCE_PRODUCT_LIMITS.maximumRetryAttemptsPerFrame) {
     return { ok: false, reason: "frame-attempt-limit" };
   }
   if (record.execution.imageCallsUsed >= SEQUENCE_PRODUCT_LIMITS.maximumImageCalls) {
     return { ok: false, reason: "image-call-limit" };
   }
   const running = record.attempts.filter((attempt) => attempt.status === "running").length;
-  if (running >= SEQUENCE_PRODUCT_LIMITS.maximumConcurrentImageCalls) {
+  if (running > 0) {
     return { ok: false, reason: "concurrency-limit" };
   }
 
@@ -95,7 +209,7 @@ export function beginSequenceAttempt(input: {
     id: input.attemptId,
     frameId: frame.id,
     planRevisionId: revision.id,
-    attemptNumber: frame.attemptIds.length + 1,
+    attemptNumber: attemptsInCurrentRound(record, frame.id) + 1,
     status: "running",
     startedAt: input.startedAt,
     finishedAt: null,
@@ -219,7 +333,7 @@ export function resumeSequenceExecution(record: SequencePersistenceRecord, resum
     if (frame.status !== "failed") return false;
     const latestAttemptId = frame.attemptIds[frame.attemptIds.length - 1];
     const latestAttempt = record.attempts.find((attempt) => attempt.id === latestAttemptId);
-    return !latestAttempt?.retryable || frame.attemptIds.length >= SEQUENCE_PRODUCT_LIMITS.maximumRetryAttemptsPerFrame;
+    return !latestAttempt?.retryable || attemptsInCurrentRound(record, frame.id) >= SEQUENCE_PRODUCT_LIMITS.maximumRetryAttemptsPerFrame;
   });
   if (blockedFailure) return record;
   const planRevisions = record.planRevisions.map((candidate) => candidate.id !== revision.id ? candidate : {

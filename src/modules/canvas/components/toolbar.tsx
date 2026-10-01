@@ -21,6 +21,7 @@ import {
 import type { ComponentType } from "react";
 import { useEditor, CANVAS_SIZE_GROUPS, CANVAS_SIZES } from "@/modules/canvas/state/context";
 import type { CanvasSize } from "@/modules/canvas/state/context";
+import { downloadImagesZip } from "@/lib/image-export";
 
 type SizeCategory = CanvasSize["category"];
 
@@ -64,6 +65,9 @@ export function Toolbar() {
     zoomIn,
     zoomOut,
     exportPNG,
+    getPagePNG,
+    pages,
+    showError,
     saveDesign,
     saving,
     activeDesign,
@@ -74,6 +78,27 @@ export function Toolbar() {
   } = useEditor();
 
   const [showSizeDropdown, setShowSizeDropdown] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const exportAllPages = async () => {
+    setShowExportMenu(false);
+    setExporting(true);
+    try {
+      const images = [];
+      for (const page of pages) {
+        const dataUrl = await getPagePNG(page.id);
+        // Validation reports its own error; never download a partial archive.
+        if (!dataUrl) return;
+        images.push({ dataUrl, mimeType: "image/png", name: page.title || "page" });
+      }
+      await downloadImagesZip(images, activeDesign?.name || "design-pages");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Unable to export pages.");
+    } finally {
+      setExporting(false);
+    }
+  };
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const [customWidth, setCustomWidth] = useState(String(canvasWidth));
@@ -340,14 +365,26 @@ export function Toolbar() {
 
         <div className="mx-1 h-5 w-px bg-white/[0.1]" />
 
+        <div className="relative">
         <button
           className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-[11px] font-bold text-white/62 transition hover:bg-white/[0.08] hover:text-white"
-          onClick={exportPNG}
-          title="Export as PNG"
+          onClick={() => setShowExportMenu(!showExportMenu)}
+          disabled={exporting}
+          aria-expanded={showExportMenu}
+          title="Export images"
         >
           <Download size={13} />
-          Export
+          {exporting ? "Exporting…" : "Export"}
+          <ChevronDown size={12} />
         </button>
+        {showExportMenu ? <>
+          <button type="button" className="fixed inset-0 z-10 cursor-default" aria-label="Close export menu" onClick={() => setShowExportMenu(false)} />
+          <div className="absolute right-0 top-full z-20 mt-2 w-52 rounded-xl border border-white/[0.12] bg-[#101010] p-1 shadow-xl">
+            <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[11px] font-bold text-white/75 hover:bg-white/[0.08]" onClick={() => { setShowExportMenu(false); exportPNG(); }}>Current page · PNG</button>
+            <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[11px] font-bold text-white/75 hover:bg-white/[0.08]" disabled={!pages.length} onClick={() => void exportAllPages()}>All pages ({pages.length}) · ZIP</button>
+          </div>
+        </> : null}
+        </div>
         <button
           className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3.5 text-[11px] font-bold text-white shadow-[0_12px_32px_rgb(59_130_246_/_0.24)] transition hover:bg-accent-hover disabled:opacity-50"
           onClick={saveDesign}

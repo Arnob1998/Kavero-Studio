@@ -8,8 +8,11 @@ import {
   buildSequenceFramePrompt,
   calculateAffectedFrameIds,
   failSequenceAttempt,
+  keepPreviousSequenceOutputs,
+  replaceSequenceReference,
   requestSequenceCancellation,
   resumeSequenceExecution,
+  scheduleSequenceRegeneration,
   selectSequenceReferences,
   SEQUENCE_PRODUCT_LIMITS,
   succeedSequenceAttempt,
@@ -265,6 +268,12 @@ describe("sequence persistence state", () => {
     });
     expect(first).toMatchObject({ ok: true, attempt: { attemptNumber: 1 } });
     if (!first.ok) throw new Error("Expected first attempt to start");
+    expect(beginSequenceAttempt({
+      record: first.record,
+      frameId: "frame-1",
+      attemptId: "attempt-concurrent",
+      startedAt: "2026-09-12T10:00:02.000Z",
+    })).toEqual({ ok: false, reason: "frame-in-progress" });
 
     const accepted = succeedSequenceAttempt({
       record: first.record,
@@ -368,5 +377,50 @@ describe("sequence persistence state", () => {
       attemptId: "attempt-2",
       startedAt: "2026-09-12T10:00:31.000Z",
     })).toEqual({ ok: false, reason: "record-not-running" });
+  });
+
+  it("regenerates only affected frames and keeps old outputs until each replacement succeeds", () => {
+    const base = record();
+    const firstOutput = output();
+    const unrelated = output({ id: "output-2", frameId: "frame-2", attemptId: "attempt-2", generatedImageId: "generated-2" });
+    const complete: SequencePersistenceRecord = {
+      ...base,
+      planRevisions: [{
+        ...base.planRevisions[0],
+        references: [reference("reference-a", 0, "frame-specific", ["frame-1"])],
+        frames: [
+          { ...base.planRevisions[0].frames[0], status: "accepted", referenceIds: ["reference-a"], acceptedOutputId: firstOutput.id, attemptIds: ["attempt-1"] },
+          { ...base.planRevisions[0].frames[1], status: "accepted", acceptedOutputId: unrelated.id, attemptIds: ["attempt-2"] },
+        ],
+      }],
+      attempts: [
+        { id: "attempt-1", frameId: "frame-1", planRevisionId: "revision-1", attemptNumber: 1, status: "succeeded", startedAt: "2026-09-12T10:00:00.000Z", finishedAt: "2026-09-12T10:01:00.000Z", outputId: "output-1", replacesOutputId: null, errorCode: null, retryable: false },
+        { id: "attempt-2", frameId: "frame-2", planRevisionId: "revision-1", attemptNumber: 1, status: "succeeded", startedAt: "2026-09-12T10:01:00.000Z", finishedAt: "2026-09-12T10:02:00.000Z", outputId: "output-2", replacesOutputId: null, errorCode: null, retryable: false },
+      ],
+      outputs: [firstOutput, unrelated],
+      execution: { ...base.execution, status: "complete", nextFrameId: null, imageCallsUsed: 2 },
+    };
+    const scheduled = scheduleSequenceRegeneration({ record: complete, mode: "affected-reference", referenceId: "reference-a", scheduledAt: "2026-09-12T11:00:00.000Z" });
+    expect(scheduled.planRevisions[0].frames).toMatchObject([
+      { status: "pending", acceptedOutputId: "output-1" },
+      { status: "accepted", acceptedOutputId: "output-2" },
+    ]);
+    const begun = beginSequenceAttempt({ record: scheduled, frameId: "frame-1", attemptId: "attempt-3", replacesOutputId: "output-1", startedAt: "2026-09-12T11:01:00.000Z" });
+    if (!begun.ok) throw new Error("Replacement should start");
+    expect(begun.attempt.attemptNumber).toBe(1);
+    const replaced = succeedSequenceAttempt({ record: begun.record, attemptId: "attempt-3", output: output({ id: "output-3", attemptId: "attempt-3", generatedImageId: "generated-3", acceptedAt: null, supersedesOutputId: "output-1" }), finishedAt: "2026-09-12T11:02:00.000Z" });
+    expect(replaced.execution.status).toBe("complete");
+    expect(replaced.planRevisions[0].frames.map((frame) => frame.acceptedOutputId)).toEqual(["output-3", "output-2"]);
+    expect(replaced.outputs.find((item) => item.id === "output-1")?.acceptedAt).not.toBeNull();
+    expect(replaced.outputs.find((item) => item.id === "output-3")?.supersedesOutputId).toBe("output-1");
+
+    const next = replaceSequenceReference({ record: replaced, referenceId: "reference-a", assetId: "new-asset", revisionId: "revision-2", label: "New photo", mimeType: "image/png", byteSize: 200, replacedAt: "2026-09-12T12:00:00.000Z" });
+    expect(next.planRevisions).toHaveLength(2);
+    expect(next.planRevisions[0].references[0].source.assetId).toBe("reference-a");
+    expect(next.planRevisions[1].references[0].source).toMatchObject({ assetId: "new-asset", byteSize: 200 });
+    expect(next.planRevisions[1].frames[1]).toMatchObject({ status: "accepted", acceptedOutputId: "output-2" });
+    const kept = keepPreviousSequenceOutputs({ ...next, execution: { ...next.execution, status: "cancelled" } }, "2026-09-12T12:01:00.000Z");
+    expect(kept.execution.status).toBe("complete");
+    expect(kept.planRevisions[1].frames[0]).toMatchObject({ status: "accepted", acceptedOutputId: "output-3" });
   });
 });

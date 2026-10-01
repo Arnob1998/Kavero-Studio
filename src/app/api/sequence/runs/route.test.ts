@@ -11,8 +11,11 @@ const { getUser, maybeSingle, save, load, getResolvedModelProviderPreferences, v
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => {
-    const query = { eq: vi.fn(), maybeSingle };
+    const query = { eq: vi.fn(), contains: vi.fn(), order: vi.fn(), limit: vi.fn(), maybeSingle };
     query.eq.mockImplementation(() => query);
+    query.contains.mockImplementation(() => query);
+    query.order.mockImplementation(() => query);
+    query.limit.mockImplementation(() => query);
     return {
       auth: { getUser },
       from: vi.fn(() => ({ select: vi.fn(() => query) })),
@@ -169,6 +172,20 @@ describe("sequence run freeze API", () => {
     expect(await response.json()).toMatchObject({ details: { code: "sequence-version-conflict", currentVersion: 3 } });
   });
 
+  it("rejects a changed model selection before a saved run starts", async () => {
+    await POST(post());
+    const frozen = save.mock.calls[0][0];
+    load.mockResolvedValueOnce(frozen);
+    getResolvedModelProviderPreferences.mockReturnValueOnce({
+      chatOrchestrationModelAlias: input.plannerModelAlias,
+      imageGenerationModelAlias: "changed-image-model",
+    });
+    const response = await PUT(put({ action: "start", sequenceId: frozen.id, expectedVersion: 1 }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ details: { code: "model-selection-stale" } });
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts a frame only after its generated image is visible in owner-scoped history", async () => {
     await POST(post());
     const frozen = save.mock.calls[0][0];
@@ -184,7 +201,38 @@ describe("sequence run freeze API", () => {
 
     const generatedImageId = "44444444-4444-4444-8444-444444444444";
     load.mockResolvedValueOnce(attempting);
-    maybeSingle.mockResolvedValueOnce({ data: { id: generatedImageId }, error: null });
+    const forged = await PUT(put({
+      action: "attempt-success", sequenceId: frozen.id, expectedVersion: 3, attemptId, generatedImageId,
+      modelAlias: input.imageModelAlias,
+      prompt: "Hero\n\nKeep these approved sequence rules:\nstyle: Editorial\nproduct: Same product",
+      referenceIds: [], sourceOutputIds: [],
+    }));
+    expect(forged.status).toBe(409);
+    expect(save).toHaveBeenCalledTimes(3);
+    load.mockResolvedValueOnce(attempting);
+    const generationId = "55555555-5555-4555-8555-555555555555";
+    maybeSingle.mockResolvedValueOnce({ data: { id: generatedImageId, generation_id: generationId }, error: null });
+    maybeSingle.mockResolvedValueOnce({ data: { settings: { sequenceContext: {
+      sequenceId: "other-sequence",
+    } } }, error: null });
+    const unrelated = await PUT(put({
+      action: "attempt-success", sequenceId: frozen.id, expectedVersion: 3, attemptId, generatedImageId,
+      modelAlias: input.imageModelAlias,
+      prompt: "Hero\n\nKeep these approved sequence rules:\nstyle: Editorial\nproduct: Same product",
+      referenceIds: ["reference-1"], sourceOutputIds: [],
+    }));
+    expect(unrelated.status).toBe(409);
+    load.mockResolvedValueOnce(attempting);
+    maybeSingle.mockResolvedValueOnce({ data: { id: generatedImageId, generation_id: generationId }, error: null });
+    maybeSingle.mockResolvedValueOnce({ data: { settings: { sequenceContext: {
+      sequenceId: frozen.id,
+      planRevisionId: frozen.planRevisions[0].id,
+      frameId: "frame-1",
+      framePosition: 1,
+      attemptId,
+      referenceIds: ["reference-1"],
+      sourceOutputIds: [],
+    } } }, error: null });
     const response = await PUT(put({
       action: "attempt-success",
       sequenceId: frozen.id,
@@ -202,6 +250,29 @@ describe("sequence run freeze API", () => {
       version: 4,
       outputs: [{ generatedImageId, frameId: "frame-1", acceptedAt: expect.any(String) }],
       planRevisions: [{ frames: [expect.objectContaining({ id: "frame-1", status: "accepted" }), expect.any(Object)] }],
+    });
+  });
+
+  it("reconciles an old interrupted attempt without repeating an unsaved image call", async () => {
+    await POST(post());
+    const frozen = save.mock.calls[0][0];
+    load.mockResolvedValueOnce(frozen);
+    await PUT(put({ action: "start", sequenceId: frozen.id, expectedVersion: 1 }));
+    const running = save.mock.calls.at(-1)?.[0];
+    const attemptId = "66666666-6666-4666-8666-666666666666";
+    load.mockResolvedValueOnce(running);
+    await PUT(put({ action: "attempt-start", sequenceId: frozen.id, expectedVersion: 2, frameId: "frame-1", attemptId }));
+    const attempting = save.mock.calls.at(-1)?.[0];
+    load.mockResolvedValueOnce({
+      ...attempting,
+      attempts: attempting.attempts.map((attempt: { startedAt: string }) => ({ ...attempt, startedAt: "2020-01-01T00:00:00.000Z" })),
+    });
+    maybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    const response = await PUT(put({ action: "recover", sequenceId: frozen.id, expectedVersion: 3 }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).sequence).toMatchObject({
+      execution: { status: "failed", imageCallsUsed: 1 },
+      attempts: [{ status: "failed", retryable: true, errorCode: "interrupted_attempt" }],
     });
   });
 });

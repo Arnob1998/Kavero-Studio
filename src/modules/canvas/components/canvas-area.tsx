@@ -40,6 +40,7 @@ import {
   type BackgroundRemovalModel,
 } from "@/modules/assets/background-removal";
 import { BackgroundRemovalModelDialog } from "@/modules/canvas/components/background-removal-model-dialog";
+import { CutoutReviewDialog } from "@/modules/canvas/components/cutout-review-dialog";
 import { isBackgroundRemovalTarget } from "@/modules/canvas/utils/background-removal-target";
 
 export function CanvasArea() {
@@ -65,6 +66,7 @@ export function CanvasArea() {
   const [rotationBadge, setRotationBadge] = useState<{ x: number; y: number; angle: number } | null>(null);
   const [canvasLocked, setCanvasLocked] = useState(false);
   const [backgroundRemovalBusy, setBackgroundRemovalBusy] = useState(false);
+  const [cutoutReview, setCutoutReview] = useState<{ sourceUrl: string; blob: Blob; objectId: string; fileName: string } | null>(null);
   const [backgroundRemovalModels, setBackgroundRemovalModels] = useState<BackgroundRemovalModel[]>([
     ...BUILTIN_BACKGROUND_REMOVAL_MODELS,
   ]);
@@ -451,17 +453,9 @@ export function CanvasArea() {
           },
         });
         const safeModelName = model.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        const outputFile = new File([result.blob], `background-removed-${safeModelName || "model"}.png`, {
-          type: "image/png",
-        });
-        setCanvasUpload({ label: "Saving transparent image", progress: 89 });
-        const asset = await uploadCanvasAsset(outputFile, (progress) => {
-          setCanvasUpload({ label: "Saving transparent image", progress: 89 + Math.round(progress * 0.11) });
-        });
-        const replaced = await replaceImageObjectSource(objectId, asset.public_url);
-        if (!replaced) throw new Error("The image changed before the result could be applied.");
-        window.dispatchEvent(new CustomEvent("kavero:canvas-asset-uploaded", { detail: asset }));
+        setCutoutReview({ sourceUrl: imageUrl, blob: result.blob, objectId, fileName: `background-removed-${safeModelName || "model"}.png` });
       } catch (error) {
+        console.error("Local background removal failed:", error);
         showError(error instanceof Error ? error.message : "Unable to remove the image background.");
       } finally {
         setBackgroundRemovalBusy(false);
@@ -470,6 +464,20 @@ export function CanvasArea() {
     },
     [backgroundRemovalBusy, canvas, replaceImageObjectSource, selectBackgroundRemovalModel, showError],
   );
+
+  const applyReviewedCutout = async (blob: Blob) => {
+    if (!cutoutReview || backgroundRemovalBusy) return;
+    setBackgroundRemovalBusy(true);
+    try {
+      const asset = await uploadCanvasAsset(new File([blob], cutoutReview.fileName, { type: "image/png" }));
+      const replaced = await replaceImageObjectSource(cutoutReview.objectId, asset.public_url);
+      if (!replaced) throw new Error("The image changed before the result could be applied.");
+      window.dispatchEvent(new CustomEvent("kavero:canvas-asset-uploaded", { detail: asset }));
+      setCutoutReview(null);
+    } finally {
+      setBackgroundRemovalBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -553,6 +561,7 @@ export function CanvasArea() {
           layerInfo={getSelectedLayerInfo()}
         />
       ) : null}
+      {cutoutReview ? <CutoutReviewDialog sourceUrl={cutoutReview.sourceUrl} cutout={cutoutReview.blob} busy={backgroundRemovalBusy} onCancel={() => setCutoutReview(null)} onApply={applyReviewedCutout} /> : null}
       <BackgroundRemovalModelDialog
         open={showBackgroundRemovalModels}
         models={backgroundRemovalModels}

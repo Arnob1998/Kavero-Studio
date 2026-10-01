@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getResolvedModelProviderPreferences } from "@/modules/model-providers";
+import { getImageModelCapabilities } from "@/modules/model-providers/image-capabilities";
 import {
   createSupabaseSequenceRepository,
   beginSequenceAttempt,
@@ -8,7 +9,12 @@ import {
   failSequenceAttempt,
   freezeSequenceRunSchema,
   requestSequenceCancellation,
+  keepPreviousSequenceOutputs,
   resumeSequenceExecution,
+  replaceSequenceReference,
+  scheduleSequenceRegeneration,
+  selectSequenceReferences,
+  SEQUENCE_PRODUCT_LIMITS,
   sequenceRunActionSchema,
   succeedSequenceAttempt,
   validateSequenceCapabilities,
@@ -157,6 +163,26 @@ export async function PUT(request: Request) {
     });
   }
 
+  if (["start", "attempt-start", "resume", "regenerate", "replace-reference"].includes(input.action)) {
+    const plan = current.planRevisions.find((revision) => revision.id === current.execution.activePlanRevisionId);
+    if (!plan) return jsonError("The frozen sequence plan is unavailable.", 409);
+    const { data: metadata, error: metadataError } = await supabase.from("user_metadata")
+      .select("preferences").eq("user_id", user.id).maybeSingle<{ preferences: unknown }>();
+    if (metadataError) return jsonError("Unable to verify selected models.", 500);
+    const selected = getResolvedModelProviderPreferences(metadata?.preferences ?? {});
+    if (selected.chatOrchestrationModelAlias !== plan.plannerModelAlias
+      || selected.imageGenerationModelAlias !== plan.imageModelAlias) {
+      return jsonError("Your selected models changed. Review the sequence before continuing.", 409, { code: "model-selection-stale" });
+    }
+    const issues = validateSequenceCapabilities({
+      plannerModelAlias: plan.plannerModelAlias,
+      imageModelAlias: plan.imageModelAlias,
+      plannerImages: plan.references.map((reference) => ({ mimeType: reference.source.mimeType, byteSize: reference.source.byteSize })),
+      executionUsesReferences: plan.references.length > 0,
+    });
+    if (issues.length > 0) return jsonError("The frozen models are no longer eligible for Sequence.", 409, issues);
+  }
+
   const now = new Date().toISOString();
   let next = current;
   if (input.action === "start") {
@@ -182,13 +208,42 @@ export async function PUT(request: Request) {
     if (!frame || buildSequenceFramePrompt(activePlan, frame) !== input.prompt) {
       return jsonError("Generated output prompt does not match the frozen frame.", 409);
     }
+    const imageCapabilities = getImageModelCapabilities(activePlan.imageModelAlias);
+    if (!imageCapabilities?.selectable) return jsonError("The frozen image model is unavailable.", 409);
+    const selected = selectSequenceReferences({
+      frame,
+      frames: activePlan.frames,
+      references: activePlan.references,
+      outputs: current.outputs,
+      maximumReferences: imageCapabilities.maximumReferenceImages,
+    });
+    const expectedReferenceIds = selected.filter((item) => item.kind === "reference").map((item) => item.id);
+    const expectedSourceIds = selected.filter((item) => item.kind === "prior-output").map((item) => item.id);
+    if (JSON.stringify(expectedReferenceIds) !== JSON.stringify(input.referenceIds)
+      || JSON.stringify(expectedSourceIds) !== JSON.stringify(input.sourceOutputIds)) {
+      return jsonError("Generated output references do not match the frozen plan.", 409);
+    }
     const { data: generatedImage, error: imageError } = await supabase
       .from("generated_images")
-      .select("id")
+      .select("id, generation_id")
       .eq("id", input.generatedImageId)
       .eq("user_id", user.id)
-      .maybeSingle<{ id: string }>();
+      .maybeSingle<{ id: string; generation_id: string }>();
     if (imageError || !generatedImage) return jsonError("Persisted generated image was not found.", 409);
+    const { data: generation, error: generationError } = await supabase
+      .from("generation_runs")
+      .select("settings")
+      .eq("id", generatedImage.generation_id)
+      .eq("user_id", user.id)
+      .maybeSingle<{ settings: { sequenceContext?: Record<string, unknown> } | null }>();
+    const context = generation?.settings?.sequenceContext;
+    if (generationError || !context || context.sequenceId !== current.id
+      || context.planRevisionId !== activePlan.id || context.frameId !== frame.id
+      || context.attemptId !== attempt.id || context.framePosition !== frame.position
+      || JSON.stringify(context.referenceIds) !== JSON.stringify(input.referenceIds)
+      || JSON.stringify(context.sourceOutputIds) !== JSON.stringify(input.sourceOutputIds)) {
+      return jsonError("Persisted image does not belong to this sequence attempt.", 409);
+    }
     next = succeedSequenceAttempt({
       record: current,
       attemptId: attempt.id,
@@ -221,6 +276,80 @@ export async function PUT(request: Request) {
     next = requestSequenceCancellation(current, now);
   } else if (input.action === "resume") {
     next = resumeSequenceExecution(current, now);
+  } else if (input.action === "keep-previous") {
+    next = keepPreviousSequenceOutputs(current, now);
+  } else if (input.action === "recover") {
+    const attempt = current.attempts.find((candidate) => candidate.status === "running");
+    if (current.execution.status !== "running" || !attempt?.startedAt) return jsonError("No interrupted attempt needs recovery.", 409);
+    if (Date.now() - new Date(attempt.startedAt).getTime() < 180_000) {
+      return jsonError("The frame may still be generating. Try recovery after three minutes.", 409, { code: "attempt-still-active" });
+    }
+    const plan = current.planRevisions.find((revision) => revision.id === attempt.planRevisionId);
+    const frame = plan?.frames.find((candidate) => candidate.id === attempt.frameId);
+    const capability = plan ? getImageModelCapabilities(plan.imageModelAlias) : null;
+    if (!plan || !frame || !capability?.selectable) return jsonError("Frozen frame is unavailable for recovery.", 409);
+    const selected = selectSequenceReferences({
+      frame, frames: plan.frames, references: plan.references, outputs: current.outputs,
+      maximumReferences: capability.maximumReferenceImages,
+    });
+    const referenceIds = selected.filter((item) => item.kind === "reference").map((item) => item.id);
+    const sourceOutputIds = selected.filter((item) => item.kind === "prior-output").map((item) => item.id);
+    const { data: savedRun, error: runError } = await supabase.from("generation_runs")
+      .select("id, settings")
+      .eq("user_id", user.id)
+      .contains("settings", { sequenceContext: { sequenceId: current.id, attemptId: attempt.id } })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ id: string; settings: { sequenceContext?: Record<string, unknown> } }>();
+    if (runError) return jsonError("Unable to check saved frame history.", 500);
+    const context = savedRun?.settings?.sequenceContext;
+    if (savedRun && (!context || context.frameId !== frame.id || context.planRevisionId !== plan.id
+      || context.framePosition !== frame.position
+      || JSON.stringify(context.referenceIds) !== JSON.stringify(referenceIds)
+      || JSON.stringify(context.sourceOutputIds) !== JSON.stringify(sourceOutputIds))) {
+      return jsonError("Saved frame history does not match the frozen attempt.", 409);
+    }
+    if (savedRun) {
+      const { data: savedImage, error: imageError } = await supabase.from("generated_images")
+        .select("id")
+        .eq("generation_id", savedRun.id)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle<{ id: string }>();
+      if (imageError) return jsonError("Unable to check saved frame image.", 500);
+      if (savedImage) {
+        next = succeedSequenceAttempt({
+          record: current, attemptId: attempt.id, finishedAt: now,
+          output: {
+            id: crypto.randomUUID(), sequenceId: current.id, frameId: frame.id, planRevisionId: plan.id,
+            attemptId: attempt.id, generatedImageId: savedImage.id, modelAlias: plan.imageModelAlias,
+            prompt: buildSequenceFramePrompt(plan, frame), referenceIds, sourceOutputIds,
+            createdAt: now, acceptedAt: null, supersedesOutputId: attempt.replacesOutputId,
+          },
+        });
+      }
+    }
+    if (next === current) {
+      next = failSequenceAttempt({ record: current, attemptId: attempt.id, finishedAt: now, errorCode: "interrupted_attempt", retryable: true });
+    }
+  } else if (input.action === "regenerate") {
+    next = scheduleSequenceRegeneration({ record: current, mode: input.mode, frameId: input.frameId, referenceId: input.referenceId, scheduledAt: now });
+  } else if (input.action === "replace-reference") {
+    const plan = current.planRevisions.find((revision) => revision.id === current.execution.activePlanRevisionId);
+    const capability = plan ? getImageModelCapabilities(plan.imageModelAlias) : null;
+    const match = /^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/.exec(input.dataUrl);
+    if (!plan || !capability?.selectable || !capability.supportedReferenceMimeTypes.includes(input.mimeType)
+      || !match || match[1].toLowerCase() !== input.mimeType
+      || Buffer.from(match[2], "base64").byteLength !== input.byteSize) {
+      return jsonError("Replacement reference is invalid for the frozen model.", 400);
+    }
+    const totalBytes = plan.references.reduce((total, reference) => total + (reference.id === input.referenceId ? input.byteSize : reference.source.byteSize), 0);
+    if (totalBytes > SEQUENCE_PRODUCT_LIMITS.maximumTotalUploadBytes) return jsonError("Sequence references exceed the total byte limit.", 400);
+    next = replaceSequenceReference({
+      record: current, referenceId: input.referenceId, assetId: crypto.randomUUID(), revisionId: crypto.randomUUID(),
+      label: input.label, mimeType: input.mimeType, byteSize: input.byteSize, replacedAt: now,
+    });
   }
 
   if (next.version !== current.version + 1) {

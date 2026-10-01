@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Images, Loader2, PanelLeftOpen, Plus, Send, X } from "lucide-react";
 import { brand } from "@/lib/brand";
+import { imageDownloadName } from "@/lib/image-export";
+import { DownloadImagesButton } from "./download-images-button";
 import { getBrowserImageModelByAlias, getBrowserImageModelByLegacyId } from "@/modules/model-providers/image-browser";
 import type { GeneratedImage, GenerationRun, ReferenceImage } from "../types";
 import { formatBytes } from "../utils/client-helpers";
@@ -58,7 +60,7 @@ function ResultCollage({
 }) {
   if (focusedImage) {
     return (
-      <div className={`grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] px-4 pt-14 sm:px-6 ${reserveComposerSpace ? "pb-28" : "pb-4 sm:pb-6"}`}>
+      <div className={`grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] px-4 pt-14 sm:px-6 ${reserveComposerSpace ? "pb-40" : "pb-4 sm:pb-6"}`}>
         <div className="relative grid min-h-0 place-items-center">
           <button
             className="absolute left-0 top-0 z-10 inline-flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] bg-black/58 px-3 text-[11px] font-bold text-white/70 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white"
@@ -71,13 +73,13 @@ function ResultCollage({
           <a
             className="absolute right-0 top-0 z-10 grid h-9 w-9 place-items-center rounded-lg border border-white/[0.1] bg-black/58 text-white/70 backdrop-blur-xl transition hover:bg-white/[0.08] hover:text-white"
             href={focusedImage.dataUrl}
-            download={`${brand.slug}-${focusedImage.variant}.png`}
+            download={imageDownloadName(`${brand.slug}-${focusedImage.variant}`, focusedImage.mimeType)}
             aria-label="Download focused image"
           >
             <Download size={16} />
           </a>
           <img
-            className="max-h-full max-w-full object-contain shadow-[0_30px_120px_rgb(0_0_0_/_0.72)]"
+            className="absolute inset-0 h-full w-full object-contain"
             src={focusedImage.dataUrl}
             alt={`Generated variation ${focusedImage.variant}`}
           />
@@ -136,7 +138,7 @@ function ResultCollage({
             <a
               className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-lg border border-white/[0.12] bg-black/64 text-white/72 opacity-100 backdrop-blur-xl transition hover:bg-white/[0.1] hover:text-white sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
               href={image.dataUrl}
-              download={`${brand.slug}-${image.variant}.png`}
+              download={imageDownloadName(`${brand.slug}-${image.variant}`, image.mimeType)}
               aria-label={`Download generated image ${image.variant}`}
             >
               <Download size={16} />
@@ -226,6 +228,9 @@ export function GenerationResultsWorkspace({
           {focusedImage ? `Variation ${focusedImage.variant}` : "Generated"}
         </div>
         <div className="absolute right-3 top-3 z-30 flex items-center gap-1 rounded-lg border border-white/[0.08] bg-black/54 p-1 backdrop-blur-xl">
+          {!isGenerating && run && run.images.length > 1 ? (
+            <DownloadImagesButton images={run.images.map((image) => ({ ...image, name: `${brand.slug}-${image.variant}` }))} name={`${brand.slug}-images`} />
+          ) : null}
           <button
             ref={sourceButtonRef}
             className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.06em] text-white/62 transition hover:bg-white/[0.08] hover:text-white"

@@ -31,6 +31,14 @@ const run: GenerationRun = {
 };
 
 describe("GenerationResultsWorkspace", () => {
+  it("uses JPEG download names in both collage and focus and offers a batch ZIP", () => {
+    const jpegRun = { ...run, images: run.images.map((image) => ({ ...image, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,one" })) };
+    render(<GenerationResultsWorkspace run={jpegRun} isGenerating={false} loadingPhrase="" error={null} onStartNewPrompt={vi.fn()} onEditImage={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "Download generated image 1" })).toHaveAttribute("download", "kavero-1.jpg");
+    expect(screen.getByRole("button", { name: "Download all (2)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Focus generated image 1" }));
+    expect(screen.getByRole("link", { name: "Download focused image" })).toHaveAttribute("download", "kavero-1.jpg");
+  });
   it("makes the collage primary and keeps source content collapsed by default", () => {
     render(
       <GenerationResultsWorkspace
