@@ -99,6 +99,17 @@ create table if not exists public.generation_runs (
   constraint generation_runs_reference_images_array check (jsonb_typeof(reference_images) = 'array')
 );
 
+create table if not exists public.sequence_runs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  version integer not null default 1,
+  record jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint sequence_runs_version_positive check (version > 0),
+  constraint sequence_runs_record_object check (jsonb_typeof(record) = 'object')
+);
+
 create table if not exists public.canvas_designs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -595,6 +606,7 @@ alter table public.canvas_assets enable row level security;
 alter table public.canvas_templates enable row level security;
 alter table public.generation_runs enable row level security;
 alter table public.generated_images enable row level security;
+alter table public.sequence_runs enable row level security;
 
 grant usage on schema public to anon, authenticated, service_role;
 
@@ -611,6 +623,7 @@ grant select, insert, update, delete on public.canvas_assets to authenticated, s
 grant select on public.canvas_templates to anon, authenticated, service_role;
 grant select, insert, update, delete on public.generation_runs to authenticated, service_role;
 grant select, insert, update, delete on public.generated_images to authenticated, service_role;
+grant select, insert, update, delete on public.sequence_runs to authenticated, service_role;
 revoke all on vault.decrypted_secrets from anon;
 revoke all on vault.decrypted_secrets from authenticated;
 revoke all on vault.decrypted_secrets from service_role;
@@ -641,6 +654,9 @@ create index if not exists idx_canvas_templates_sort
 
 create index if not exists idx_generation_runs_user_created
   on public.generation_runs (user_id, created_at desc);
+
+create index if not exists idx_sequence_runs_user_updated
+  on public.sequence_runs (user_id, updated_at desc);
 
 create index if not exists idx_generated_images_user_created
   on public.generated_images (user_id, created_at desc);
@@ -855,6 +871,31 @@ create policy "Generation runs are deletable by owner"
   to authenticated
   using ((select auth.uid()) = user_id);
 
+drop policy if exists "Sequence runs are viewable by owner" on public.sequence_runs;
+create policy "Sequence runs are viewable by owner"
+  on public.sequence_runs for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "Sequence runs are insertable by owner" on public.sequence_runs;
+create policy "Sequence runs are insertable by owner"
+  on public.sequence_runs for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Sequence runs are updatable by owner" on public.sequence_runs;
+create policy "Sequence runs are updatable by owner"
+  on public.sequence_runs for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Sequence runs are deletable by owner" on public.sequence_runs;
+create policy "Sequence runs are deletable by owner"
+  on public.sequence_runs for delete
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -888,6 +929,11 @@ create trigger user_drive_connections_set_updated_at
 drop trigger if exists prompt_templates_set_updated_at on public.prompt_templates;
 create trigger prompt_templates_set_updated_at
   before update on public.prompt_templates
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists sequence_runs_set_updated_at on public.sequence_runs;
+create trigger sequence_runs_set_updated_at
+  before update on public.sequence_runs
   for each row execute function public.set_updated_at();
 
 drop trigger if exists canvas_designs_set_updated_at on public.canvas_designs;
@@ -946,30 +992,8 @@ create trigger canvas_assets_delete_storage_object
   after delete on public.canvas_assets
   for each row execute function public.delete_canvas_asset_storage_object();
 
-create or replace function public.enforce_canvas_asset_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  asset_count integer;
-begin
-  select count(*)
-  into asset_count
-  from public.canvas_assets
-  where user_id = new.user_id;
-
-  if asset_count >= 200 then
-    raise exception 'Canvas asset limit reached';
-  end if;
-
-  return new;
-end;
-$$;
-
 drop trigger if exists canvas_assets_limit on public.canvas_assets;
-create trigger canvas_assets_limit
-  before insert on public.canvas_assets
-  for each row execute function public.enforce_canvas_asset_limit();
+drop function if exists public.enforce_canvas_asset_limit();
 
 create or replace function public.shift_canvas_pages_after(
   p_design_id uuid,
@@ -1038,67 +1062,10 @@ revoke all on function public.delete_stale_canvas_assets(interval) from anon;
 revoke all on function public.delete_stale_canvas_assets(interval) from authenticated;
 grant execute on function public.delete_stale_canvas_assets(interval) to service_role;
 
-create or replace function public.delete_inactive_free_canvas_data(p_older_than interval default interval '180 days')
-returns integer
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  deleted_count integer;
-begin
-  delete from public.canvas_assets asset
-  using public.user_metadata metadata
-  where metadata.user_id = asset.user_id
-    and metadata.plan = 'free'
-    and not exists (
-      select 1
-      from public.canvas_designs design
-      where design.user_id = asset.user_id
-        and design.updated_at >= now() - p_older_than
-    )
-    and asset.created_at < now() - p_older_than;
-
-  delete from public.canvas_designs design
-  using public.user_metadata metadata
-  where metadata.user_id = design.user_id
-    and metadata.plan = 'free'
-    and design.updated_at < now() - p_older_than;
-
-  get diagnostics deleted_count = row_count;
-  return deleted_count;
-end;
-$$;
-
-revoke all on function public.delete_inactive_free_canvas_data(interval) from public;
-revoke all on function public.delete_inactive_free_canvas_data(interval) from anon;
-revoke all on function public.delete_inactive_free_canvas_data(interval) from authenticated;
-grant execute on function public.delete_inactive_free_canvas_data(interval) to service_role;
-
-create or replace function public.enforce_prompt_template_limit()
-returns trigger
-language plpgsql
-as $$
-declare
-  template_count integer;
-begin
-  select count(*)
-  into template_count
-  from public.prompt_templates
-  where user_id = new.user_id;
-
-  if template_count >= 3 then
-    raise exception 'Prompt template limit reached';
-  end if;
-
-  return new;
-end;
-$$;
+drop function if exists public.delete_inactive_free_canvas_data(interval);
 
 drop trigger if exists prompt_templates_limit on public.prompt_templates;
-create trigger prompt_templates_limit
-  before insert on public.prompt_templates
-  for each row execute function public.enforce_prompt_template_limit();
+drop function if exists public.enforce_prompt_template_limit();
 
 create or replace function public.upsert_provider_key(
   p_user_id uuid,

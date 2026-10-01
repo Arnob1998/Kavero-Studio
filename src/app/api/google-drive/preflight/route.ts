@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getGoogleDriveAccessTokenForUser } from "@/lib/google-drive";
-import { getGenerationLimit, normalizeUserPlan } from "@/lib/plans";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -14,8 +13,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [{ data: metadata }, { count }, { data: connection }] = await Promise.all([
-    supabase.from("user_metadata").select("plan").eq("user_id", user.id).maybeSingle(),
+  const [{ count }, { data: connection }] = await Promise.all([
     supabase
       .from("generation_runs")
       .select("id", { count: "exact", head: true })
@@ -28,16 +26,14 @@ export async function GET() {
       .maybeSingle(),
   ]);
 
-  const plan = normalizeUserPlan(metadata?.plan);
-  const generationLimit = getGenerationLimit(plan);
+  const generationLimit = null;
   const used = count ?? 0;
-  const quotaFull = generationLimit !== null && used >= generationLimit;
   if (!connection || connection.status === "revoked") {
     return NextResponse.json({
       canSave: false,
       connected: false,
       reconnectRequired: false,
-      quotaFull,
+      quotaFull: false,
       usage: { used, limit: generationLimit },
       warning:
         "Google Drive is not connected. This generation will not be saved to Gallery, so download any images you want to keep.",
@@ -49,7 +45,7 @@ export async function GET() {
       canSave: false,
       connected: true,
       reconnectRequired: true,
-      quotaFull,
+      quotaFull: false,
       usage: { used, limit: generationLimit },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
@@ -63,21 +59,10 @@ export async function GET() {
       canSave: false,
       connected: true,
       reconnectRequired: true,
-      quotaFull,
+      quotaFull: false,
       usage: { used, limit: generationLimit },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
-    });
-  }
-
-  if (quotaFull) {
-    return NextResponse.json({
-      canSave: false,
-      connected: true,
-      reconnectRequired: false,
-      quotaFull: true,
-      usage: { used, limit: generationLimit },
-      warning: `Free plan Gallery storage is full (${used}/${generationLimit} generations). This generation will not be saved unless you free a folder first.`,
     });
   }
 

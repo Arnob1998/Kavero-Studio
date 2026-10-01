@@ -3,7 +3,6 @@ import type { DeploymentProfile } from "@/lib/deployment-profile";
 export type CanvasAccessPolicyStatus = {
   authenticated: boolean;
   deploymentProfile?: DeploymentProfile | string | null;
-  plan?: "free" | "premium";
   drive: {
     connected: boolean;
     reconnectRequired: boolean;
@@ -24,7 +23,7 @@ export function getCanvasAccessPolicyDecision(
   const isLocalFirst = status.deploymentProfile === "local-first";
   const allowed = isLocalFirst
     ? status.authenticated
-    : status.authenticated && status.plan === "premium" && status.drive.connected;
+    : status.authenticated && status.drive.connected;
 
   if (allowed) {
     return {
@@ -43,17 +42,6 @@ export function getCanvasAccessPolicyDecision(
       description: "Canvas projects are attached to your workspace and require an account.",
       actionHref: "/auth/login?next=/canvas",
       actionLabel: "Sign in",
-    };
-  }
-
-  if (status.plan !== "premium") {
-    return {
-      allowed,
-      title: "Canvas is premium",
-      description:
-        "Canvas is a premium workspace feature. Upgrade to unlock design editing, Drive-backed assets, autosave, and export.",
-      actionHref: "/pricing",
-      actionLabel: "View plans",
     };
   }
 

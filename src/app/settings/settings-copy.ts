@@ -12,7 +12,6 @@ export type SettingsCopy = {
     helper: string;
   };
   storageQuickActionLabel: string;
-  subscriptionQuickActionLabel: string;
   storagePageDescription: string;
   storagePanel: {
     title: string;
@@ -40,7 +39,6 @@ export function getSettingsCopy(profile?: string | null): SettingsCopy {
         helper: "Managed storage",
       },
       storageQuickActionLabel: "Review storage",
-      subscriptionQuickActionLabel: "View account details",
       storagePageDescription:
         "Review the managed Kavero storage path used by local-first generation, Gallery, and canvas workflows.",
       storagePanel: {
@@ -63,22 +61,21 @@ export function getSettingsCopy(profile?: string | null): SettingsCopy {
   return {
     deploymentProfile,
     overviewDescription:
-      "Manage your profile, workspace preferences, API access, and subscription.",
+      "Manage your profile, workspace preferences, API access, and connected storage.",
     storageStat: {
       value: "Drive",
-      helper: "Free plan archive",
+      helper: "Connected storage",
     },
     storageQuickActionLabel: "Connect storage",
-    subscriptionQuickActionLabel: "View subscription",
     storagePageDescription:
-      "Connect a scoped Google Drive folder so generated images and history can be saved on the free plan.",
+      "Connect a scoped Google Drive folder so generated images and history can be saved to your storage.",
     storagePanel: {
       title: "Google Drive",
       description:
         "Kavero creates a dedicated folder and only requests file access for Drive files it creates.",
       badge: "Connected",
       details: [],
-      summaryTitle: "Free plan storage",
+      summaryTitle: "Gallery storage",
       summaryDescription: "New generations are saved to Drive and listed in Gallery.",
     },
   };

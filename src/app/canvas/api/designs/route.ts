@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  CANVAS_LIMITS,
   designPayloadSchema,
   getCanvasUser,
   jsonError,
@@ -40,16 +39,6 @@ export async function POST(request: Request) {
 
   const { admin, response } = requireCanvasAdmin();
   if (!admin) return response;
-
-  const { count, error: countError } = await admin
-    .from("canvas_designs")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id);
-
-  if (countError) return jsonError("Unable to check design quota.", 500);
-  if ((count ?? 0) >= CANVAS_LIMITS.designsPerUser) {
-    return jsonError(`Canvas design limit reached (${CANVAS_LIMITS.designsPerUser}).`, 409);
-  }
 
   const canvasJson = normalizeCanvasJson(parsed.data.canvas_json);
   const { data: design, error: designError } = await admin

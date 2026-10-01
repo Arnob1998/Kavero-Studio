@@ -74,8 +74,7 @@ export async function POST(request: Request) {
     .single();
 
   if (error) {
-    const status = error.message.includes("Prompt template limit reached") ? 409 : 500;
-    return NextResponse.json({ error: "Unable to save prompt template." }, { status });
+    return NextResponse.json({ error: "Unable to save prompt template." }, { status: 500 });
   }
 
   return NextResponse.json({ promptTemplate: data });

@@ -20,7 +20,6 @@ interface ClientAppProps {
 type CanvasAccessStatus = {
   authenticated: boolean;
   deploymentProfile?: DeploymentProfile;
-  plan?: "free" | "premium";
   drive: {
     connected: boolean;
     reconnectRequired: boolean;

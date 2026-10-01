@@ -293,7 +293,7 @@ describe("useDesigns", () => {
       if (method === "GET" && path === "/canvas/api/designs") return [] as never;
       if (method === "GET" && path === "/api/templates") return [] as never;
       if (method === "POST" && path === "/canvas/api/designs") {
-        throw new Error("Canvas design limit reached (3)");
+        throw new Error("Unable to create design.");
       }
       throw new Error(`Unexpected API call: ${method} ${path}`);
     });
@@ -305,10 +305,10 @@ describe("useDesigns", () => {
       await result.current.createDesign();
     });
 
-    const feedback = "Canvas limit reached. You can keep up to 3 designs. Delete an old design to create a new one.";
+    const feedback = "Unable to create design.";
     expect(result.current.error).toBe(feedback);
     expect(onError).toHaveBeenCalledWith(feedback);
-    expect(consoleErrorSpy).not.toHaveBeenCalledWith("Failed to create design:", expect.anything());
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to create design:", expect.anything());
   });
 
   it("saves page and design data through the existing paths and marks drafts synced", async () => {

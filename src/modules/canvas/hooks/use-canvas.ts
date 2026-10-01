@@ -1451,6 +1451,32 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
     [findLayerObjectById, getActiveCanvas, refreshLayers, saveHistory],
   );
 
+  const replaceImageObjectSource = useCallback(
+    async (objectId: string, assetUrl: string) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId || !isAllowedCanvasImageUrl(assetUrl)) return false;
+      const target = findLayerObjectById(canvas, objectId);
+      if (!(target instanceof fabric.FabricImage) || isBackgroundImageObject(target)) return false;
+      try {
+        await target.setSrc(assetUrl, { crossOrigin: "anonymous" });
+        target.set({ kaveroAssetSrc: assetUrl, crossOrigin: "anonymous" } as any);
+        target.setCoords();
+        canvas.setActiveObject(target);
+        canvas.requestRenderAll();
+        saveHistory(pageId);
+        setSelectedObject(target);
+        refreshLayers(pageId);
+        refreshSelectedObject((version) => version + 1);
+        return true;
+      } catch (error) {
+        console.error("Failed to replace image source:", error);
+        return false;
+      }
+    },
+    [findLayerObjectById, getActiveCanvas, refreshLayers, saveHistory],
+  );
+
   const cropImageObject = useCallback(
     (objectId: string, crop: ImageCropInput, options?: { outputFit?: "preserve-frame" | "resize-frame-to-crop" }) => {
       const canvas = getActiveCanvas();
@@ -1835,9 +1861,12 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
 
   // ── Export ──────────────────────────────────────────────────────────
 
-  const exportPNG = useCallback(async () => {
-    const canvas = getActiveCanvas();
-    if (!canvas) return;
+  const getPagePNG = useCallback(async (pageId: string) => {
+    const canvas = canvasMapRef.current.get(pageId);
+    if (!canvas) {
+      onErrorRef.current?.("One canvas page is still loading. Try exporting again.");
+      return;
+    }
     const imageSources = canvas
       .getObjects()
       .filter((obj) => obj instanceof fabric.FabricImage)
@@ -1855,7 +1884,6 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
 
     const availability = await Promise.all(imageSources.map(isFetchableCanvasAsset));
     if (availability.some((available) => !available)) {
-      const pageId = activeCanvasIdRef.current;
       if (pageId) isRestoringRef.current.add(pageId);
       let replaced = 0;
       try {
@@ -1892,16 +1920,23 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
       return;
     }
 
-    const link = document.createElement("a");
-    link.download = "design.png";
-    link.href = dataURL;
-    link.click();
-
     if (activeObj) {
       canvas.setActiveObject(activeObj);
       canvas.requestRenderAll();
     }
-  }, [getActiveCanvas]);
+    return dataURL;
+  }, [saveHistory]);
+
+  const exportPNG = useCallback(async () => {
+    const pageId = activeCanvasIdRef.current;
+    if (!pageId) return;
+    const dataURL = await getPagePNG(pageId);
+    if (!dataURL) return;
+    const link = document.createElement("a");
+    link.download = "design.png";
+    link.href = dataURL;
+    link.click();
+  }, [getPagePNG]);
 
   // ── Serialization ───────────────────────────────────────────────────
 
@@ -2651,6 +2686,7 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
     setBackgroundImageFit,
     updateSelectedObject,
     setImageBorderRadius,
+    replaceImageObjectSource,
     cropImageObject,
     resetImageCrop,
     getImageCropInfo,
@@ -2676,6 +2712,7 @@ export function useCanvasState(options: UseCanvasStateOptions = {}) {
     zoomIn,
     zoomOut,
     exportPNG,
+    getPagePNG,
     getCanvasJSON,
     getCanvasJSONForPage,
     getCanvasSceneSnapshot,

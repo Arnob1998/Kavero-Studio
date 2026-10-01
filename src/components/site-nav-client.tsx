@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  CreditCard,
   KeyRound,
   LogOut,
   Settings,
@@ -213,12 +212,6 @@ function UserMenu({
           <Link href="/settings/api-keys">
             <KeyRound size={15} />
             API keys
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link href="/subscription">
-            <CreditCard size={15} />
-            Subscription
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

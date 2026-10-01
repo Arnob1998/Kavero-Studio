@@ -19,9 +19,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/canvas/api", () => ({
   CANVAS_LIMITS: {
-    designsPerUser: 10,
-    pagesPerDesign: 20,
-    driveAssetsPerUser: 50,
     driveAssetBytesPerFile: 10 * 1024 * 1024,
   },
   getCanvasUser: mocks.getCanvasUser,
@@ -99,7 +96,7 @@ function createCanvasAssetsAdmin(options: {
     then: assetQueryResult.then.bind(assetQueryResult),
   };
   const assetLimit = vi.fn(() => assetQuery);
-  const assetOrder = vi.fn(() => ({ limit: assetLimit }));
+  const assetOrder = vi.fn(() => assetQuery);
   const assetEq = vi.fn(() => ({ order: assetOrder, limit: assetLimit }));
   const select = vi.fn((_columns?: string, options?: { count?: string; head?: boolean }) => {
     if (options?.count === "exact" && options.head === true) {
@@ -323,6 +320,21 @@ describe("canvas assets API", () => {
           sizeBytes: 11,
         }),
       }),
+    );
+  });
+
+  it("uploads when existing asset usage is above the former product cap", async () => {
+    const admin = setDefaultMocks(
+      createCanvasAssetsAdmin({ countResult: { count: 500, error: null } }),
+    );
+
+    const response = await POST(imageRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.uploadGoogleDriveFile).toHaveBeenCalledTimes(1);
+    expect(admin.__mocks.select).not.toHaveBeenCalledWith(
+      "id",
+      expect.objectContaining({ count: "exact", head: true }),
     );
   });
 
@@ -556,6 +568,7 @@ describe("canvas assets API", () => {
     expect(admin.__mocks.select).toHaveBeenCalledWith(
       "id, original_name, content_type, size_bytes, public_url, drive_file_id, drive_file_name, drive_web_view_link, drive_status, storage_ref, storage_kind, storage_status, storage_metadata, storage_external_id, storage_external_url, last_used_at, created_at",
     );
+    expect(admin.__mocks.assetLimit).not.toHaveBeenCalledWith(200);
   });
 
   it("returns the current missing-token response without uploading", async () => {

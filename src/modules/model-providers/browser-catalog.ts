@@ -1,7 +1,7 @@
 import { modelCatalog } from "./catalog";
 import { getProviderKeyIdForModelProvider } from "./provider-key-mapping";
 import type { SupportedProviderId } from "@/lib/provider-key-registry";
-import type { ModelCatalogEntry, ModelCapabilitySlot, ModelProviderId } from "./types";
+import type { ModelCatalogEntry, ModelCapabilitySlot, ModelProviderId, SequencePlannerCapabilities } from "./types";
 import { AZURE_OPENAI_GPT_IMAGE_2_MODEL_ALIAS } from "./image-capabilities";
 import type { ChatControlCapabilities } from "./chat-request-policy";
 
@@ -43,6 +43,7 @@ export type BrowserModelCatalogEntry = {
     supportsImageOutput: boolean;
     supportsStreaming: boolean;
     requirements: readonly string[];
+    sequencePlanner: SequencePlannerCapabilities;
     chatControls?: ChatControlCapabilities;
   };
 };
@@ -67,6 +68,7 @@ export function toBrowserModelCatalogEntry(entry: ModelCatalogEntry): BrowserMod
       supportsImageOutput: entry.capabilities.supportsImageOutput,
       supportsStreaming: entry.capabilities.supportsStreaming,
       requirements: entry.capabilities.requirements,
+      sequencePlanner: entry.capabilities.sequencePlanner,
     },
   };
 }

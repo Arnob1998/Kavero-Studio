@@ -31,7 +31,7 @@ async function ensureCloudStorageReady({
     if (!preflight || preflight.canSave || !preflight.warning) return true;
 
     return openGateDialog({
-      title: preflight.quotaFull ? "Gallery storage full" : "Drive save unavailable",
+      title: "Drive save unavailable",
       description: `${preflight.warning} You can still generate, but download images you want to keep.`,
       confirmLabel: "Generate anyway",
       cancelLabel: preflight.reconnectRequired ? "Reconnect first" : "Cancel",

@@ -4,7 +4,6 @@ import {
   isLocalFirstDeploymentProfile,
   type DeploymentProfile,
 } from "@/lib/deployment-profile";
-import { getGenerationLimit, normalizeUserPlan } from "@/lib/plans";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { resolveRuntimeManagedStorageBackend } from "@/modules/storage/managed/runtime";
@@ -40,7 +39,6 @@ type WorkspaceStatusResponseInput = {
   deploymentProfile: DeploymentProfile;
   authenticated: boolean;
   hasGeminiKey: boolean;
-  plan?: ReturnType<typeof normalizeUserPlan>;
   drive: WorkspaceDriveStatus;
   managedStorageStatus?: Pick<StorageStatus, "ready" | "warning"> | null;
 };
@@ -69,7 +67,7 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
-  const [{ data: providerKey }, { data: metadata }, { count }, { data: driveConnection }] =
+  const [{ data: providerKey }, { count }, { data: driveConnection }] =
     await Promise.all([
       admin
         .from("user_provider_keys")
@@ -78,7 +76,6 @@ export async function GET() {
         .eq("provider_id", "google-gemini")
         .eq("status", "active")
         .maybeSingle(),
-      supabase.from("user_metadata").select("plan").eq("user_id", user.id).maybeSingle(),
       supabase
         .from("generation_runs")
         .select("id", { count: "exact", head: true })
@@ -91,14 +88,13 @@ export async function GET() {
         .maybeSingle(),
     ]);
 
-  const plan = normalizeUserPlan(metadata?.plan);
-  const limit = getGenerationLimit(plan);
+  const limit = null;
   const used = count ?? 0;
   const hasGeminiKey = Boolean(providerKey);
   const drive: WorkspaceDriveStatus = {
     connected: driveConnection?.status === "active",
     reconnectRequired: driveConnection?.status === "reconnect_required",
-    quotaFull: limit !== null && used >= limit,
+    quotaFull: false,
     usage: { used, limit },
   };
 
@@ -111,7 +107,6 @@ export async function GET() {
       deploymentProfile,
       authenticated: true,
       hasGeminiKey,
-      plan,
       drive,
       managedStorageStatus,
     }),
@@ -134,7 +129,6 @@ export function buildWorkspaceStatusResponse(input: WorkspaceStatusResponseInput
   return {
     authenticated: input.authenticated,
     hasGeminiKey: input.hasGeminiKey,
-    ...(input.plan ? { plan: input.plan } : {}),
     drive: input.drive,
     deploymentProfile: input.deploymentProfile,
     workspace: {

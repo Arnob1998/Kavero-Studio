@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { ComponentType, ReactNode } from "react";
 import {
-  CreditCard,
   HardDrive,
   KeyRound,
   LayoutDashboard,
@@ -16,7 +15,6 @@ const settingsNav = [
   { label: "Overview", href: "/settings", icon: LayoutDashboard },
   { label: "API Keys", href: "/settings/api-keys", icon: KeyRound },
   { label: "Storage", href: "/settings/storage", icon: HardDrive },
-  { label: "Subscription", href: "/subscription", icon: CreditCard },
 ];
 
 export function SettingsShell({

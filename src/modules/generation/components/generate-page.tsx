@@ -85,9 +85,30 @@ import {
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "../utils/prompt-refiner-policy";
 import { ModelQuickPicker } from "./model-quick-picker";
+import { GenerationResultsWorkspace } from "./generation-results-workspace";
+import { SequencePlannerPanel, SequenceToggle, type SequenceExecutionViewState, type SequenceExecutionVisual, type SequencePlannerViewState } from "./sequence-planner-panel";
+import { SequenceImportDialog } from "./sequence-import-dialog";
+import { selectedImportTotal } from "../sequence/import-policy";
+import { buildSequenceFramePrompt, clearRecentSequenceId, getRecentSequenceId, loadSequenceLocalSources, saveSequenceLocalSources, SEQUENCE_PRODUCT_LIMITS, selectSequenceReferences, shouldSuggestSequence, type SequencePersistenceRecord, type SequencePlanDraft, type SequencePlannerReferenceInput, type SequenceReferenceRole } from "../sequence";
 
 // TEMP: Hide the prompt chatbox/hover only on the generation workspace. Set this to false to restore it there.
 const hidePromptComposerDuringGeneration = true;
+
+function createReferenceClientId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `reference-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getSequenceReferenceId(image: ReferenceImage, index: number) {
+  return image.clientId ?? `sequence-reference-${index + 1}`;
+}
+
+class SequenceFrameError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message);
+  }
+}
 
 const llmProviderReferenceImages: PresetReferenceImage[] = [
   {
@@ -917,6 +938,7 @@ export function GeneratePage() {
   const [promptBeforeRefineReplacement, setPromptBeforeRefineReplacement] = useState<string | null>(null);
   const [promptRefiner, setPromptRefiner] = useState<PromptRefinerState>({ status: "idle", answers: [] });
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
+  const [sequenceImportOpen, setSequenceImportOpen] = useState(false);
   const [isDraggingReference, setIsDraggingReference] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -924,7 +946,15 @@ export function GeneratePage() {
   const [generationHistory, setGenerationHistory] = useState<GenerationRun[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generatedPanelMode, setGeneratedPanelMode] = useState<GeneratedPanelMode>("split");
+  const [sequenceEnabled, setSequenceEnabled] = useState(false);
+  const [sequencePlannerState, setSequencePlannerState] = useState<SequencePlannerViewState>({ status: "idle" });
+  const [sequencePlannerCalls, setSequencePlannerCalls] = useState(0);
+  const [sequenceExecution, setSequenceExecution] = useState<SequenceExecutionViewState>({ status: "idle" });
+  const sequenceCancelRequestedRef = useRef(false);
+  const sequenceRestoreStartedRef = useRef(false);
+  const sequencePlanRevisionRef = useRef(0);
+  const [sequenceReferenceRoles, setSequenceReferenceRoles] = useState<Record<string, SequenceReferenceRole>>({});
+  const [requestedFocusedImageId, setRequestedFocusedImageId] = useState<string | null>(null);
   const [isComposerRaised, setIsComposerRaised] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [promptSearch, setPromptSearch] = useState("");
@@ -947,6 +977,7 @@ export function GeneratePage() {
   const [gateDialog, setGateDialog] = useState<GateDialog | null>(null);
   const gateDialogResolverRef = useRef<((value: boolean) => void) | null>(null);
   const referenceFileInputRef = useRef<HTMLInputElement>(null);
+  const sequenceImportButtonRef = useRef<HTMLButtonElement>(null);
 
   const activeImageModels = modelProvider.activeModels("imageGeneration")
     .map((model) => getBrowserImageModelByAlias(model.modelAlias))
@@ -985,13 +1016,72 @@ export function GeneratePage() {
   const generationActive = Boolean(activeRun || isGenerating || generationError);
   const activeModel = settings.model as ModelId;
   const activeModelMetadata = getBrowserImageModelByLegacyId(activeModel);
-  const referenceImageLimit = activeModelMetadata?.maximumReferenceImages ?? 0;
+  const modelReferenceImageLimit = activeModelMetadata?.maximumReferenceImages ?? 0;
+  const referenceImageLimit = sequenceEnabled
+    ? Math.min(modelReferenceImageLimit, 8)
+    : modelReferenceImageLimit;
   const supportsReferenceImages = activeModelMetadata?.supportsReferenceEditing ?? false;
   const hasReferencePanel = referenceImages.length > 0 || Boolean(uploadMessage);
   const hasPromptRefinerPanel = promptRefiner.status !== "idle";
   const hasComposerTopPanel = hasReferencePanel || hasPromptRefinerPanel;
   const composerHasDraft = promptText.trim().length > 0 || referenceImages.length > 0;
   const isPromptComposerCollapsed = generationActive && !isComposerRaised && !composerHasDraft;
+  const activeIterationRootId = activeRun?.iterationRootId ?? activeRun?.id ?? null;
+  const activeIterationRuns = activeIterationRootId
+    ? generationHistory
+        .filter((run) => (run.iterationRootId ?? run.id) === activeIterationRootId)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    : [];
+  const selectedChatModel = modelProvider.settings?.catalog.find((model) =>
+    model.modelAlias === modelProvider.settings?.selected.chatOrchestrationModelAlias,
+  );
+  const sequencePlannerEligible = Boolean(
+    selectedChatModel?.availability.active && selectedChatModel.capabilities.sequencePlanner.eligible,
+  );
+  const sequenceReferences: SequencePlannerReferenceInput[] = referenceImages.map((image, index) => {
+    const id = getSequenceReferenceId(image, index);
+    return {
+      id,
+      label: image.name,
+      role: sequenceReferenceRoles[id] ?? "frame-specific",
+      dataUrl: image.dataUrl,
+      mimeType: image.mimeType,
+      byteSize: image.size,
+    };
+  });
+  const showSequenceSuggestion = !sequenceEnabled && shouldSuggestSequence(promptText);
+
+  function invalidateSequenceApproval() {
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    setSequencePlannerState((current) => {
+      if (current.status !== "review") return current;
+      return { ...current, approved: false, revision: nextSequencePlanRevision() };
+    });
+  }
+
+  function nextSequencePlanRevision() {
+    sequencePlanRevisionRef.current += 1;
+    return sequencePlanRevisionRef.current;
+  }
+
+  function discardSequencePlan() {
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    setSequencePlannerState((current) => current.status === "review" || current.status === "error" ? { status: "idle" } : current);
+  }
+
+  function setSequenceMode(enabled: boolean) {
+    setSequenceImportOpen(false);
+    setSequenceEnabled(enabled);
+    setSequencePlannerState({ status: "idle" });
+    setSequencePlannerCalls(0);
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    sequencePlanRevisionRef.current = 0;
+    setGenerationError(null);
+    if (!enabled) setSequenceReferenceRoles({});
+  }
 
   async function loadWorkspaceStatus() {
     try {
@@ -1052,6 +1142,7 @@ export function GeneratePage() {
 
   const handlePromptTextChange = (value: string) => {
     setPromptText(value);
+    discardSequencePlan();
     setPromptBeforeRefineReplacement(null);
     if (generationActive && value.trim()) {
       setIsComposerRaised(true);
@@ -1076,9 +1167,64 @@ export function GeneratePage() {
   }, []);
 
   useEffect(() => {
+    if (sequenceRestoreStartedRef.current || !modelProvider.settings || !workspaceStatus?.authenticated) return;
+    const selectedImage = getBrowserImageModelByAlias(modelProvider.settings.selected.imageGenerationModelAlias);
+    if (selectedImage && settings.model !== selectedImage.legacyModelId) return;
+    sequenceRestoreStartedRef.current = true;
+    const sequenceId = getRecentSequenceId();
+    if (!sequenceId) return;
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/sequence/runs?id=${encodeURIComponent(sequenceId)}`);
+        if (!response.ok) { if (response.status === 404) clearRecentSequenceId(sequenceId); return; }
+        const payload = await response.json() as { sequence?: SequencePersistenceRecord };
+        const record = payload.sequence;
+        const plan = record?.planRevisions.find((revision) => revision.id === record.execution.activePlanRevisionId);
+        if (!record || !plan || !active) return;
+        const sources = await loadSequenceLocalSources(record.id, plan).catch(() => null);
+        if (!active) return;
+        const draft: SequencePlanDraft = {
+          title: plan.title, sequenceType: plan.sequenceType, countRationale: plan.countRationale,
+          sharedRules: plan.sharedRules, warnings: [...plan.warnings], assumptions: [...plan.assumptions],
+          frames: plan.frames.map((frame) => ({
+            id: frame.id, purpose: frame.purpose, prompt: frame.prompt,
+            referenceIds: [...frame.referenceIds], dependencies: frame.dependencies.map((dependency) => dependency.frameId),
+          })),
+        };
+        const visuals: Record<string, SequenceExecutionVisual> = {};
+        for (const frame of plan.frames) {
+          const output = record.outputs.find((candidate) => candidate.id === frame.acceptedOutputId);
+          if (output) visuals[frame.id] = {
+            dataUrl: `/api/gallery/images/${encodeURIComponent(output.generatedImageId)}/content`,
+            mimeType: "image/png", generatedImageId: output.generatedImageId,
+          };
+        }
+        setSequenceEnabled(true);
+        setPromptText(plan.goal);
+        setSequencePlannerCalls(record.execution.plannerCallsUsed);
+        sequencePlanRevisionRef.current = Math.max(sequencePlanRevisionRef.current, plan.revision);
+        setSequencePlannerState({ status: "review", plan: draft, approved: true, revision: plan.revision });
+        if (sources) {
+          setReferenceImages(sources.map((reference) => ({ clientId: reference.id, dataUrl: reference.dataUrl, mimeType: reference.mimeType, name: reference.label, size: reference.byteSize })));
+          setSequenceReferenceRoles(Object.fromEntries(sources.map((reference) => [reference.id, reference.role])));
+        }
+        const status = record.execution.status === "complete" ? "complete"
+          : record.execution.status === "cancelled" ? "cancelled"
+          : record.execution.status === "running" ? "error" : "partial";
+        setSequenceExecution({ status, record, visuals, message: sources || plan.references.length === 0
+          ? status === "error" ? "This run was interrupted during a frame. Its progress is saved, but the in-flight attempt needs reconciliation before continuing." : "Restored the saved sequence."
+          : "Original references are unavailable in this browser. Reattach them before continuing." });
+      } catch { /* A missing local cache cannot start provider traffic. */ }
+    })();
+    return () => { active = false; };
+  }, [modelProvider.settings, workspaceStatus?.authenticated, settings.model]);
+
+  useEffect(() => {
     const alias = modelProvider.settings?.selected?.imageGenerationModelAlias;
     const selected = alias ? getBrowserImageModelByAlias(alias) : null;
     if (!selected || selected.legacyModelId === settings.model) return;
+    discardSequencePlan();
     setSettings((current) => {
       const normalized = normalizeBrowserImageUiSettings({
         model: current.model,
@@ -1092,6 +1238,13 @@ export function GeneratePage() {
       return { ...current, model: normalized.model, count: String(normalized.count), aspect: normalized.aspectRatio, quality: normalized.imageSize, thinking: normalized.reasoning, providerQuality: normalized.quality ?? "auto", background: normalized.background ?? "auto" };
     });
   }, [modelProvider.settings?.selected?.imageGenerationModelAlias, settings.model]);
+
+  useEffect(() => {
+    discardSequencePlan();
+  }, [
+    modelProvider.settings?.selected?.chatOrchestrationModelAlias,
+    modelProvider.settings?.selected?.imageGenerationModelAlias,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1199,6 +1352,7 @@ export function GeneratePage() {
   const resolvePresetReferenceImage = async (image: PresetReferenceImage): Promise<ReferenceImage> => {
     if (image.dataUrl) {
       return {
+        clientId: createReferenceClientId(),
         dataUrl: image.dataUrl,
         mimeType: image.mimeType,
         name: image.name,
@@ -1217,6 +1371,7 @@ export function GeneratePage() {
 
     const blob = await response.blob();
     return {
+      clientId: createReferenceClientId(),
       dataUrl: await readFileAsDataUrl(blob),
       mimeType: image.mimeType,
       name: image.name,
@@ -1225,6 +1380,7 @@ export function GeneratePage() {
   };
 
   const usePrompt = async (preset: PromptPreset) => {
+    discardSequencePlan();
     const presetPrompt = preset.prompt.trim();
     setPromptText((current) => {
       const currentPrompt = current.trim();
@@ -1362,6 +1518,21 @@ export function GeneratePage() {
   };
 
   const removeReferenceImage = (index: number) => {
+    const removedId = sequenceReferences[index]?.id;
+    setSequencePlannerState((current) => current.status === "review"
+      ? {
+          ...current,
+          approved: false,
+          revision: nextSequencePlanRevision(),
+          plan: {
+            ...current.plan,
+            frames: current.plan.frames.map((frame) => ({
+              ...frame,
+              referenceIds: removedId ? frame.referenceIds.filter((id) => id !== removedId) : frame.referenceIds,
+            })),
+          },
+        }
+      : current);
     setReferenceImages((current) => {
       const next = current.filter((_, itemIndex) => itemIndex !== index);
       clearUploadFeedbackIfEmpty(next.length);
@@ -1370,6 +1541,9 @@ export function GeneratePage() {
   };
 
   const clearReferenceImages = () => {
+    setSequencePlannerState((current) => current.status === "review"
+      ? { ...current, approved: false, revision: nextSequencePlanRevision(), plan: { ...current.plan, frames: current.plan.frames.map((frame) => ({ ...frame, referenceIds: [] })) } }
+      : current);
     setReferenceImages([]);
     setUploadStatus("idle");
     setUploadMessage("");
@@ -1395,6 +1569,7 @@ export function GeneratePage() {
     const skippedCount = imageFiles.length - acceptedFiles.length;
     const images = await Promise.all(
       acceptedFiles.map(async (file) => ({
+        clientId: createReferenceClientId(),
         dataUrl: await readFileAsDataUrl(file),
         mimeType: file.type as ReferenceImage["mimeType"],
         name: file.name,
@@ -1447,6 +1622,7 @@ export function GeneratePage() {
     try {
       const { images: nextImages, skippedCount } = await convertFilesToReferenceImages(files, remainingSlots);
 
+      invalidateSequenceApproval();
       setReferenceImages((current) => [...current, ...nextImages]);
       setGenerationError(null);
       setUploadStatus("success");
@@ -1459,6 +1635,21 @@ export function GeneratePage() {
       setUploadStatus("error");
       setUploadMessage(error instanceof Error ? error.message : "Failed to upload image.");
     }
+  };
+
+  const addImportedSequenceImages = (images: ReferenceImage[]) => {
+    if (!sequenceEnabled || !supportsReferenceImages || sequenceExecution.status !== "idle" || images.length > referenceImageLimit - referenceImages.length) {
+      setUploadStatus("error");
+      setUploadMessage("Sequence reference capacity changed. Review the import again.");
+      return false;
+    }
+    try { selectedImportTotal(referenceImages.reduce((sum, image) => sum + image.size, 0), images.map((image) => image.size)); }
+    catch (error) { setUploadStatus("error"); setUploadMessage(error instanceof Error ? error.message : "Import exceeds reference limits."); return false; }
+    invalidateSequenceApproval();
+    setReferenceImages((current) => [...current, ...images]);
+    setUploadStatus("success");
+    setUploadMessage(`Imported ${images.length} ordered sequence reference${images.length === 1 ? "" : "s"}.`);
+    return true;
   };
 
   const handleReferenceDragEnter = (event: DragEvent<HTMLFormElement>) => {
@@ -1597,12 +1788,14 @@ export function GeneratePage() {
 
   const replacePromptWithRefinement = () => {
     if (promptRefiner.status !== "refined") return;
+    discardSequencePlan();
     setPromptBeforeRefineReplacement(promptRefiner.originalPrompt);
     setPromptText(promptRefiner.refinedPrompt);
   };
 
   const undoPromptRefinementReplacement = () => {
     if (promptBeforeRefineReplacement === null) return;
+    discardSequencePlan();
     setPromptText(promptBeforeRefineReplacement);
     setPromptBeforeRefineReplacement(null);
   };
@@ -1649,9 +1842,9 @@ export function GeneratePage() {
     setUploadMessage("");
     setPreviewReference(null);
     setActiveRun(draftRun);
+    setRequestedFocusedImageId(null);
     setGenerationError(null);
     setSettingsOpen(false);
-    setGeneratedPanelMode("split");
     setIsComposerRaised(false);
     setIsGenerating(true);
 
@@ -1671,6 +1864,7 @@ export function GeneratePage() {
           background: settings.background,
           schema: "none",
           referenceImages: submittedReferenceImages,
+          clientRunId: runId,
         }),
       });
 
@@ -1726,6 +1920,530 @@ export function GeneratePage() {
     if (!preflightResponse.ok) return null;
     return (await preflightResponse.json()) as DrivePreflightResponse;
   }
+
+  const startNewPrompt = () => {
+    setActiveRun(null);
+    setRequestedFocusedImageId(null);
+    setGenerationError(null);
+    setIsComposerRaised(true);
+  };
+
+  const requestSequencePlan = async (value = promptText) => {
+    const goal = value.trim();
+    if (!sequenceEnabled || sequencePlannerState.status === "loading") return;
+    if (!goal) {
+      setSequencePlannerState({ status: "error", message: "Describe the sequence goal before planning." });
+      return;
+    }
+    if (!sequencePlannerEligible) {
+      setSequencePlannerState({ status: "error", message: "Choose an active sequence-eligible chat model in Settings." });
+      return;
+    }
+    if (sequencePlannerCalls >= SEQUENCE_PRODUCT_LIMITS.maximumPlannerCalls) {
+      setSequencePlannerState({ status: "error", message: "This draft has reached its planner-call limit. Turn Sequence off and on to start a new draft." });
+      return;
+    }
+    const selectedImageAlias = modelProvider.settings?.selected.imageGenerationModelAlias;
+    if (!selectedImageAlias) {
+      setSequencePlannerState({ status: "error", message: "Choose an active image model before planning." });
+      return;
+    }
+    const status = await loadWorkspaceStatus();
+    if (!(await requireSignedIn(status))) return;
+
+    const plannerCallNumber = sequencePlannerCalls + 1;
+    setSequencePlannerCalls(plannerCallNumber);
+    setSequencePlannerState({ status: "loading" });
+    try {
+      const response = await fetch("/api/sequence/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal,
+          imageModelAlias: selectedImageAlias,
+          plannerCallNumber,
+          references: sequenceReferences,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { plan?: SequencePlanDraft; error?: string } | null;
+      if (response.status === 401) {
+        await requireSignedIn();
+        throw new Error("Sign in to plan a sequence.");
+      }
+      if (shouldOpenPromptRefinerGeminiKeyGate(response.status, payload?.error)) {
+        await requireGeminiKey();
+        throw new Error("Add your Gemini API key before planning a sequence.");
+      }
+      if (!response.ok || !payload?.plan) throw new Error(payload?.error ?? "Sequence planning failed.");
+      const revision = nextSequencePlanRevision();
+      setSequencePlannerState({ status: "review", plan: payload.plan, approved: false, revision });
+    } catch (error) {
+      setSequencePlannerState({ status: "error", message: error instanceof Error ? error.message : "Sequence planning failed." });
+    }
+  };
+
+  const handleSequencePlanChange = (plan: SequencePlanDraft) => {
+    setSequenceExecution({ status: "idle" });
+    sequenceCancelRequestedRef.current = false;
+    const revision = nextSequencePlanRevision();
+    setSequencePlannerState({ status: "review", plan, approved: false, revision });
+  };
+
+  const moveSequenceReference = (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= referenceImages.length) return;
+    invalidateSequenceApproval();
+    setReferenceImages((current) => {
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const changeSequenceReferenceRole = (id: string, role: SequenceReferenceRole) => {
+    invalidateSequenceApproval();
+    setSequenceReferenceRoles((current) => ({ ...current, [id]: role }));
+  };
+
+  const removeSequenceReference = (id: string) => {
+    const index = sequenceReferences.findIndex((reference) => reference.id === id);
+    if (index >= 0) removeReferenceImage(index);
+  };
+
+  const checkpointSequence = async (record: SequencePersistenceRecord, action: Record<string, unknown>) => {
+    const response = await fetch("/api/sequence/runs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sequenceId: record.id,
+        expectedVersion: record.version,
+        ...action,
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as {
+      sequence?: SequencePersistenceRecord;
+      error?: string;
+      details?: { code?: string; currentVersion?: number };
+    } | null;
+    if (!response.ok || !payload?.sequence) {
+      throw new SequenceFrameError(payload?.error ?? "Unable to save sequence progress.", response.status >= 500);
+    }
+    return payload.sequence;
+  };
+
+  const runSequence = async (
+    initialRecord: SequencePersistenceRecord,
+    initialVisuals: Record<string, SequenceExecutionVisual>,
+    sourceReferences: readonly SequencePlannerReferenceInput[] = sequenceReferences,
+  ) => {
+    let record = initialRecord;
+    let visuals = { ...initialVisuals };
+    if (record.execution.status === "awaiting-approval") {
+      record = await checkpointSequence(record, { action: "start" });
+    }
+
+    while (record.execution.status === "running") {
+      if (sequenceCancelRequestedRef.current) {
+        record = await checkpointSequence(record, { action: "cancel" });
+        setSequenceExecution({ status: "cancelled", record, visuals, message: "Execution stopped before the next frame." });
+        return;
+      }
+
+      const plan = record.planRevisions.find((candidate) => candidate.id === record.execution.activePlanRevisionId);
+      const frame = plan?.frames.find((candidate) => candidate.id === record.execution.nextFrameId);
+      if (!plan || !frame) {
+        setSequenceExecution({ status: "error", record, visuals, message: "The frozen sequence has no executable next frame." });
+        return;
+      }
+
+      const selectedReferences = selectSequenceReferences({
+        frame,
+        frames: plan.frames,
+        references: plan.references,
+        outputs: record.outputs,
+        maximumReferences: getBrowserImageModelByAlias(plan.imageModelAlias)?.maximumReferenceImages ?? 0,
+      });
+      const attemptId = crypto.randomUUID();
+      let attemptStarted = false;
+
+      try {
+        const frameReferences = selectedReferences.map((selected) => {
+          if (selected.kind === "reference") {
+            const reference = sourceReferences.find((candidate) => candidate.id === selected.id);
+            if (!reference) throw new SequenceFrameError("An approved reference is no longer available in this browser session.", false);
+            return { id: reference.id, dataUrl: reference.dataUrl, mimeType: reference.mimeType, name: reference.label };
+          }
+          const output = record.outputs.find((candidate) => candidate.id === selected.id);
+          const visual = output ? visuals[output.frameId] : null;
+          if (!output || !visual) throw new SequenceFrameError("A continuity frame is no longer available for reference.", false);
+          return { id: output.id, dataUrl: visual.dataUrl, mimeType: visual.mimeType, name: `Accepted frame ${output.frameId}` };
+        });
+        for (const reference of frameReferences) {
+          if (!reference.dataUrl.startsWith("data:")) {
+            const imageResponse = await fetch(reference.dataUrl);
+            if (!imageResponse.ok) throw new SequenceFrameError("A saved continuity frame could not be loaded from Gallery storage.", false);
+            const blob = await imageResponse.blob();
+            if (!isSupportedImageMimeType(blob.type) || blob.size === 0 || blob.size > SEQUENCE_PRODUCT_LIMITS.maximumUploadBytes) {
+              throw new SequenceFrameError("A saved continuity frame is not a supported reference image within the 10 MiB limit.", false);
+            }
+            reference.dataUrl = await readFileAsDataUrl(blob);
+            reference.mimeType = blob.type;
+          }
+        }
+        const sourceOutputIds = selectedReferences.filter((selected) => selected.kind === "prior-output").map((selected) => selected.id);
+        const prompt = buildSequenceFramePrompt(plan, frame);
+        record = await checkpointSequence(record, { action: "attempt-start", frameId: frame.id, attemptId, replacesOutputId: frame.acceptedOutputId });
+        attemptStarted = true;
+        setSequenceExecution({ status: "running", record, visuals, message: `Generating frame ${frame.position} of ${plan.frames.length}…` });
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            modelAlias: plan.imageModelAlias,
+            model: settings.model,
+            count: 1,
+            thinking: settings.thinking,
+            aspectRatio: settings.aspect,
+            imageSize: settings.quality,
+            quality: settings.providerQuality,
+            background: settings.background,
+            schema: "none",
+            referenceImages: frameReferences.map(({ dataUrl, mimeType, name }) => ({ dataUrl, mimeType, name })),
+            clientRunId: `${record.id}-${frame.id}-${attemptId}`,
+            sequenceContext: {
+              sequenceId: record.id,
+              planRevisionId: plan.id,
+              frameId: frame.id,
+              framePosition: frame.position,
+              attemptId,
+              referenceIds: selectedReferences.filter((selected) => selected.kind === "reference").map((selected) => selected.id),
+              sourceOutputIds,
+            },
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as (Partial<GenerateApiResponse> & GenerateApiError) | null;
+        if (!response.ok) {
+          const retryable = response.status === 429 || response.status === 502 || response.status === 503;
+          throw new SequenceFrameError(payload?.error ?? `Frame ${frame.position} generation failed.`, retryable);
+        }
+        const image = payload?.images?.[0];
+        const generatedImageId = payload?.persistence?.generatedImageIds?.[0];
+        if (!image || !generatedImageId || !payload?.persistence?.generationId) {
+          throw new SequenceFrameError("The frame was generated but was not durably saved, so execution stopped.", true);
+        }
+        record = await checkpointSequence(record, {
+          action: "attempt-success",
+          attemptId,
+          generatedImageId,
+          modelAlias: plan.imageModelAlias,
+          prompt,
+          referenceIds: selectedReferences.filter((selected) => selected.kind === "reference").map((selected) => selected.id),
+          sourceOutputIds,
+        });
+        visuals = {
+          ...visuals,
+          [frame.id]: { dataUrl: image.dataUrl, mimeType: image.mimeType, generatedImageId },
+        };
+        const frameRun: GenerationRun = {
+          id: payload.persistence.generationId,
+          prompt,
+          model: payload.model ?? plan.imageModelAlias,
+          modelLabel: payload.modelLabel ?? activeModelOption.label,
+          kind: "image",
+          images: [image],
+          text: payload.text ?? "",
+          referenceImages: frameReferences.map(({ dataUrl, mimeType, name }) => ({ dataUrl, mimeType: mimeType as ReferenceImage["mimeType"], name, size: 0 })),
+          createdAt: new Date().toISOString(),
+          settings: { ...settings },
+          warnings: payload.warnings ?? [],
+        };
+        setGenerationHistory((current) => [frameRun, ...current.filter((item) => item.id !== frameRun.id)].slice(0, 10));
+        setSequenceExecution({
+          status: record.execution.status === "complete" ? "complete" : "running",
+          record,
+          visuals,
+          message: record.execution.status === "complete" ? "Sequence complete. Every frame was saved independently." : `Saved frame ${frame.position}.`,
+        });
+      } catch (error) {
+        const failure = error instanceof SequenceFrameError ? error : new SequenceFrameError("Sequence frame generation failed.", true);
+        if (!attemptStarted) {
+          try {
+            record = await checkpointSequence(record, { action: "cancel" });
+            setSequenceExecution({ status: "cancelled", record, visuals, message: failure.message });
+          } catch {
+            setSequenceExecution({ status: "error", record, visuals, message: failure.message });
+          }
+          return;
+        }
+        try {
+          record = await checkpointSequence(record, {
+            action: "attempt-failure",
+            attemptId,
+            errorCode: failure.retryable ? "provider_error" : "invalid_reference_state",
+            retryable: failure.retryable,
+          });
+        } catch (checkpointError) {
+          setSequenceExecution({ status: "error", record, visuals, message: checkpointError instanceof Error ? checkpointError.message : failure.message });
+          return;
+        }
+        setSequenceExecution({ status: "partial", record, visuals, message: failure.message });
+        return;
+      }
+    }
+  };
+
+  const executeApprovedSequence = async () => {
+    if (sequencePlannerState.status !== "review" || !sequencePlannerState.approved || sequenceExecution.status === "saving") return;
+    const plannerModelAlias = modelProvider.settings?.selected.chatOrchestrationModelAlias;
+    const imageModelAlias = modelProvider.settings?.selected.imageGenerationModelAlias;
+    if (!plannerModelAlias || !imageModelAlias) {
+      setSequenceExecution({ status: "startup-error", message: "Select active planner and image models first." });
+      return;
+    }
+    const status = await loadWorkspaceStatus();
+    if (!(await requireSignedIn(status))) return;
+    if (activeModelMetadata?.provider === "gemini" && !(await requireGeminiKey(status))) return;
+    if (!(await ensureGenerateStorageReady({ workspaceStatus: status, loadDrivePreflight, openGateDialog }))) return;
+    sequenceCancelRequestedRef.current = false;
+    setSequenceExecution({ status: "saving", message: "Freezing the approved plan before generation…" });
+    try {
+      const response = await fetch("/api/sequence/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: promptText.trim(),
+          plannerModelAlias,
+          imageModelAlias,
+          plannerCallsUsed: sequencePlannerCalls,
+          revision: sequencePlannerState.revision,
+          plan: sequencePlannerState.plan,
+          references: sequenceReferences,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { sequence?: SequencePersistenceRecord; error?: string } | null;
+      if (!response.ok || !payload?.sequence) throw new SequenceFrameError(payload?.error ?? "Unable to freeze the approved sequence.", response.status >= 500);
+      await saveSequenceLocalSources(payload.sequence.id, sequenceReferences);
+      await runSequence(payload.sequence, {});
+    } catch (error) {
+      setSequenceExecution({ status: "startup-error", message: error instanceof Error ? error.message : "Unable to start sequence execution." });
+    }
+  };
+
+  const cancelSequenceExecution = () => {
+    sequenceCancelRequestedRef.current = true;
+    setSequenceExecution((current) => current.status === "running" ? { ...current, cancelRequested: true, message: "Stopping after the current frame…" } : current);
+  };
+
+  const resumeSequence = async () => {
+    if (!(sequenceExecution.status === "partial" || sequenceExecution.status === "cancelled")) return;
+    sequenceCancelRequestedRef.current = false;
+    try {
+      const resumed = await checkpointSequence(sequenceExecution.record, { action: "resume" });
+      await runSequence(resumed, sequenceExecution.visuals);
+    } catch (error) {
+      setSequenceExecution({ ...sequenceExecution, status: "error", message: error instanceof Error ? error.message : "Unable to resume sequence." });
+    }
+  };
+
+  const regenerateSequence = async (action: { mode: "from-frame"; frameId: string } | { mode: "affected-reference"; referenceId: string }) => {
+    if (sequenceExecution.status !== "complete") return;
+    const previous = sequenceExecution;
+    setSequenceExecution({ ...previous, status: "running", message: "Preparing selected frames for regeneration…" });
+    try {
+      const scheduled = await checkpointSequence(previous.record, { action: "regenerate", ...action });
+      sequenceCancelRequestedRef.current = false;
+      await runSequence(scheduled, previous.visuals);
+    } catch (error) {
+      setSequenceExecution({ ...previous, message: error instanceof Error ? error.message : "Unable to regenerate the selected frames." });
+    }
+  };
+
+  const replaceSequenceReferenceImage = async (referenceId: string, file: File) => {
+    if (sequenceExecution.status !== "complete") return;
+    if (!isSupportedImageMimeType(file.type) || file.size === 0 || file.size > SEQUENCE_PRODUCT_LIMITS.maximumUploadBytes) {
+      setSequenceExecution({ ...sequenceExecution, status: "error", message: "Choose a supported reference image within the 10 MiB limit." });
+      return;
+    }
+    const existing = sequenceReferences.find((reference) => reference.id === referenceId);
+    if (!existing) return;
+    const replacementMimeType: ReferenceImage["mimeType"] = file.type;
+    const previous = sequenceExecution;
+    let scheduled: SequencePersistenceRecord | null = null;
+    setSequenceExecution({ ...previous, status: "running", message: "Saving the replacement reference…" });
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const updated: SequencePlannerReferenceInput = { ...existing, dataUrl, mimeType: replacementMimeType, byteSize: file.size, label: file.name.slice(0, 160) };
+      const nextSources = sequenceReferences.map((reference) => reference.id === referenceId ? updated : reference);
+      await saveSequenceLocalSources(previous.record.id, nextSources);
+      scheduled = await checkpointSequence(previous.record, {
+        action: "replace-reference", referenceId, label: updated.label,
+        dataUrl, mimeType: updated.mimeType, byteSize: updated.byteSize,
+      });
+      setReferenceImages((current) => current.map((reference, index) => getSequenceReferenceId(reference, index) === referenceId
+        ? { ...reference, dataUrl, mimeType: replacementMimeType, size: file.size, name: updated.label } : reference));
+      const savedRecord = scheduled;
+      const plan = savedRecord.planRevisions.find((revision) => revision.id === savedRecord.execution.activePlanRevisionId);
+      if (plan) {
+        sequencePlanRevisionRef.current = plan.revision;
+        setSequencePlannerState((current) => current.status === "review" ? { ...current, revision: plan.revision, approved: true } : current);
+      }
+      sequenceCancelRequestedRef.current = false;
+      await runSequence(scheduled, previous.visuals, nextSources);
+    } catch (error) {
+      if (!scheduled) await saveSequenceLocalSources(previous.record.id, sequenceReferences).catch(() => null);
+      setSequenceExecution({ ...previous, status: scheduled ? "error" : "complete", record: scheduled ?? previous.record, message: error instanceof Error ? error.message : "Unable to replace the reference." });
+    }
+  };
+
+  const keepPreviousSequenceImages = async () => {
+    if (sequenceExecution.status !== "partial" && sequenceExecution.status !== "cancelled") return;
+    const previous = sequenceExecution;
+    try {
+      const record = await checkpointSequence(previous.record, { action: "keep-previous" });
+      setSequenceExecution({ status: "complete", record, visuals: previous.visuals, message: "Kept the previously accepted images." });
+    } catch (error) {
+      setSequenceExecution({ ...previous, message: error instanceof Error ? error.message : "Unable to keep previous images." });
+    }
+  };
+
+  const recoverSequence = async () => {
+    if (sequenceExecution.status !== "error" || sequenceExecution.record.execution.status !== "running") return;
+    const previous = sequenceExecution;
+    try {
+      let record = previous.record;
+      if (record.attempts.some((attempt) => attempt.status === "running")) {
+        record = await checkpointSequence(record, { action: "recover" });
+      }
+      const visuals = { ...previous.visuals };
+      for (const frame of record.planRevisions.find((revision) => revision.id === record.execution.activePlanRevisionId)?.frames ?? []) {
+        const output = record.outputs.find((candidate) => candidate.id === frame.acceptedOutputId);
+        if (output && visuals[frame.id]?.generatedImageId !== output.generatedImageId) {
+          visuals[frame.id] = { dataUrl: `/api/gallery/images/${encodeURIComponent(output.generatedImageId)}/content`, mimeType: "image/png", generatedImageId: output.generatedImageId };
+        }
+      }
+      if (record.execution.status === "partially-complete" || record.execution.status === "failed") {
+        record = await checkpointSequence(record, { action: "resume" });
+      }
+      if (record.execution.status === "complete") {
+        setSequenceExecution({ status: "complete", record, visuals, message: "Recovered the saved sequence." });
+      } else {
+        sequenceCancelRequestedRef.current = false;
+        await runSequence(record, visuals);
+      }
+    } catch (error) {
+      setSequenceExecution({ ...previous, message: error instanceof Error ? error.message : "Unable to reconcile the interrupted sequence." });
+    }
+  };
+
+  const handlePrimarySubmit = (value: string) => {
+    if (sequenceEnabled) {
+      void requestSequencePlan(value);
+      return;
+    }
+    void handleGenerate(value);
+  };
+
+  const returnToLatestResults = () => {
+    const latestRun = generationHistory[0];
+    if (!latestRun) return;
+    setActiveRun(latestRun);
+    setRequestedFocusedImageId(null);
+    setGenerationError(null);
+    setIsComposerRaised(false);
+  };
+
+  const editGeneratedImage = async (sourceImage: GeneratedImage, editPrompt: string) => {
+    const sourceRun = activeRun;
+    if (!sourceRun) throw new Error("The source generation is no longer available.");
+
+    const runModel = getBrowserImageModelByAlias(sourceRun.model)
+      ?? getBrowserImageModelByLegacyId(sourceRun.settings.model);
+    if (!runModel || runModel.provider !== "gemini" || !runModel.supportsReferenceEditing) {
+      throw new Error(`${runModel?.displayLabel ?? "This model"} does not support verified iterative editing.`);
+    }
+    if (!runModel.supportedReferenceMimeTypes.includes(sourceImage.mimeType)) {
+      throw new Error(`${runModel.displayLabel} cannot edit ${sourceImage.mimeType} images.`);
+    }
+
+    const selectedImageAlias = modelProvider.settings?.selected?.imageGenerationModelAlias;
+    if (selectedImageAlias !== runModel.modelAlias) {
+      throw new Error(`Restore ${runModel.displayLabel} as the active image model before editing this result.`);
+    }
+
+    const status = await loadWorkspaceStatus();
+    if (!(await requireSignedIn(status))) throw new Error("Sign in to edit generated images.");
+    if (!(await requireGeminiKey(status))) throw new Error("Add your Gemini API key before editing images.");
+    const storageReady = await ensureGenerateStorageReady({ workspaceStatus: status, loadDrivePreflight, openGateDialog });
+    if (!storageReady) throw new Error("Connect supported storage before editing images.");
+
+    const editRunId = `${Date.now()}`;
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: editPrompt,
+        modelAlias: runModel.modelAlias,
+        model: runModel.legacyModelId,
+        count: 1,
+        thinking: sourceRun.settings.thinking,
+        aspectRatio: sourceRun.settings.aspect,
+        imageSize: sourceRun.settings.quality,
+        quality: sourceRun.settings.providerQuality,
+        background: sourceRun.settings.background,
+        schema: "none",
+        referenceImages: [{
+          dataUrl: sourceImage.dataUrl,
+          mimeType: sourceImage.mimeType,
+          name: `generation-${sourceRun.id}-image-${sourceImage.id}.png`,
+        }],
+        sourceGenerationId: sourceRun.id,
+        sourceImageId: sourceImage.id,
+        clientRunId: editRunId,
+      }),
+    });
+    const payload = (await response.json()) as Partial<GenerateApiResponse> & GenerateApiError;
+    if (!response.ok) {
+      if (response.status === 409 && (payload.details as { code?: string } | undefined)?.code === "model-selection-stale") {
+        await modelProvider.refresh();
+      }
+      if (shouldOpenImageGenerationGeminiKeyGate(response.status, payload.error)) {
+        await openImageModelKeyDialog();
+      }
+      throw new Error(payload.error || "Image editing failed.");
+    }
+    if (!payload.images?.length) throw new Error("Image editing returned no output.");
+
+    const nextRun: GenerationRun = {
+      id: editRunId,
+      prompt: editPrompt,
+      model: payload.model ?? runModel.modelAlias,
+      modelLabel: payload.modelLabel ?? runModel.displayLabel,
+      kind: "image",
+      images: payload.images,
+      text: payload.text ?? "",
+      referenceImages: [{
+        dataUrl: sourceImage.dataUrl,
+        mimeType: sourceImage.mimeType as ReferenceImage["mimeType"],
+        name: `Generated variation ${sourceImage.variant}`,
+        size: Math.ceil((sourceImage.dataUrl.split(",")[1]?.length ?? 0) * 0.75),
+      }],
+      createdAt: new Date().toISOString(),
+      settings: { ...sourceRun.settings, count: "1", model: runModel.legacyModelId },
+      warnings: payload.warnings ?? [],
+      parentRunId: sourceRun.id,
+      sourceImageId: sourceImage.id,
+      iterationRootId: sourceRun.iterationRootId ?? sourceRun.id,
+    };
+
+    setGenerationHistory((current) => [
+      nextRun,
+      sourceRun,
+      ...current.filter((item) => item.id !== nextRun.id && item.id !== sourceRun.id),
+    ].slice(0, 10));
+    setRequestedFocusedImageId(nextRun.images[0]?.id ?? null);
+    setActiveRun(nextRun);
+  };
 
   const promptRefinerPanel = hasPromptRefinerPanel ? (
     <div className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-2.5 text-left">
@@ -2550,13 +3268,19 @@ export function GeneratePage() {
               exit={{ opacity: 0, y: 12, scale: 0.99 }}
               transition={{ duration: 0.42, ease: "easeOut" }}
             >
-              <GenerationWorkspace
+              <GenerationResultsWorkspace
                 run={activeRun}
                 isGenerating={isGenerating}
                 loadingPhrase={loadingPhrase}
                 error={generationError}
-                panelMode={generatedPanelMode}
-                onPanelModeChange={setGeneratedPanelMode}
+                onStartNewPrompt={startNewPrompt}
+                onEditImage={editGeneratedImage}
+                iterationRuns={activeIterationRuns}
+                requestedFocusedImageId={requestedFocusedImageId}
+                onSelectRun={(run) => {
+                  setRequestedFocusedImageId(run.images[0]?.id ?? null);
+                  setActiveRun(run);
+                }}
               />
             </motion.div>
           ) : (
@@ -2573,10 +3297,62 @@ export function GeneratePage() {
               <p className="mt-4 text-[clamp(17px,1.35vw,24px)] font-semibold tracking-normal text-white/88 sm:mt-5">
                 Start by describing your picture
               </p>
+              <SequenceToggle enabled={sequenceEnabled} onToggle={setSequenceMode} />
+              {showSequenceSuggestion ? (
+                <button
+                  type="button"
+                  className="mx-auto mt-2 block text-[11px] font-bold text-accent/88 underline decoration-accent/35 underline-offset-4 hover:text-white"
+                  onClick={() => setSequenceMode(true)}
+                >
+                  This sounds like an ordered set. Enable Sequence?
+                </button>
+              ) : null}
+              {sequenceEnabled ? (
+                <div className="mx-auto mt-3 flex justify-center">
+                  <button ref={sequenceImportButtonRef} type="button" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-bold text-white/80 disabled:opacity-40" disabled={!supportsReferenceImages || referenceImages.length >= referenceImageLimit || sequenceExecution.status !== "idle"} onClick={() => setSequenceImportOpen(true)}>
+                    <FileText size={15} /> Import PDF pages or image carousel
+                  </button>
+                </div>
+              ) : null}
+              {sequenceEnabled ? (
+                <SequencePlannerPanel
+                  state={sequencePlannerState}
+                  references={sequenceReferences}
+                  plannerLabel={selectedChatModel?.displayLabel ?? "No planner selected"}
+                  plannerEligible={sequencePlannerEligible}
+                  callsUsed={sequencePlannerCalls}
+                  onRequestPlan={() => void requestSequencePlan()}
+                  onChangePlan={handleSequencePlanChange}
+                  onApprove={() => setSequencePlannerState((current) => current.status === "review" ? { ...current, approved: true } : current)}
+                  onMoveReference={moveSequenceReference}
+                  onChangeReferenceRole={changeSequenceReferenceRole}
+                  onRemoveReference={removeSequenceReference}
+                  execution={sequenceExecution}
+                  onExecute={() => void executeApprovedSequence()}
+                  onCancel={cancelSequenceExecution}
+                  onResume={() => void resumeSequence()}
+                  onRegenerate={(action) => void regenerateSequence(action)}
+                  onReplaceReference={(referenceId, file) => void replaceSequenceReferenceImage(referenceId, file)}
+                  onKeepPrevious={() => void keepPreviousSequenceImages()}
+                  onRecover={() => void recoverSequence()}
+                />
+              ) : null}
+              {generationHistory.length > 0 ? (
+                <button
+                  className="mx-auto mt-5 inline-flex h-10 items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.055] px-4 text-[12px] font-extrabold text-white/72 transition hover:bg-white/[0.1] hover:text-white"
+                  type="button"
+                  onClick={returnToLatestResults}
+                >
+                  <Images size={15} />
+                  Return to results
+                </button>
+              ) : null}
             </motion.div>
           )}
         </AnimatePresence>
       </section>
+
+      {sequenceImportOpen ? <SequenceImportDialog availableSlots={referenceImageLimit - referenceImages.length} existingBytes={referenceImages.reduce((sum, image) => sum + image.size, 0)} onImport={addImportedSequenceImages} onClose={() => { setSequenceImportOpen(false); requestAnimationFrame(() => sequenceImportButtonRef.current?.focus()); }} /> : null}
 
       {previewReference && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-black/72 px-4 backdrop-blur-xl">
@@ -2696,8 +3472,8 @@ export function GeneratePage() {
             ariaLabel="Prompt"
             value={promptText}
             onValueChange={handlePromptTextChange}
-            onSubmit={handleGenerate}
-            isLoading={isGenerating}
+            onSubmit={handlePrimarySubmit}
+            isLoading={isGenerating || sequencePlannerState.status === "loading"}
             onDragEnter={handleReferenceDragEnter}
             onDragOver={handleReferenceDragOver}
             onDragLeave={handleReferenceDragLeave}
@@ -2844,8 +3620,8 @@ export function GeneratePage() {
                     },
                   ]
             }
-            submitLabel={isGenerating ? "Generating" : "Generate"}
-            submitIcon={<SubmitGlyph isGenerating={isGenerating} />}
+            submitLabel={sequenceEnabled ? (sequencePlannerState.status === "loading" ? "Planning sequence" : "Plan sequence") : (isGenerating ? "Generating" : "Generate")}
+            submitIcon={<SubmitGlyph isGenerating={isGenerating || sequencePlannerState.status === "loading"} />}
           />
         </>
       )}

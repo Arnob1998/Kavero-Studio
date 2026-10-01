@@ -16,6 +16,32 @@ export const OPENAI_GPT_5_6_MODEL_ALIASES = {
   luna: "kavero-chat-openai-gpt-5-6-luna",
 } as const;
 
+const NO_SEQUENCE_PLANNER = {
+  eligible: false,
+  eligibility: "not-verified",
+  supportsSchemaConstrainedOutput: false,
+  imageInput: {
+    eligible: false,
+    maximumImages: { source: "unknown", value: null },
+    supportedMimeTypes: [],
+    maximumBytesPerImage: { source: "unknown", value: null },
+    maximumTotalBytes: { source: "unknown", value: null },
+  },
+} as const;
+
+const VERIFIED_MULTIMODAL_SEQUENCE_PLANNER = {
+  eligible: true,
+  eligibility: "verified",
+  supportsSchemaConstrainedOutput: true,
+  imageInput: {
+    eligible: true,
+    maximumImages: { source: "application-cap", value: 8 },
+    supportedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"],
+    maximumBytesPerImage: { source: "application-cap", value: 10 * 1024 * 1024 },
+    maximumTotalBytes: { source: "application-cap", value: 32 * 1024 * 1024 },
+  },
+} as const;
+
 export const modelCatalog = [
   {
     provider: "gemini",
@@ -30,6 +56,7 @@ export const modelCatalog = [
       supportsImageOutput: false,
       supportsStreaming: true,
       requirements: ["provider-key"],
+      sequencePlanner: VERIFIED_MULTIMODAL_SEQUENCE_PLANNER,
     },
   },
   {
@@ -45,6 +72,7 @@ export const modelCatalog = [
       supportsImageOutput: true,
       supportsStreaming: false,
       requirements: ["provider-key"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
   {
@@ -60,6 +88,7 @@ export const modelCatalog = [
       supportsImageOutput: true,
       supportsStreaming: false,
       requirements: ["provider-key"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
   {
@@ -75,6 +104,7 @@ export const modelCatalog = [
       supportsImageOutput: true,
       supportsStreaming: false,
       requirements: ["provider-key"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
   ...([
@@ -95,6 +125,7 @@ export const modelCatalog = [
       supportsImageOutput: false,
       supportsStreaming: true,
       requirements: ["provider-key"] as const,
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   })),
   {
@@ -110,6 +141,7 @@ export const modelCatalog = [
       supportsImageOutput: false,
       supportsStreaming: true,
       requirements: ["provider-key"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
   {
@@ -125,6 +157,7 @@ export const modelCatalog = [
       supportsImageOutput: true,
       supportsStreaming: true,
       requirements: ["provider-key"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
   {
@@ -140,6 +173,7 @@ export const modelCatalog = [
       supportsImageOutput: true,
       supportsStreaming: true,
       requirements: ["provider-key"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
   {
@@ -155,6 +189,7 @@ export const modelCatalog = [
       supportsImageOutput: false,
       supportsStreaming: true,
       requirements: ["provider-key"],
+      sequencePlanner: VERIFIED_MULTIMODAL_SEQUENCE_PLANNER,
     },
   },
   {
@@ -170,6 +205,7 @@ export const modelCatalog = [
       supportsImageOutput: false,
       supportsStreaming: true,
       requirements: ["local-runtime"],
+      sequencePlanner: NO_SEQUENCE_PLANNER,
     },
   },
 ] as const satisfies readonly ModelCatalogEntry[];

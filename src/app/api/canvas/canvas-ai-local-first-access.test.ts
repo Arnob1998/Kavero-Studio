@@ -173,20 +173,18 @@ describe("canvas AI Local-first access", () => {
     );
   });
 
-  it("keeps Cloud/default free users blocked by the premium canvas gate before model work", async () => {
+  it("allows Cloud/default users with connected Drive regardless of stored plan", async () => {
     mocks.createAdminClient.mockReturnValue(createCanvasAiAdmin({ plan: "free", driveStatus: "active" }));
+    mocks.generateContent.mockResolvedValue(okImageResponse("cloud-canvas-image"));
 
     const response = await imageGeneratePost(imageGenerateRequest());
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: "Canvas is available on the premium plan.",
-    });
-    expect(mocks.getUserProviderApiKey).not.toHaveBeenCalled();
-    expect(mocks.generateContent).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.getUserProviderApiKey).toHaveBeenCalled();
+    expect(mocks.generateContent).toHaveBeenCalled();
   });
 
-  it("keeps Cloud/default premium users without Drive blocked before model work", async () => {
+  it("keeps Cloud/default users without Drive blocked before model work", async () => {
     mocks.createAdminClient.mockReturnValue(createCanvasAiAdmin({ plan: "premium", driveStatus: null }));
 
     const response = await imageJudgePost(imageJudgeRequest());
@@ -211,7 +209,7 @@ describe("canvas AI Local-first access", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
-      error: "Canvas is available on the premium plan.",
+      error: "Connect Google Drive to use Canvas.",
     });
   });
 

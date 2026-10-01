@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getDeploymentProfile, isLocalFirstDeploymentProfile } from "@/lib/deployment-profile";
-import { normalizeUserPlan } from "@/lib/plans";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const CANVAS_LIMITS = {
-  designsPerUser: 3,
-  pagesPerDesign: 5,
   canvasJsonBytesPerPage: 250 * 1024,
-  driveAssetsPerUser: 200,
   driveAssetBytesPerFile: 10 * 1024 * 1024,
 } as const;
 
@@ -107,39 +103,30 @@ export function getCanvasAdmin() {
 export async function getCanvasAccess(userId: string) {
   const deploymentProfile = getDeploymentProfile();
   const admin = createAdminClient();
-  const [{ data: metadata }, { data: driveConnection }] = await Promise.all([
-    admin.from("user_metadata").select("plan").eq("user_id", userId).maybeSingle(),
-    admin
-      .from("user_drive_connections")
-      .select("status")
-      .eq("user_id", userId)
-      .eq("provider", "google-drive")
-      .maybeSingle(),
-  ]);
-
-  const plan = normalizeUserPlan(metadata?.plan);
+  const { data: driveConnection } = await admin
+    .from("user_drive_connections")
+    .select("status")
+    .eq("user_id", userId)
+    .eq("provider", "google-drive")
+    .maybeSingle();
   const driveConnected = driveConnection?.status === "active";
   const driveReconnectRequired = driveConnection?.status === "reconnect_required";
   const isLocalFirst = isLocalFirstDeploymentProfile(deploymentProfile);
 
   return {
     deploymentProfile,
-    plan,
     driveConnected,
     driveReconnectRequired,
-    allowed: isLocalFirst || (plan === "premium" && driveConnected),
+    allowed: isLocalFirst || driveConnected,
   };
 }
 
 export async function requireCanvasAccess(userId: string) {
   const access = await getCanvasAccess(userId);
   if (!access.allowed) {
-    const message =
-      access.plan !== "premium"
-        ? "Canvas is available on the premium plan."
-        : access.driveReconnectRequired
-          ? "Reconnect Google Drive to use Canvas."
-          : "Connect Google Drive to use Canvas.";
+    const message = access.driveReconnectRequired
+      ? "Reconnect Google Drive to use Canvas."
+      : "Connect Google Drive to use Canvas.";
 
     return {
       access,

@@ -32,4 +32,27 @@ describe("browser model catalog", () => {
     expect(catalog.find((entry) => entry.provider === "groq")?.providerKeyId).toBe("groq");
     expect(catalog.find((entry) => entry.provider === "ollama")?.providerKeyId).toBeNull();
   });
+
+  it("exposes bounded sequence-planner metadata and fails unverified models closed", () => {
+    const catalog = getBrowserModelCatalog();
+    const gemini = catalog.find((entry) => entry.modelAlias === DEFAULT_CHAT_ORCHESTRATION_MODEL_ALIAS);
+    const openai = catalog.find((entry) => entry.modelAlias === "kavero-chat-openai-gpt-5-6");
+
+    expect(gemini?.capabilities.sequencePlanner).toMatchObject({
+      eligible: true,
+      eligibility: "verified",
+      supportsSchemaConstrainedOutput: true,
+      imageInput: {
+        eligible: true,
+        maximumImages: { source: "application-cap", value: 8 },
+        maximumBytesPerImage: { source: "application-cap", value: 10 * 1024 * 1024 },
+        maximumTotalBytes: { source: "application-cap", value: 32 * 1024 * 1024 },
+      },
+    });
+    expect(openai?.capabilities.sequencePlanner).toMatchObject({
+      eligible: false,
+      eligibility: "not-verified",
+      imageInput: { maximumImages: { source: "unknown", value: null } },
+    });
+  });
 });

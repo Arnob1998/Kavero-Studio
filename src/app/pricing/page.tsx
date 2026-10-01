@@ -39,8 +39,8 @@ const valueProps = [
   },
   {
     icon: PlugZap,
-    title: "Upgrade later",
-    description: "Paid editing and team plans are coming.",
+    title: "Full workspace",
+    description: "Canvas, generation, editing, and history are included.",
   },
 ];
 
@@ -74,7 +74,7 @@ export default function PricingPage() {
               Create with your own AI providers.
             </h2>
             <p className="m-0 mt-4 max-w-[36ch] text-[13px] font-medium leading-6 text-white/36">
-              No subscription today. No markup on usage. You stay in control of provider spend.
+              No product subscription or usage markup. You stay in control of provider spend.
             </p>
 
             <div className="mt-9 grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
@@ -88,11 +88,11 @@ export default function PricingPage() {
             <div className="flex items-start justify-between gap-6">
               <div>
                 <h2 className="m-0 text-[clamp(24px,5vw,32px)] font-light tracking-normal text-white">
-                  Free Plan
+                  Full access
                 </h2>
                 <div className="mt-3 flex items-end gap-3">
                   <span className="text-[clamp(38px,8vw,50px)] font-light leading-none tracking-normal">
-                    Free
+                    $0
                   </span>
                   <span className="pb-1.5 text-[12px] font-medium text-white/34">per user/mo</span>
                 </div>
@@ -127,7 +127,7 @@ export default function PricingPage() {
                   </li>
                   <li className="flex items-center gap-3 text-[12px] font-medium leading-5 text-white/48">
                     <Check size={15} className="shrink-0 text-accent" />
-                    Optional paid upgrades later
+                    Your storage and hosting
                   </li>
                   <li className="flex items-center gap-3 text-[12px] font-medium leading-5 text-white/48">
                     <Check size={15} className="shrink-0 text-accent" />

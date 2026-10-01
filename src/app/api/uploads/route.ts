@@ -71,13 +71,6 @@ export async function POST(request: Request) {
   const { admin, response } = requireCanvasAdmin();
   if (!admin) return response;
 
-  const { data: existingAssets, error: usageError } = await admin
-    .from("canvas_assets")
-    .select("id")
-    .eq("user_id", user.id);
-
-  if (usageError) return jsonError("Unable to check upload quota.", 500);
-
   const assetId = crypto.randomUUID();
   const stableUrl = `/api/canvas/assets/${assetId}`;
   const originalName = safeName(file.name);
@@ -107,9 +100,6 @@ export async function POST(request: Request) {
     return jsonError("Connect Google Drive before uploading canvas assets.", 403);
   }
 
-  if ((existingAssets?.length ?? 0) >= CANVAS_LIMITS.driveAssetsPerUser) {
-    return jsonError(`Upload limit reached (${CANVAS_LIMITS.driveAssetsPerUser}).`, 409);
-  }
   let folderId: string | null;
   try {
     folderId = await getCanvasDriveFolderId(user.id, accessToken);

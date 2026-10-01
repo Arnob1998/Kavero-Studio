@@ -48,8 +48,7 @@ export async function GET() {
           "id, original_name, content_type, size_bytes, public_url, drive_file_id, drive_file_name, drive_web_view_link, drive_status, storage_ref, storage_kind, storage_status, storage_metadata, storage_external_id, storage_external_url, last_used_at, created_at",
         )
         .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(200),
+        .order("created_at", { ascending: false }),
       admin
         .from("canvas_designs")
         .select("id", { count: "exact", head: true })
@@ -92,16 +91,6 @@ export async function POST(request: Request) {
   if (!allowedImageTypes.has(file.type)) return jsonError("Canvas uploads must be PNG, JPG, or WebP.", 400);
   if (file.size <= 0 || file.size > CANVAS_LIMITS.driveAssetBytesPerFile) {
     return jsonError("Canvas uploads must be 10MB or smaller.", 400);
-  }
-
-  const { count, error: countError } = await admin
-    .from("canvas_assets")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id);
-
-  if (countError) return jsonError("Unable to check asset limits.", 500);
-  if ((count ?? 0) >= CANVAS_LIMITS.driveAssetsPerUser) {
-    return jsonError("Canvas asset limit reached.", 403);
   }
 
   const selection = getCanvasAssetStorageProviderFromEnv();

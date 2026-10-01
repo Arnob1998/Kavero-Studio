@@ -22,10 +22,7 @@ function mockAssetsFetch(assets: unknown[] = []) {
         assets,
         usage: { designs: 0, pages: 0, assets: assets.length, assetBytes: 0 },
         limits: {
-          designsPerUser: 3,
-          pagesPerDesign: 5,
           canvasJsonBytesPerPage: 1000000,
-          driveAssetsPerUser: 200,
           driveAssetBytesPerFile: 10000000,
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } });

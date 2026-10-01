@@ -6,8 +6,6 @@ const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
   getUserProviderApiKey: vi.fn(),
   getUserProviderCredentials: vi.fn(),
-  normalizeUserPlan: vi.fn(),
-  getGenerationLimit: vi.fn(),
   getGoogleDriveConnection: vi.fn(),
   getGoogleDriveAccessTokenForUser: vi.fn(),
   uploadGoogleDriveFile: vi.fn(),
@@ -40,11 +38,6 @@ vi.mock("@/lib/supabase/server", () => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mocks.createAdminClient,
-}));
-
-vi.mock("@/lib/plans", () => ({
-  normalizeUserPlan: mocks.normalizeUserPlan,
-  getGenerationLimit: mocks.getGenerationLimit,
 }));
 
 vi.mock("@/lib/google-drive", () => ({
@@ -335,8 +328,6 @@ describe("/api/generate POST", () => {
     mocks.createAdminClient.mockReturnValue(admin);
     mocks.getUserProviderApiKey.mockResolvedValue("gemini-key");
     mocks.getUserProviderCredentials.mockResolvedValue(null);
-    mocks.normalizeUserPlan.mockReturnValue("premium");
-    mocks.getGenerationLimit.mockReturnValue(null);
     mocks.getGoogleDriveConnection.mockResolvedValue({
       folder_id: "folder-1",
     });
@@ -490,6 +481,29 @@ describe("/api/generate POST", () => {
     expect(body.details).toMatchObject({ fieldErrors: { referenceImages: expect.any(Array) } });
   });
 
+  it("rejects incomplete image-edit lineage before provider traffic", async () => {
+    const response = await POST(request(validBody({ sourceGenerationId: "run-source" })));
+    const body = await json(response);
+
+    expect(response.status).toBe(400);
+    expect(body.details).toMatchObject({ fieldErrors: { sourceGenerationId: expect.any(Array) } });
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
+  it("rejects edit lineage without exactly one source image", async () => {
+    const response = await POST(request(validBody({
+      sourceGenerationId: "run-source",
+      sourceImageId: "image-source",
+      clientRunId: "run-edit",
+      referenceImages: [],
+    })));
+    const body = await json(response);
+
+    expect(response.status).toBe(400);
+    expect(body.details).toMatchObject({ fieldErrors: { referenceImages: ["Iterative editing requires exactly one source image."] } });
+    expect(mocks.generateContent).not.toHaveBeenCalled();
+  });
+
   it("enforces the current reference image limit for gemini-2.5-flash-image", async () => {
     const response = await POST(
       request(
@@ -584,6 +598,66 @@ describe("/api/generate POST", () => {
       }),
     ]);
     expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+    expect(body.persistence).toEqual({
+      generationId: expect.any(String),
+      generatedImageIds: [expect.any(String)],
+    });
+  });
+
+  it("persists bounded sequence lineage metadata and returns the stable history IDs", async () => {
+    const sequenceContext = {
+      sequenceId: "11111111-1111-4111-8111-111111111111",
+      planRevisionId: "22222222-2222-4222-8222-222222222222",
+      frameId: "frame-1",
+      framePosition: 1,
+      attemptId: "33333333-3333-4333-8333-333333333333",
+      referenceIds: ["reference-1"],
+      sourceOutputIds: [],
+    };
+    const response = await POST(request(validBody({ sequenceContext })));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(body.persistence).toEqual({
+      generationId: expect.any(String),
+      generatedImageIds: [expect.any(String)],
+    });
+    const persistence = body.persistence as { generatedImageIds: string[] };
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({ sequenceContext }),
+    }));
+    expect(admin.__mocks.generatedImageInsert).toHaveBeenCalledWith(expect.objectContaining({
+      id: persistence.generatedImageIds[0],
+    }));
+  });
+
+  it("persists Gemini edit lineage and the selected source reference without mutating the source", async () => {
+    const response = await POST(request(validBody({
+      prompt: "Make the windows glow warmly",
+      count: 1,
+      referenceImages: [referenceImage(1)],
+      sourceGenerationId: "run-source",
+      sourceImageId: "image-source",
+      clientRunId: "run-edit",
+    })));
+    const body = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(mocks.generateContent).toHaveBeenCalledOnce();
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "Make the windows glow warmly",
+      settings: expect.objectContaining({
+        sourceGenerationId: "run-source",
+        sourceImageId: "image-source",
+        clientRunId: "run-edit",
+      }),
+      reference_images: [{ mimeType: "image/png", name: "reference-1.png" }],
+    }));
+    expect(body.settings).toMatchObject({
+      sourceGenerationId: "run-source",
+      sourceImageId: "image-source",
+      clientRunId: "run-edit",
+    });
   });
 
   it("uses the selected image-generation alias through LiteLLM when the gateway is configured", async () => {
@@ -1535,40 +1609,17 @@ describe("/api/generate POST", () => {
     expect(mocks.uploadGoogleDriveFile).not.toHaveBeenCalled();
   });
 
-  it("preserves current quota full warning behavior", async () => {
+  it("persists generated images when saved history is at the former plan cap", async () => {
     supabase = createSupabaseClient({ countResult: { count: 20, error: null } });
     mocks.createClient.mockResolvedValue(supabase);
-    mocks.normalizeUserPlan.mockReturnValue("free");
-    mocks.getGenerationLimit.mockReturnValue(20);
 
     const response = await POST(request(validBody()));
     const body = await json(response);
 
     expect(response.status).toBe(200);
-    expect(body.warnings).toEqual([
-      "Free plan gallery storage is full (20/20 generations). Remove a generation from Gallery or upgrade before saving more.",
-    ]);
-    expect(mocks.getGoogleDriveConnection).not.toHaveBeenCalled();
-    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
-  });
-
-  it("preserves current quota count failure warning behavior", async () => {
-    supabase = createSupabaseClient({
-      countResult: { count: null, error: new Error("count failed") },
-    });
-    mocks.createClient.mockResolvedValue(supabase);
-    mocks.normalizeUserPlan.mockReturnValue("free");
-    mocks.getGenerationLimit.mockReturnValue(20);
-
-    const response = await POST(request(validBody()));
-    const body = await json(response);
-
-    expect(response.status).toBe(200);
-    expect(body.warnings).toEqual([
-      "Generated images are ready, but Kavero could not check your gallery generation limit.",
-    ]);
-    expect(mocks.getGoogleDriveConnection).not.toHaveBeenCalled();
-    expect(admin.__mocks.generationRunInsert).not.toHaveBeenCalled();
+    expect(body.warnings).toEqual(["Saved 1 image to Google Drive."]);
+    expect(mocks.getGoogleDriveConnection).toHaveBeenCalled();
+    expect(admin.__mocks.generationRunInsert).toHaveBeenCalled();
   });
 
   it("preserves current missing Drive token warning behavior", async () => {

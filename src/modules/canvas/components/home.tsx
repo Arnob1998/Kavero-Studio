@@ -39,10 +39,7 @@ interface CanvasAssetsResponse {
     assetBytes: number;
   };
   limits: {
-    designsPerUser: number;
-    pagesPerDesign: number;
     canvasJsonBytesPerPage: number;
-    driveAssetsPerUser: number;
     driveAssetBytesPerFile: number;
   };
 }
@@ -65,11 +62,6 @@ function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB"];
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function percent(value: number, limit: number | null | undefined) {
-  if (!limit || limit <= 0) return 0;
-  return Math.min(100, Math.round((value / limit) * 100));
 }
 
 export function Home({
@@ -195,35 +187,31 @@ export function Home({
   const clearAssetSelection = () => {
     setSelectedAssetIds([]);
   };
-  const quotaCards = useMemo(
+  const usageCards = useMemo(
     () => [
       {
         label: "Designs",
-        value: `${designs.length}/${limits?.designsPerUser ?? 3}`,
-        detail: "Premium workspace limit",
+        value: `${designs.length}`,
+        detail: "No product limit",
         icon: LayoutGrid,
-        progress: percent(designs.length, limits?.designsPerUser ?? 3),
       },
       {
         label: "Pages",
         value: `${usage?.pages ?? 0}`,
-        detail: `${limits?.pagesPerDesign ?? 5} pages per design`,
+        detail: "Across all designs",
         icon: FileStack,
-        progress: 0,
       },
       {
         label: "Assets",
-        value: `${usage?.assets ?? assets.length}/${limits?.driveAssetsPerUser ?? 200}`,
-        detail: "Delete assets to free slots",
+        value: `${usage?.assets ?? assets.length}`,
+        detail: "No product limit",
         icon: ImageIcon,
-        progress: percent(usage?.assets ?? assets.length, limits?.driveAssetsPerUser ?? 200),
       },
       {
         label: "Storage",
         value: formatBytes(usage?.assetBytes ?? 0),
         detail: `${formatBytes(limits?.driveAssetBytesPerFile ?? 10 * 1024 * 1024)} max per file`,
         icon: HardDrive,
-        progress: 0,
       },
     ],
     [assets.length, designs.length, limits, usage],
@@ -283,7 +271,7 @@ export function Home({
         ) : null}
 
         <div className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {quotaCards.map(({ label, value, detail, icon: Icon, progress }) => (
+          {usageCards.map(({ label, value, detail, icon: Icon }) => (
             <section key={label} className={`${glassPanelClass} rounded-2xl p-4`}>
               <div className="mb-4 flex items-center justify-between">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/[0.055] text-white/58">
@@ -295,12 +283,6 @@ export function Home({
               </div>
               <p className="m-0 text-2xl font-light text-white">{value}</p>
               <p className="m-0 mt-1 text-[12px] font-medium text-white/42">{detail}</p>
-              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
-                <div
-                  className="h-full rounded-full bg-accent"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
             </section>
           ))}
         </div>
@@ -390,7 +372,7 @@ function Hero({ onCreate }: { onCreate: () => void }) {
             {brand.name} Canvas
           </h1>
           <p className="mt-5 max-w-[58ch] text-[17px] font-normal leading-8 text-white/64">
-            Create, manage, and clean up stored design assets from one premium workspace.
+            Create, manage, and organize designs and assets in one open workspace.
           </p>
           <button
             className="mt-7 inline-flex h-12 items-center gap-2 rounded-xl bg-accent px-5 text-[14px] font-bold text-white shadow-[0_16px_44px_rgb(59_130_246_/_0.24)] transition hover:bg-accent-hover"
