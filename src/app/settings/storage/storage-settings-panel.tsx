@@ -12,7 +12,6 @@ type DriveStatus = {
   connected: boolean;
   usage: {
     used: number;
-    limit: number | null;
   };
   connection: {
     googleEmail: string | null;
@@ -71,7 +70,7 @@ export function StorageSettingsPanel({
     if (response.ok) {
       setStatus((current) => ({
         connected: false,
-        usage: current?.usage ?? { used: 0, limit: null },
+        usage: current?.usage ?? { used: 0 },
         connection: null,
       }));
     }

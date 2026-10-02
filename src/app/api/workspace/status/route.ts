@@ -15,16 +15,13 @@ type WorkspaceMissingReason =
   | "gemini-key"
   | "google-drive"
   | "google-drive-reconnect"
-  | "storage"
-  | "quota";
+  | "storage";
 
 type WorkspaceDriveStatus = {
   connected: boolean;
   reconnectRequired: boolean;
-  quotaFull: boolean;
   usage: {
     used: number;
-    limit: number | null;
   };
 };
 
@@ -59,8 +56,7 @@ export async function GET() {
         drive: {
           connected: false,
           reconnectRequired: false,
-          quotaFull: false,
-          usage: { used: 0, limit: null },
+          usage: { used: 0 },
         },
       }),
     );
@@ -88,14 +84,12 @@ export async function GET() {
         .maybeSingle(),
     ]);
 
-  const limit = null;
   const used = count ?? 0;
   const hasGeminiKey = Boolean(providerKey);
   const drive: WorkspaceDriveStatus = {
     connected: driveConnection?.status === "active",
     reconnectRequired: driveConnection?.status === "reconnect_required",
-    quotaFull: false,
-    usage: { used, limit },
+    usage: { used },
   };
 
   const managedStorageStatus = isLocalFirstDeploymentProfile(deploymentProfile)
@@ -170,7 +164,7 @@ async function getLocalFirstManagedStorageStatus(input: { admin: unknown; userId
 }
 
 function buildGoogleDriveStorageStatus(drive: WorkspaceDriveStatus): WorkspaceStorageStatus {
-  const ready = drive.connected && !drive.reconnectRequired && !drive.quotaFull;
+  const ready = drive.connected && !drive.reconnectRequired;
   return {
     providerId: "google-drive",
     ready,
@@ -217,14 +211,12 @@ function buildWorkspaceMissingReasons(input: {
     missing.push("google-drive");
   }
 
-  if (input.drive.quotaFull) missing.push("quota");
   return missing;
 }
 
 function googleDriveStorageWarning(drive: WorkspaceDriveStatus) {
   if (drive.reconnectRequired) return "Google Drive needs to be reconnected.";
   if (!drive.connected) return "Google Drive is not connected.";
-  if (drive.quotaFull) return "Google Drive storage quota is full.";
   return null;
 }
 

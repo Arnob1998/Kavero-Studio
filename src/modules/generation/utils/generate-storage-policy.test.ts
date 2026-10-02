@@ -151,8 +151,7 @@ function drivePreflight(overrides: Partial<DrivePreflightResponse> = {}): DriveP
     canSave: true,
     connected: true,
     reconnectRequired: false,
-    quotaFull: false,
-    usage: { used: 0, limit: 20 },
+    usage: { used: 0 },
     warning: null,
     ...overrides,
   };
@@ -186,8 +185,7 @@ function workspaceStatus({
     drive: {
       connected: deploymentProfile !== "local-first",
       reconnectRequired: false,
-      quotaFull: false,
-      usage: { used: 0, limit: 20 },
+      usage: { used: 0 },
     },
   };
 }

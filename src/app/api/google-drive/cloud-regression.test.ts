@@ -112,7 +112,7 @@ describe("Google Drive Cloud regression routes", () => {
     expect(body).toEqual({
       connected: true,
       reconnectRequired: false,
-      usage: { used: 7, limit: null },
+      usage: { used: 7 },
       connection: {
         googleEmail: "user@example.com",
         folderId: "folder-1",
@@ -136,7 +136,7 @@ describe("Google Drive Cloud regression routes", () => {
     expect(await reconnectResponse.json()).toMatchObject({
       connected: false,
       reconnectRequired: true,
-      usage: { used: 2, limit: null },
+      usage: { used: 2 },
       connection: {
         status: "reconnect_required",
       },
@@ -148,7 +148,7 @@ describe("Google Drive Cloud regression routes", () => {
     expect(await disconnectedResponse.json()).toEqual({
       connected: false,
       reconnectRequired: false,
-      usage: { used: 0, limit: null },
+      usage: { used: 0 },
       connection: null,
     });
   });
@@ -171,8 +171,7 @@ describe("Google Drive Cloud regression routes", () => {
       canSave: false,
       connected: false,
       reconnectRequired: false,
-      quotaFull: false,
-      usage: { used: 1, limit: null },
+      usage: { used: 1 },
       warning:
         "Google Drive is not connected. This generation will not be saved to Gallery, so download any images you want to keep.",
     });
@@ -187,8 +186,7 @@ describe("Google Drive Cloud regression routes", () => {
       canSave: false,
       connected: true,
       reconnectRequired: true,
-      quotaFull: false,
-      usage: { used: 1, limit: null },
+      usage: { used: 1 },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
     });
@@ -203,8 +201,7 @@ describe("Google Drive Cloud regression routes", () => {
       canSave: false,
       connected: true,
       reconnectRequired: true,
-      quotaFull: false,
-      usage: { used: 1, limit: null },
+      usage: { used: 1 },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
     });
@@ -216,8 +213,7 @@ describe("Google Drive Cloud regression routes", () => {
       canSave: true,
       connected: true,
       reconnectRequired: false,
-      quotaFull: false,
-      usage: { used: 20, limit: null },
+      usage: { used: 20 },
       warning: null,
     });
 
@@ -228,8 +224,7 @@ describe("Google Drive Cloud regression routes", () => {
       canSave: true,
       connected: true,
       reconnectRequired: false,
-      quotaFull: false,
-      usage: { used: 3, limit: null },
+      usage: { used: 3 },
       warning: null,
     });
   });

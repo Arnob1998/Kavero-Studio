@@ -29,7 +29,6 @@ export async function GET() {
     reconnectRequired: connection?.status === "reconnect_required",
     usage: {
       used: count ?? 0,
-      limit: null,
     },
     connection: connection
       ? {

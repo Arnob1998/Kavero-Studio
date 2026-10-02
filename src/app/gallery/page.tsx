@@ -8,6 +8,7 @@ import { getDeploymentProfile, isLocalFirstDeploymentProfile } from "@/lib/deplo
 import { createClient } from "@/lib/supabase/server";
 
 import { GalleryShell } from "@/modules/gallery/components/gallery-shell";
+import { GalleryPagination } from "@/modules/gallery/components/gallery-pagination";
 import { EmptyState } from "@/modules/gallery/components/empty-state";
 import { GalleryGenerationActions } from "@/modules/gallery/components/gallery-generation-actions";
 import { GalleryCard } from "@/modules/gallery/components/gallery-card";
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: `Gallery | ${brand.name}`,
-  description: "Browse generated image history saved to Google Drive.",
+  description: "Browse your saved generated image history.",
 };
 
 import type { GalleryFolder, GalleryImage, GalleryRun } from "@/modules/gallery/types";
@@ -27,9 +28,10 @@ import { getGalleryData } from "@/modules/gallery/persistence/get-gallery-data";
 export default async function GalleryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ generation?: string }>;
+  searchParams?: Promise<{ generation?: string; page?: string }>;
 }) {
-  const selectedGenerationId = (await searchParams)?.generation;
+  const params = await searchParams;
+  const selectedGenerationId = params?.generation;
   const deploymentProfile = getDeploymentProfile();
   const isLocalFirst = isLocalFirstDeploymentProfile(deploymentProfile);
   const supabase = await createClient();
@@ -42,7 +44,7 @@ export default async function GalleryPage({
       <GalleryShell>
         <EmptyState
           title="Sign in to open Gallery"
-          description="Your generated image history is attached to your account and Drive connection."
+          description="Your generated image history is attached to your account."
           actionHref="/auth/login?next=/gallery"
           actionLabel="Sign in"
         />
@@ -50,7 +52,9 @@ export default async function GalleryPage({
     );
   }
 
-  const { connection, runs, generationCount } = await getGalleryData(supabase, user.id);
+  const { connection, runs, generationCount, page, totalPages } = await getGalleryData(supabase, user.id, {
+    page: params?.page, generationId: selectedGenerationId,
+  });
 
   if (!connection && !isLocalFirst) {
     return (
@@ -130,7 +134,9 @@ export default async function GalleryPage({
         </Button>
       </div>
 
-      {folders.length === 0 ? (
+      {selectedGenerationId && !selectedFolder ? (
+        <EmptyState title="Generation not found" description="This generation is unavailable or has been removed." actionHref="/gallery" actionLabel="Back to Gallery" />
+      ) : folders.length === 0 ? (
         <EmptyState
           title="No saved generations yet"
           description={emptyDescription}
@@ -155,6 +161,7 @@ export default async function GalleryPage({
           ))}
         </div>
       )}
+      {!selectedGenerationId ? <GalleryPagination page={page} totalPages={totalPages} /> : null}
     </GalleryShell>
   );
 }

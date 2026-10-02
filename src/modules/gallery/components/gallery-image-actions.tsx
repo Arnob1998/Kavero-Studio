@@ -30,22 +30,22 @@ export function GalleryImageActions({ imageId }: { imageId: string }) {
         type="button"
         disabled={Boolean(pendingAction)}
         onClick={() => void removeImage("record")}
-        aria-label="Remove prompt and metadata from Kavero Gallery but keep Drive files"
-        title="Free this image slot, keep Drive files"
+        aria-label="Remove from Gallery, keep stored files"
+        title="Remove from Gallery, keep stored files"
       >
         <DatabaseZap size={13} />
-        {pendingAction === "record" ? "Freeing" : "Free image"}
+        {pendingAction === "record" ? "Removing" : "Remove from Gallery"}
       </button>
       <button
         className="inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold text-white/48 transition hover:bg-red-500/14 hover:text-red-100 disabled:cursor-wait disabled:opacity-55"
         type="button"
         disabled={Boolean(pendingAction)}
         onClick={() => void removeImage("files")}
-        aria-label="Delete generated image from Google Drive and Kavero Gallery"
-        title="Delete this image from Drive and Gallery"
+        aria-label="Delete permanently from Gallery and storage"
+        title="Delete permanently from Gallery and storage"
       >
         <Trash2 size={13} />
-        {pendingAction === "files" ? "Deleting" : "Delete image"}
+        {pendingAction === "files" ? "Deleting" : "Delete permanently"}
       </button>
     </span>
   );

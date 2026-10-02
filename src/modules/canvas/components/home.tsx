@@ -500,7 +500,7 @@ function AssetStorageStrip({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="m-0 text-[18px] font-normal text-white">Asset storage</h3>
-          <p className="m-0 mt-1 text-[12px] font-medium text-white/42">Delete unused assets forever to free slots.</p>
+          <p className="m-0 mt-1 text-[12px] font-medium text-white/42">Permanently delete unused assets and their stored files.</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {assets.length > 0 ? (
@@ -640,8 +640,8 @@ function DeleteAssetDialog({
   const title = asset.length === 1 ? "Delete asset forever?" : `Delete ${asset.length} assets forever?`;
   const description =
     asset.length === 1
-      ? "This removes the Drive file and frees one Canvas asset slot."
-      : "This removes the selected Drive files and frees Canvas asset slots.";
+      ? "This permanently removes the asset and its stored file."
+      : "This permanently removes the selected assets and their stored files.";
 
   return (
     <div

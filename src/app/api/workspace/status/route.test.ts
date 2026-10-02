@@ -71,8 +71,7 @@ describe("/api/workspace/status", () => {
       drive: {
         connected: false,
         reconnectRequired: false,
-        quotaFull: false,
-        usage: { used: 0, limit: null },
+        usage: { used: 0 },
       },
       deploymentProfile: "cloud",
       workspace: {
@@ -106,8 +105,7 @@ describe("/api/workspace/status", () => {
       drive: {
         connected: true,
         reconnectRequired: false,
-        quotaFull: false,
-        usage: { used: 3, limit: null },
+        usage: { used: 3 },
       },
       deploymentProfile: "cloud",
       workspace: {
@@ -182,7 +180,6 @@ describe("/api/workspace/status", () => {
       drive: {
         connected: false,
         reconnectRequired: false,
-        quotaFull: false,
       },
       workspace: {
         ready: true,

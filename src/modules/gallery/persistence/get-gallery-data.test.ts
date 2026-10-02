@@ -16,6 +16,7 @@ describe("getGalleryData", () => {
     runsData?: any;
     generationCount?: any;
   } = {}) => {
+    const rangeMock = vi.fn().mockResolvedValue({ data: runsData });
     const generationRunsSelectMock = vi.fn((selector) => {
       if (selector === "id") {
         return {
@@ -25,7 +26,8 @@ describe("getGalleryData", () => {
       return {
         eq: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({ data: runsData }),
+        range: rangeMock,
+        then: (resolve: (value: unknown) => void) => resolve({ data: runsData }),
       };
     });
 
@@ -48,7 +50,7 @@ describe("getGalleryData", () => {
     return {
       from: fromMock,
       __mocks: {
-        generationRunsSelectMock,
+        generationRunsSelectMock, rangeMock,
       },
     } as any;
   };
@@ -198,4 +200,27 @@ describe("getGalleryData", () => {
     expect(result.runs).toEqual([]);
     expect(result.generationCount).toBeNull();
   });
+  it("loads history beyond 80 runs using owner-scoped ranges", async () => {
+    const supabase = createMockSupabase({ generationCount: 100 });
+    const result = await getGalleryData(supabase, "user-1", { page: "4" });
+    expect(supabase.__mocks.rangeMock).toHaveBeenCalledWith(72, 95);
+    expect(result).toMatchObject({ page: 4, totalPages: 5 });
+  });
+  it("clamps stale page links and rejects invalid page numbers", async () => {
+    const supabase = createMockSupabase({ generationCount: 25 });
+    expect((await getGalleryData(supabase, "user-1", { page: "99" })).page).toBe(2);
+    for (const page of ["-1", "0", "1.2", "oops"]) {
+      expect((await getGalleryData(supabase, "user-1", { page })).page).toBe(1);
+    }
+  });
+  it("loads a selected older generation independently of pagination", async () => {
+    const supabase = createMockSupabase({ generationCount: 100, runsData: [{ id: "old-run" }] });
+    const result = await getGalleryData(supabase, "user-1", { generationId: "old-run" });
+    expect(result.runs[0].id).toBe("old-run");
+    expect(supabase.__mocks.rangeMock).not.toHaveBeenCalled();
+    const query = supabase.__mocks.generationRunsSelectMock.mock.results[1].value;
+    expect(query.eq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(query.eq).toHaveBeenCalledWith("id", "old-run");
+  });
+
 });

@@ -132,9 +132,24 @@ describe("GalleryPage", () => {
     expect(screen.queryByRole("heading", { name: "Connect Google Drive" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Drive is connected/i)).not.toBeInTheDocument();
   });
+  it("exposes older history through pagination links", async () => {
+    mockSupabaseUser({ id: "user-1" });
+    mockGetGalleryData.mockResolvedValue(galleryData({ runs: [run()], generationCount: 100 }));
+    await renderGalleryPage();
+    expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute("href", "/gallery?page=2");
+    expect(screen.queryByRole("link", { name: "Previous" })).not.toBeInTheDocument();
+  });
+  it("shows a missing-generation state instead of unrelated history", async () => {
+    mockSupabaseUser({ id: "user-1" });
+    mockGetGalleryData.mockResolvedValue(galleryData({ runs: [] }));
+    await renderGalleryPage({ generation: "gone" });
+    expect(screen.getByRole("heading", { name: "Generation not found" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Gallery pagination" })).not.toBeInTheDocument();
+    expect(mockGetGalleryData).toHaveBeenCalledWith(expect.anything(), "user-1", { generationId: "gone", page: undefined });
+  });
 });
 
-async function renderGalleryPage(searchParams: { generation?: string } = {}) {
+async function renderGalleryPage(searchParams: { generation?: string; page?: string } = {}) {
   const page = await GalleryPage({ searchParams: Promise.resolve(searchParams) });
   render(page);
 }
@@ -165,6 +180,7 @@ function galleryData({
     runs,
     metadata,
     generationCount,
+    page: 1, totalPages: Math.max(1, Math.ceil((generationCount ?? 0) / 24)),
   };
 }
 

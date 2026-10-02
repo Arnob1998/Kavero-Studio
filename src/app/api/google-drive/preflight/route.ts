@@ -26,15 +26,13 @@ export async function GET() {
       .maybeSingle(),
   ]);
 
-  const generationLimit = null;
   const used = count ?? 0;
   if (!connection || connection.status === "revoked") {
     return NextResponse.json({
       canSave: false,
       connected: false,
       reconnectRequired: false,
-      quotaFull: false,
-      usage: { used, limit: generationLimit },
+      usage: { used },
       warning:
         "Google Drive is not connected. This generation will not be saved to Gallery, so download any images you want to keep.",
     });
@@ -45,8 +43,7 @@ export async function GET() {
       canSave: false,
       connected: true,
       reconnectRequired: true,
-      quotaFull: false,
-      usage: { used, limit: generationLimit },
+      usage: { used },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
     });
@@ -59,8 +56,7 @@ export async function GET() {
       canSave: false,
       connected: true,
       reconnectRequired: true,
-      quotaFull: false,
-      usage: { used, limit: generationLimit },
+      usage: { used },
       warning:
         "Google Drive needs to be reconnected. This generation will not be saved to Gallery unless Drive is reconnected first.",
     });
@@ -70,8 +66,7 @@ export async function GET() {
     canSave: true,
     connected: true,
     reconnectRequired: false,
-    quotaFull: false,
-    usage: { used, limit: generationLimit },
+    usage: { used },
     warning: null,
   });
 }

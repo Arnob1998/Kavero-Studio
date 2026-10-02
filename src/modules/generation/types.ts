@@ -153,10 +153,8 @@ export interface DrivePreflightResponse {
   canSave: boolean;
   connected: boolean;
   reconnectRequired: boolean;
-  quotaFull: boolean;
   usage: {
     used: number;
-    limit: number | null;
   };
   warning: string | null;
 }
@@ -168,7 +166,7 @@ export interface WorkspaceStatusResponse {
   workspace?: {
     ready: boolean;
     missing: Array<
-      "auth" | "gemini-key" | "google-drive" | "google-drive-reconnect" | "storage" | "quota"
+      "auth" | "gemini-key" | "google-drive" | "google-drive-reconnect" | "storage"
     >;
   };
   storage?: {
@@ -180,10 +178,8 @@ export interface WorkspaceStatusResponse {
   drive: {
     connected: boolean;
     reconnectRequired: boolean;
-    quotaFull: boolean;
     usage: {
       used: number;
-      limit: number | null;
     };
   };
 }

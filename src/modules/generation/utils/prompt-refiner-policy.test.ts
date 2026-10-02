@@ -61,8 +61,7 @@ function workspaceStatus({
     drive: {
       connected: true,
       reconnectRequired: false,
-      quotaFull: false,
-      usage: { used: 0, limit: 20 },
+      usage: { used: 0 },
     },
   };
 }
