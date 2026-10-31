@@ -1,0 +1,3 @@
+Qwen is licensed under the Qwen RESEARCH LICENSE AGREEMENT, Copyright (c) 2026 Hangzhou Tongyi Laboratory Technology Co., Ltd. All Rights Reserved.
+
+Image diffusion weights are the upstream Abiray GGUF conversion; the VAE is the upstream Comfy-Org repack. Kavero has not modified these pinned files. Research/evaluation use only; no commercial permission is granted by Kavero.

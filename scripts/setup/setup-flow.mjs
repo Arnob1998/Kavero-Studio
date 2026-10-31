@@ -420,7 +420,7 @@ export async function runSetupWizard({
 
     if (runNow) {
       prompts.outro(`Starting Kavero. Open http://127.0.0.1:${inputs.KAVERO_APP_PORT} when it is ready.`);
-      const runResult = runLocalDocker({ cwd });
+      const runResult = await runLocalDocker({ cwd });
       if (runResult.status !== 0) {
         process.exitCode = runResult.status ?? 1;
       }

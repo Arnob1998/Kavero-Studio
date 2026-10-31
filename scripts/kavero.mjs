@@ -36,7 +36,7 @@ async function main() {
   }
 
   if (command === "run") {
-    const result = runLocalDockerStack();
+    const result = await runLocalDockerStack();
     process.exitCode = result.status ?? 1;
     return;
   }

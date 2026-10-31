@@ -53,6 +53,10 @@ http://127.0.0.1:3000
 
 The setup wizard creates local env files safely, protects existing secrets, and can start the local Docker stack for you.
 
+On supported Windows x64 machines, **Generate → Local** offers the user-selected Qwen image research profile. Kavero checks the GPU/RAM, shows the pinned model terms, and downloads and installs the engine, model, encoder and VAE after you accept. No separate ComfyUI installation, planning model or paid provider key is needed. Initial support is one NVIDIA RTX 30/40 GPU with at least 8 GB VRAM and 16 GB RAM; other eligible GPUs have no measured timing yet. Operators can disable Local by setting `KAVERO_LOCAL_GENERATION_ENABLED=0` in `.env.docker.local` before starting the stack.
+
+Local generation saves to the configured destination; inference on your GPU does not change that destination. The default Docker setup uses local managed storage and does not need Google sign-in. Deployments configured for Drive use a separate **Settings → Storage → Connect Drive** connection; live acceptance of local-generation Drive saves is still pending.
+
 ## Choose Your Setup
 
 ### Local Docker

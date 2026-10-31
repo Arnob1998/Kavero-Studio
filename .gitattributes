@@ -1,2 +1,4 @@
 *.sh text eol=lf
 docker/supabase/init/*.sh text eol=lf
+scripts/local-generation/install/qwen-recipe.json -text
+scripts/local-generation/notices/qwen-research-v1/* -text

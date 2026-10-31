@@ -1,0 +1,539 @@
+{
+  "schema": 1,
+  "auditedAt": "2026-10-03",
+  "packageId": "qwen-image-2.1-q4-evaluation",
+  "packageFingerprint": "d9cd1dc7cc93a20c2ffc8cc780393a04cfc6043a5560ddf12f2924c3ea575f07",
+  "publicApproved": false,
+  "noticesVerified": false,
+  "purpose": "research/evaluation only; a free feature or user checkbox alone does not establish eligibility of Kavero delivery",
+  "components": [
+    {
+      "path": "downloads/engine.zip",
+      "bytes": 30067605,
+      "sha256": "60e6850d650417409f18c2170ab5e27335db96da70cd3d1ad1e930bcffc2fd35",
+      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-929-3f8527a/sd-master-3f8527a-bin-win-vulkan-x64.zip",
+      "terms": "MIT engine plus bundled dependency notices"
+    },
+    {
+      "path": "downloads/qwen_image_2.1_Q4_K_M.gguf",
+      "bytes": 4189343904,
+      "sha256": "dc956c958fbfa1d5c64ec316d7e865283d17d97a9eb332a4a74a4d63afaae9a5",
+      "url": "https://huggingface.co/Abiray/Qwen-Image-2.1-GGUF/resolve/c9dd12108f53974cd1e0abd708df042d6df0ca8d/qwen_image_2.1_Q4_K_M.gguf",
+      "terms": "Qwen Research License: research/evaluation only"
+    },
+    {
+      "path": "downloads/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "bytes": 5027784800,
+      "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2",
+      "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "terms": "Apache-2.0 declared by pinned encoder card"
+    },
+    {
+      "path": "downloads/qwen_image_2.1_vae_bf16.safetensors",
+      "bytes": 675509688,
+      "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/cb504a4090723e43f17ad01cec0359490e2de613/vae/qwen_image_2.1_vae_bf16.safetensors",
+      "terms": "Qwen Research License: research/evaluation only"
+    }
+  ],
+  "allPayloadFiles": [
+    {
+      "path": "downloads/engine.zip",
+      "bytes": 30067605,
+      "sha256": "60e6850d650417409f18c2170ab5e27335db96da70cd3d1ad1e930bcffc2fd35"
+    },
+    {
+      "path": "downloads/qwen_image_2.1_Q4_K_M.gguf",
+      "bytes": 4189343904,
+      "sha256": "dc956c958fbfa1d5c64ec316d7e865283d17d97a9eb332a4a74a4d63afaae9a5"
+    },
+    {
+      "path": "downloads/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "bytes": 5027784800,
+      "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+    },
+    {
+      "path": "downloads/qwen_image_2.1_vae_bf16.safetensors",
+      "bytes": 675509688,
+      "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+    },
+    {
+      "path": "engine/ggml-base.dll",
+      "bytes": 681984,
+      "sha256": "735999bf82d5fb52657ba145cccac30d3128e2d688394b6968f50b71efc8a958"
+    },
+    {
+      "path": "engine/ggml-cpu-alderlake.dll",
+      "bytes": 904192,
+      "sha256": "7ef25ea2fc8c3913f0b3dae6b25c1f316d08d30527905025c68fc3393ed86caa"
+    },
+    {
+      "path": "engine/ggml-cpu-cannonlake.dll",
+      "bytes": 949248,
+      "sha256": "654abb884dfd137fb62be16d4815d2bf6afcc04e267420d6056e61205e27826c"
+    },
+    {
+      "path": "engine/ggml-cpu-cascadelake.dll",
+      "bytes": 946176,
+      "sha256": "3057e2d40f9591139bf1126c866b449a692d0068acce722089feb30347d61416"
+    },
+    {
+      "path": "engine/ggml-cpu-haswell.dll",
+      "bytes": 905216,
+      "sha256": "8958b6f234d1d364121114f76827e1608c82d1bdbfd327d2a8769a50a83821dd"
+    },
+    {
+      "path": "engine/ggml-cpu-icelake.dll",
+      "bytes": 946176,
+      "sha256": "1af8a5d354964001c7fd41bf8233f47c5a03365d591ba1da22e5347d8b59fbb7"
+    },
+    {
+      "path": "engine/ggml-cpu-sandybridge.dll",
+      "bytes": 879616,
+      "sha256": "5eefd377250abf0e0046e47045aa1f4689a22293e2476101a9a40827d7c399be"
+    },
+    {
+      "path": "engine/ggml-cpu-skylakex.dll",
+      "bytes": 949248,
+      "sha256": "3f873e265b46c74f02f7e91bd343d5089a888e726ebc4a35cae97f9607361d7d"
+    },
+    {
+      "path": "engine/ggml-cpu-sse42.dll",
+      "bytes": 866304,
+      "sha256": "6998840b42451e3e4b48d134875e9faad3733d2405e91ffe27b7e44a1784ff79"
+    },
+    {
+      "path": "engine/ggml-cpu-x64.dll",
+      "bytes": 867840,
+      "sha256": "8699309c7dabbd8ae037e962ba9e8d1073ed7411449e8bcf7474716bd95704c8"
+    },
+    {
+      "path": "engine/ggml-vulkan.dll",
+      "bytes": 42662912,
+      "sha256": "7c24c7ff74dd408e397e0a24118b60bb8b28d76439d1e0ff3d9a5b564b36667f"
+    },
+    {
+      "path": "engine/ggml.dll",
+      "bytes": 59392,
+      "sha256": "8a2bb16f90aa1183494b045d32234deb15e0521338836cd46abbec0a377db847"
+    },
+    {
+      "path": "engine/ggml.txt",
+      "bytes": 1099,
+      "sha256": "bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285"
+    },
+    {
+      "path": "engine/libsharpyuv.dll",
+      "bytes": 24576,
+      "sha256": "ad6ca2411a2f51f5b0571b8de54a4694d58ebc0f173a80ed502bdf5d13c90596"
+    },
+    {
+      "path": "engine/libwebp.dll",
+      "bytes": 373248,
+      "sha256": "1b089576a9c0203c361bfe5684a8a7ced3e7dbceed1eb285294cabe7a8af58e4"
+    },
+    {
+      "path": "engine/libwebpmux.dll",
+      "bytes": 41984,
+      "sha256": "714ba99dfd869d83883afcd0f4a925339162390b9920e18b74d093e9ddb60cc3"
+    },
+    {
+      "path": "engine/sd-cli.exe",
+      "bytes": 656384,
+      "sha256": "40e2e2703e7efca2dc3f1823ef5f48f136f8fc740567b3b8f298b74788bc93ae"
+    },
+    {
+      "path": "engine/sd-server.exe",
+      "bytes": 1155584,
+      "sha256": "54597e7c29aae127edebf492f310e0ab9ecee3e2c08f5fb9b30a453139cbeb84"
+    },
+    {
+      "path": "engine/stable-diffusion.cpp.txt",
+      "bytes": 1082,
+      "sha256": "4e76049398df734a97db46f3bd4b5cbc460cb5f6bfaf737cdc3d6fbb8ab3de27"
+    },
+    {
+      "path": "engine/stable-diffusion.dll",
+      "bytes": 35304448,
+      "sha256": "4846efaf47bf4bdac3cc63dad4163968539cd61880596e39a05663dccd8c24b6"
+    },
+    {
+      "path": "engine/webm.dll",
+      "bytes": 328192,
+      "sha256": "81ea3c6bf40ecf9a5b2cf44a1a7abe14a60241d123b1a8f233c60ed0748ad824"
+    }
+  ],
+  "termsFiles": [
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/darts-clone-LICENSE.txt",
+      "bytes": 1481,
+      "sha256": "155f59997298ee336602c49f9c1110f268ac394ca2197eb02647a3555935ad52"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-httplib-h.txt",
+      "bytes": 96,
+      "sha256": "c419e87ea57b0e9e4f60782fd97e4bfffccfca5404a7b3225014cbf7276cce22"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-json-hpp.txt",
+      "bytes": 17416,
+      "sha256": "b5c679de66b43cdc7fabfa001e23346cbd2875f0e158214f000242479b93fefa"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-miniz-h.txt",
+      "bytes": 14072,
+      "sha256": "349513e340fa52848e1ec42a2dc2db18e4e8d98270ee6ad3b1fc4c276fc200e4"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-stb_image_resize-h.txt",
+      "bytes": 8080,
+      "sha256": "9488a3b46dfad6dc2d77ff181fe811b3da47f580d37a3a1aa368d8b32b8adbd7"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-stb_image_write-h.txt",
+      "bytes": 9575,
+      "sha256": "deb787c2ed727c0f293cce6a82e5e2f4ed1fe5c1509087ba35b732d3e764e098"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-stb_image-h.txt",
+      "bytes": 9838,
+      "sha256": "7135fb9b252883afafe2b55dbcb9f809eb61285210c71b18045a5cb06cc059ec"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-zip-c.txt",
+      "bytes": 467,
+      "sha256": "a172b8c2f152e58f6f25cc67f053ae6451b81b7ba350a174f9426aa6f2e93f46"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-zip-h.txt",
+      "bytes": 467,
+      "sha256": "a172b8c2f152e58f6f25cc67f053ae6451b81b7ba350a174f9426aa6f2e93f46"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/encoder-Apache-LICENSE.txt",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/encoder-card.txt",
+      "bytes": 7851,
+      "sha256": "6017026aa3f34f73ecff79aba398fd2c797baa99804e2e16f8b2ee2818a84078"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/engine-build-workflow.txt",
+      "bytes": 31093,
+      "sha256": "274b5c45d671b460476f74d0b6c8c6711362539d33dc9ae554c701bab27fca01"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/engine-LICENSE.txt",
+      "bytes": 1062,
+      "sha256": "b53fa08f515cb5a6fff7b9fd8fcd0961a4b80df29d74372d25e1f9171aa042ee"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/engine-thirdparty-index.txt",
+      "bytes": 1102,
+      "sha256": "9b6409f4d51f1b397a7cc268a370390605a4b9117da8d2cf5c9be6093b7eb724"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/ggml-LICENSE.txt",
+      "bytes": 1078,
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/httplib-LICENSE.txt",
+      "bytes": 1075,
+      "sha256": "4b45cbe16d7b71b89ae6127e26e0d90a029198ca5e958ad8e3d0b8bbed364d8b"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/image-card.txt",
+      "bytes": 3807,
+      "sha256": "64c6a3f1098d40dde7d234967b2dbb4ae4533d99002ddd18cc437bd93f901248"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/json-LICENSE.txt",
+      "bytes": 1076,
+      "sha256": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebm-LICENSE.txt",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebm-PATENTS.txt",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebp-COPYING.txt",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebp-PATENTS.txt",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/Notice.txt",
+      "bytes": 377,
+      "sha256": "5eb904c6bbc6bdc5e7faf3be85b158ede9e15d97cc75de2cc9703b98547cf496"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/oniguruma-COPYING.txt",
+      "bytes": 1366,
+      "sha256": "0dff717fb611b9c9bd9776a5df9c4e029030f8dbc023b77f3678cf495495b933"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/qwen-image-LICENSE.txt",
+      "bytes": 7831,
+      "sha256": "8dc973f024ff95966bea25866efa443fd16776dcb1001e681e3d467ea572b28d"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/server-frontend-LICENSE.txt",
+      "bytes": 1063,
+      "sha256": "284389c9a1f1feb68465505dbb13f41147687254b2aa62ef5d138a62cfb5bb08"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/utf8proc-LICENSE.txt",
+      "bytes": 5218,
+      "sha256": "767edbcafb23016d7f203aaf2cbdef5690ad58bcede52ee241427dcb816cd644"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/vae-card.txt",
+      "bytes": 4597,
+      "sha256": "d9b55bb1a456ec844800f29958193bb85963e83083ec9d2f0ed8f7a23a115847"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/zip-upstream-LICENSE.txt",
+      "bytes": 1064,
+      "sha256": "6c1643ab0353b42030e903654fdb3845570b741da5ffafcaf9d305e8ec79a4a0"
+    }
+  ],
+  "termsIdentity": "35dc562ce673a5602f6f03d377538b52a8af144384ec85829d430c63f0e9ad41",
+  "evidence": [
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/qwen-image-LICENSE.txt",
+      "url": "https://huggingface.co/Qwen/Qwen-Image-2.1/raw/d26bb61231c349cf6b7896fa83353113880e1ba3/LICENSE",
+      "bytes": 7831,
+      "sha256": "8dc973f024ff95966bea25866efa443fd16776dcb1001e681e3d467ea572b28d"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/encoder-Apache-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/QwenLM/Qwen3-VL/96588727e44c78b25ba03ea03b8e12f7e64fd0da/LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/engine-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/LICENSE",
+      "bytes": 1062,
+      "sha256": "b53fa08f515cb5a6fff7b9fd8fcd0961a4b80df29d74372d25e1f9171aa042ee"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/ggml-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/leejet/ggml/89c4413f5da6fb20cc796f16033d37f129be81fd/LICENSE",
+      "bytes": 1078,
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/darts-clone-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/LICENSE.darts_clone.txt",
+      "bytes": 1481,
+      "sha256": "155f59997298ee336602c49f9c1110f268ac394ca2197eb02647a3555935ad52"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/oniguruma-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/oniguruma/COPYING",
+      "bytes": 1366,
+      "sha256": "0dff717fb611b9c9bd9776a5df9c4e029030f8dbc023b77f3678cf495495b933"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/utf8proc-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/utf8proc/LICENSE.md",
+      "bytes": 5218,
+      "sha256": "767edbcafb23016d7f203aaf2cbdef5690ad58bcede52ee241427dcb816cd644"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebp-COPYING.txt",
+      "url": "https://raw.githubusercontent.com/webmproject/libwebp/0c9546f7efc61eac7f79ae115c3f99c91c21c443/COPYING",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebp-PATENTS.txt",
+      "url": "https://raw.githubusercontent.com/webmproject/libwebp/0c9546f7efc61eac7f79ae115c3f99c91c21c443/PATENTS",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebm-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/webmproject/libwebm/5bf12267eea773a32fcf4949de52b0add158a8d5/LICENSE.TXT",
+      "bytes": 1496,
+      "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/libwebm-PATENTS.txt",
+      "url": "https://raw.githubusercontent.com/webmproject/libwebm/5bf12267eea773a32fcf4949de52b0add158a8d5/PATENTS.TXT",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/server-frontend-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/leejet/sdcpp-webui/dd74a8e808aaa8b26124217424b23058935184de/LICENSE",
+      "bytes": 1063,
+      "sha256": "284389c9a1f1feb68465505dbb13f41147687254b2aa62ef5d138a62cfb5bb08"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/image-card.txt",
+      "url": "https://huggingface.co/Abiray/Qwen-Image-2.1-GGUF/raw/c9dd12108f53974cd1e0abd708df042d6df0ca8d/README.md",
+      "bytes": 3807,
+      "sha256": "64c6a3f1098d40dde7d234967b2dbb4ae4533d99002ddd18cc437bd93f901248"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/encoder-card.txt",
+      "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/raw/f982a07559d4a2f6c8744d840bf6fccab30eea96/README.md",
+      "bytes": 7851,
+      "sha256": "6017026aa3f34f73ecff79aba398fd2c797baa99804e2e16f8b2ee2818a84078"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/vae-card.txt",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/raw/cb504a4090723e43f17ad01cec0359490e2de613/README.md",
+      "bytes": 4597,
+      "sha256": "d9b55bb1a456ec844800f29958193bb85963e83083ec9d2f0ed8f7a23a115847"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/engine-build-workflow.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/.github/workflows/build.yml",
+      "bytes": 31093,
+      "sha256": "274b5c45d671b460476f74d0b6c8c6711362539d33dc9ae554c701bab27fca01"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/engine-thirdparty-index.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/README.md",
+      "bytes": 1102,
+      "sha256": "9b6409f4d51f1b397a7cc268a370390605a4b9117da8d2cf5c9be6093b7eb724"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/httplib-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/yhirose/cpp-httplib/adf58bf474fac638160592d6c3f67da4ebc7df20/LICENSE",
+      "bytes": 1075,
+      "sha256": "4b45cbe16d7b71b89ae6127e26e0d90a029198ca5e958ad8e3d0b8bbed364d8b"
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/json-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/nlohmann/json/bc889afb4c5bf1c0d8ee29ef35eaaf4c8bef8a5d/LICENSE.MIT",
+      "bytes": 1076,
+      "sha256": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14"
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-httplib-h.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/httplib.h",
+      "bytes": 458597,
+      "sha256": "97e06056511a6712d7bab1848a9068eabb80d96de4bd8237083c8089584881a8",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-httplib-h.txt",
+        "bytes": 96,
+        "sha256": "c419e87ea57b0e9e4f60782fd97e4bfffccfca5404a7b3225014cbf7276cce22",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-json-hpp.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/json.hpp",
+      "bytes": 907858,
+      "sha256": "665fa14b8af3837966949e8eb0052d583e2ac105d3438baba9951785512cf921",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-json-hpp.txt",
+        "bytes": 17416,
+        "sha256": "b5c679de66b43cdc7fabfa001e23346cbd2875f0e158214f000242479b93fefa",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-miniz-h.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/miniz.h",
+      "bytes": 395897,
+      "sha256": "530061101f19852ddcb1384259a3301c9764be59414c17a4d245c09b96d21383",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-miniz-h.txt",
+        "bytes": 14072,
+        "sha256": "349513e340fa52848e1ec42a2dc2db18e4e8d98270ee6ad3b1fc4c276fc200e4",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-zip-c.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/zip.c",
+      "bytes": 58771,
+      "sha256": "4c6de45d7ffbebadd70f468f5892ff380cea6d997e6deb910b65c04654e74d90",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-zip-c.txt",
+        "bytes": 467,
+        "sha256": "a172b8c2f152e58f6f25cc67f053ae6451b81b7ba350a174f9426aa6f2e93f46",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-zip-h.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/zip.h",
+      "bytes": 16651,
+      "sha256": "8ede649cf053c54c5fd86c7311122db3afe990f1a102ffaf3b2a0aa5c575708d",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-zip-h.txt",
+        "bytes": 467,
+        "sha256": "a172b8c2f152e58f6f25cc67f053ae6451b81b7ba350a174f9426aa6f2e93f46",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-stb_image-h.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/stb_image.h",
+      "bytes": 284733,
+      "sha256": "38e08c1c5ab8869ae8d605ddaefa85ad3fea24a2964fd63a099c0c0f79c70bcc",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-stb_image-h.txt",
+        "bytes": 9838,
+        "sha256": "7135fb9b252883afafe2b55dbcb9f809eb61285210c71b18045a5cb06cc059ec",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-stb_image_resize-h.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/stb_image_resize.h",
+      "bytes": 113565,
+      "sha256": "8b430895b231a541c234cb7441756e9f4c857ea140dbf3275dfdf12f92b83082",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-stb_image_resize-h.txt",
+        "bytes": 8080,
+        "sha256": "9488a3b46dfad6dc2d77ff181fe811b3da47f580d37a3a1aa368d8b32b8adbd7",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "docs/local-generation-proof/lg3d1-sources/source-stb_image_write-h.txt",
+      "url": "https://raw.githubusercontent.com/leejet/stable-diffusion.cpp/3f8527a46c54ecf4cb4ed6003da8e8982283c73c/thirdparty/stb_image_write.h",
+      "bytes": 72926,
+      "sha256": "683e15c6dfdc2d57b06b9e166ba27665328e0854a9c1130c2ba9958afaf2f8da",
+      "extracted": {
+        "path": "scripts/local-generation/notices/qwen-research-v1/embedded-notices-stb_image_write-h.txt",
+        "bytes": 9575,
+        "sha256": "deb787c2ed727c0f293cce6a82e5e2f4ed1fe5c1509087ba35b732d3e764e098",
+        "method": "All source comment blocks matching copyright, permission, licensed-under, public-domain or SPDX-License. Audit extraction, not binary license completeness attestation."
+      }
+    },
+    {
+      "path": "scripts/local-generation/notices/qwen-research-v1/zip-upstream-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/kuba--/zip/dd80aeab4293d1e11e31af20fabfd538d88625ef/LICENSE.txt",
+      "bytes": 1064,
+      "sha256": "6c1643ab0353b42030e903654fdb3845570b741da5ffafcaf9d305e8ec79a4a0",
+      "note": "Engine thirdparty README identifies kuba--/zip and its MIT license. Vendored zip files carry only disclaimer; exact vendored upstream revision is not declared. Reconcile during delivery assembly; this notice is not a binary-origin attestation."
+    }
+  ],
+  "remainingReleaseChecks": [
+    "Final installed Notice/license assembly and extraction review, including binaries and embedded frontend dependencies in the unchanged engine ZIP; inventory is evidence, not approval.",
+    "Delivery-purpose assessment under Qwen Sections 2/3; no blanket upstream-permission gate for rights expressly granted. Commercial-purpose delivery needs separate rights.",
+    "Owner/version/purpose-bound acknowledgement and direct fixed-source installation in LG-3D.2; no automatic download from this audit."
+  ],
+  "engineNoticeCorrection": "The pinned archive includes stable-diffusion.cpp.txt and ggml.txt. The engine MIT notice is present, contrary to previous filename-only audit."
+}

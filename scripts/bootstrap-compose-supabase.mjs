@@ -152,6 +152,10 @@ async function main() {
   console.log("Applying supabase/local-foundation.sql...");
   applySql("local foundation", options.foundation);
 
+  applySql("local generation jobs", path.join(repoRoot, "supabase", "migrations", "202610020001_local_generation_jobs.sql"));
+  applySql("local generation outputs", path.join(repoRoot, "supabase", "migrations", "202610020002_local_generation_outputs.sql"));
+  applySql("local generation saves", path.join(repoRoot, "supabase", "migrations", "202610030001_local_generation_saves.sql"));
+
   console.log("Verifying required extensions...");
   const extensions = queryScalar(
     "select count(*) = 2 from pg_extension where extname in ('pgcrypto', 'supabase_vault');",
