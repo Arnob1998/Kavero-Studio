@@ -5,7 +5,7 @@ import { mkdtempSync,rmSync,readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';import os from 'node:os';import path from 'node:path';
 import { initializeHost } from './bootstrap.mjs';
 import { ActivationManager } from './activation.mjs';
-import { EVALUATION_PACKAGE,MODEL_RECEIPT_HASH,MODEL_RECEIPT,MODEL_VERSION,verifyModel } from './model-package.mjs';
+import { EVALUATION_PACKAGE,MODEL_RECEIPT_HASH,MODEL_RECEIPT,MODEL_VERSION,verifyModel,managedPackageIdentity } from './model-package.mjs';
 import { Ledger,intentHash } from '../ledger.mjs';
 import { packageWorker } from './bundle.mjs';
 const contexts=[];
@@ -13,7 +13,7 @@ afterEach(()=>{for(const ctx of contexts.splice(0)){try{ctx.manager.worker?.ledg
 function make(overrides={},evaluation=true){
   const root=mkdtempSync(path.join(os.tmpdir(),'kavero-activation-')),base=initializeHost(root,{protect:()=>{}}),config={...base.config,internalEvaluation:evaluation};
   const db=new DatabaseSync(':memory:');let launches=0;
-  const verify=async()=>({packageId:EVALUATION_PACKAGE,receipt:MODEL_RECEIPT_HASH,packageRoot:root});
+  const verify=async()=>({...managedPackageIdentity(EVALUATION_PACKAGE),packageRoot:root});
   const start=async configPath=>{launches++;const workerConfig=JSON.parse(readFileSync(configPath,'utf8')),ledger=new Ledger(path.join(workerConfig.stateRoot,'ledger.sqlite'));return {epoch:randomUUID(),ledger,async close({token}){ledger.assertQuiescent(token);ledger.close();}};};
   const manager=new ActivationManager(config,db,{files:base.files,verify,start,...overrides}),ctx={root,files:base.files,config,db,manager,owner:randomUUID(),key:randomUUID(),launches:()=>launches};contexts.push(ctx);return ctx;
 }
@@ -54,6 +54,74 @@ describe('Managed activation identity and rollback',()=>{
   it('does not allow another owner to take over a failed update barrier',async()=>{const ctx=make(),op=admit(ctx);await ctx.manager.run(ctx.owner,op.id);ctx.manager.worker.ledger.submit(job());ctx.key=randomUUID();const next=admit(ctx);await ctx.manager.run(ctx.owner,next.id);const token=ctx.manager.worker.ledger.maintenance().token;const other=randomUUID(),attempt=ctx.manager.admit({owner:other,key:randomUUID(),packageId:EVALUATION_PACKAGE});await ctx.manager.run(other,attempt.id);expect(ctx.manager.worker.ledger.maintenance().token).toBe(token);expect(ctx.db.prepare('SELECT owner FROM activation_guard').get().owner).toBe(ctx.owner);});
   it('reconciles a committed acknowledgement with a retained barrier on explicit owner replay',async()=>{const ctx=make(),op=admit(ctx);await ctx.manager.run(ctx.owner,op.id);const token=randomUUID();ctx.manager.worker.ledger.beginMaintenance(token,'update');ctx.db.prepare("INSERT INTO activation_guard VALUES(1,?,'update',?,?)").run(token,op.id,ctx.owner);ctx.manager.worker.ledger.close();ctx.manager.worker=null;await ctx.manager.restore();expect(ctx.manager.status().state).toBe('maintenance');expect((await ctx.manager.run(ctx.owner,op.id)).state).toBe('installed');expect(ctx.manager.status().inferenceReady).toBe(true);expect(ctx.db.prepare('SELECT count(*) n FROM activations').get().n).toBe(1);});
   it('keeps the previous pointer and closed admission when candidate and rollback startup both fail',async()=>{const ctx=make(),op=admit(ctx);await ctx.manager.run(ctx.owner,op.id);ctx.manager.start=async()=>{throw Error('runtime unavailable');};ctx.key=randomUUID();const next=admit(ctx);expect((await ctx.manager.run(ctx.owner,next.id)).state).toBe('failed');expect(ctx.manager.status().state).toBe('recovery-required');expect(ctx.manager.status().inferenceReady).toBe(false);expect(ctx.db.prepare('SELECT receipt FROM active_worker').get().receipt).toBe(MODEL_RECEIPT_HASH);const ledger=new Ledger(ctx.files.resolve('generation/ledger.sqlite'));expect(ledger.maintenance()).not.toBeNull();ledger.close();});
+  it.each(['packageId','receipt','profile'])('rejects a verifier returning the wrong %s before stopping the active worker',async field=>{
+    const ctx=make(),first=admit(ctx);await ctx.manager.run(ctx.owner,first.id);const worker=ctx.manager.worker;
+    ctx.manager.verify=async()=>({...managedPackageIdentity(EVALUATION_PACKAGE),packageRoot:ctx.root,[field]:'different'});
+    ctx.key=randomUUID();const candidate=admit(ctx);expect((await ctx.manager.run(ctx.owner,candidate.id)).state).toBe('failed');
+    expect(ctx.manager.worker).toBe(worker);expect(ctx.launches()).toBe(1);expect(ctx.manager.status().inferenceReady).toBe(true);expect(worker.ledger.maintenance()).toBeNull();
+  });
+  it('rejects an unknown package before admitting a journal entry or reading files',async()=>{
+    const ctx=make();expect(()=>ctx.manager.admit({owner:ctx.owner,key:ctx.key,packageId:'unverified-link'})).toThrow('activation-package-unavailable');
+    expect(ctx.db.prepare('SELECT count(*) n FROM activations').get().n).toBe(0);
+    await expect(verifyModel(ctx.files,{packageId:'unverified-link'})).rejects.toThrow('activation-package-unavailable');
+  });
+  it.each([false,true])('refuses historical activation replay after another package became active (worker stopped: %s)',async stopped=>{
+    const ctx=make(),first=admit(ctx);await ctx.manager.run(ctx.owner,first.id);
+    // Synthetic second identity exercises switching semantics only. Production
+    // registry still contains just the physically verified Q4 package.
+    const second={packageId:'fixture-second-profile',receipt:'b'.repeat(64),profile:'c'.repeat(64)};
+    ctx.manager.identity=id=>id===second.packageId?second:managedPackageIdentity(id);
+    ctx.manager.verify=async(_files,{packageId})=>({...ctx.manager.identity(packageId),packageRoot:ctx.root});
+    const appFence={id:randomUUID(),from:ctx.manager.model.profile,target:second.profile,ledgerIdentity:ctx.manager.worker.ledger.identity};
+    const next=ctx.manager.admit({owner:ctx.owner,key:randomUUID(),packageId:second.packageId,appFence});expect((await ctx.manager.run(ctx.owner,next.id)).state).toBe('installed');
+    const token=randomUUID();ctx.manager.worker.ledger.beginMaintenance(token,'update');ctx.db.prepare("INSERT INTO activation_guard VALUES(1,?,'update',?,?)").run(token,next.id,ctx.owner);
+    if(stopped){await ctx.manager.worker.close({token});ctx.manager.worker=null;}
+    await expect(ctx.manager.run(ctx.owner,first.id)).rejects.toThrow('activation-no-longer-active');
+    expect(ctx.launches()).toBe(2);expect(ctx.manager.active().package_id).toBe(second.packageId);expect(ctx.db.prepare('SELECT token FROM activation_guard').get().token).toBe(token);
+    if(!stopped)expect(ctx.manager.worker.ledger.maintenance().token).toBe(token);
+  });
+  it.each([false,true])('keeps the committed worker when maintenance cleanup fails (barrier already removed: %s)',async removed=>{
+    const ctx=make(),original=ctx.manager.start;ctx.manager.start=async config=>{
+      const worker=await original(config),end=worker.ledger.endMaintenance.bind(worker.ledger);let fail=true;
+      worker.ledger.endMaintenance=token=>{if(fail){fail=false;if(removed)end(token);throw Error('cleanup failure');}return end(token);};return worker;
+    };
+    const op=admit(ctx);expect((await ctx.manager.run(ctx.owner,op.id)).state).toBe('installed');
+    expect(ctx.manager.worker).not.toBeNull();expect(ctx.launches()).toBe(1);expect(ctx.manager.active().receipt).toBe(MODEL_RECEIPT_HASH);
+    expect(ctx.manager.status().inferenceReady).toBe(removed);expect(ctx.db.prepare('SELECT count(*) n FROM activation_guard').get().n).toBe(1);
+    expect((await ctx.manager.run(ctx.owner,op.id)).state).toBe('installed');expect(ctx.manager.status().inferenceReady).toBe(true);
+    expect(ctx.db.prepare('SELECT count(*) n FROM activation_guard').get().n).toBe(0);expect(ctx.launches()).toBe(1);
+  });
+  it('does not restore a verifier result that differs from the durable package',async()=>{
+    const ctx=make(),op=admit(ctx);await ctx.manager.run(ctx.owner,op.id);await ctx.manager.shutdown();
+    const restored=new ActivationManager(ctx.config,ctx.db,{files:ctx.files,start:ctx.manager.start,verify:async()=>({...managedPackageIdentity(EVALUATION_PACKAGE),profile:'wrong',packageRoot:ctx.root})});ctx.manager=restored;
+    await restored.restore();expect(restored.status().state).toBe('recovery-required');expect(restored.status().inferenceReady).toBe(false);expect(ctx.launches()).toBe(1);
+  });
+  it('reports readiness false when the durable pointer differs from the loaded package',async()=>{
+    const ctx=make(),op=admit(ctx);await ctx.manager.run(ctx.owner,op.id);ctx.db.prepare('UPDATE active_worker SET receipt=?').run('b'.repeat(64));
+    expect(ctx.manager.status().inferenceReady).toBe(false);await expect(ctx.manager.run(ctx.owner,op.id)).rejects.toThrow('activation-no-longer-active');
+  });
+  it('requires and freezes an app fence before a different package can stop the worker',async()=>{
+    const ctx=make(),op=admit(ctx);await ctx.manager.run(ctx.owner,op.id);
+    const second={packageId:'fixture-second',receipt:'b'.repeat(64),profile:'c'.repeat(64)},original=managedPackageIdentity(EVALUATION_PACKAGE);
+    ctx.manager.identity=id=>id===second.packageId?second:managedPackageIdentity(id);
+    const body={owner:ctx.owner,key:randomUUID(),packageId:second.packageId};
+    expect(()=>ctx.manager.admit(body)).toThrow('activation-app-fence-required');expect(ctx.launches()).toBe(1);
+    const appFence={id:randomUUID(),from:original.profile,target:second.profile,ledgerIdentity:ctx.manager.worker.ledger.identity};
+    expect(()=>ctx.manager.admit({...body,appFence:{...appFence,ledgerIdentity:randomUUID()}})).toThrow('activation-app-fence-changed');
+    const accepted=ctx.manager.admit({...body,appFence});expect(ctx.manager.admit({...body,appFence}).id).toBe(accepted.id);
+    expect(()=>ctx.manager.admit({...body,appFence:{...appFence,id:randomUUID()}})).toThrow('activation-idempotency-conflict');
+    expect(()=>ctx.db.prepare('UPDATE activations SET app_fence=null WHERE id=?').run(accepted.id)).toThrow('activation-identity-immutable');
+    ctx.manager.verify=async()=>({...second,packageRoot:ctx.root});
+    // Recheck the fence immediately before stopping: admission is not readiness.
+    ctx.manager.model={...ctx.manager.model,profile:'d'.repeat(64)};
+    expect((await ctx.manager.run(ctx.owner,accepted.id)).state).toBe('failed');expect(ctx.launches()).toBe(1);
+  });
+  it('acknowledges a same-key failed retry as admitted before asynchronous execution begins',async()=>{
+    const ctx=make(),op=admit(ctx);ctx.manager.verify=async()=>{throw Error('fixture failure');};
+    expect((await ctx.manager.run(ctx.owner,op.id)).state).toBe('failed');
+    expect(admit(ctx)).toMatchObject({id:op.id,state:'admitted',error:null});
+    expect(ctx.db.prepare('SELECT count(*) n FROM activations').get().n).toBe(1);
+  });
 });
 describe('Self-contained immutable worker bundle',()=>{
   it('includes the decoder and rejects additional executable content',()=>{

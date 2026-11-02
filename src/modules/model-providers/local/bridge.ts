@@ -5,6 +5,7 @@ import { localJobStates, type LocalJobRecord } from "@/modules/generation/local/
 import { localOutputStatusSchema, localOutputDescriptorSchema } from "@/modules/generation/local/output-contract";
 import { LOCAL_IMAGE_MAX_BYTES, validateLocalPNG } from "./png";
 import { LOCAL_FAILURE_CODES, LOCAL_FAILURE_STAGES } from "./failure";
+import {canonicalSnapshot,validateSnapshotIntent} from "./job-snapshot";
 
 const readinessSchema = z.object({
   ready: z.literal(true), epoch: z.string().uuid(), ledgerIdentity: z.string().uuid(),
@@ -54,6 +55,8 @@ export async function localBridgeRequest(path: string, body: unknown) {
 function verifyJobStatus(job: LocalJobRecord, result: z.infer<typeof statusSchema>) {
   if (result.id !== job.id || result.ledgerIdentity !== job.worker_identity) throw new Error("local-bridge-job-mismatch");
   const descriptor = result.output.descriptor;
+  if(job.recipe_snapshot)validateSnapshotIntent(job.intent,job.recipe_snapshot,job.package_fingerprint);
+  if(descriptor&&canonicalSnapshot(descriptor.recipeSnapshot??null)!==canonicalSnapshot(job.recipe_snapshot??null))throw new Error("local-output-identity-mismatch");
   if (descriptor && (descriptor.jobId !== job.id || descriptor.ownerId !== job.owner_id || descriptor.ledgerIdentity !== job.worker_identity
     || descriptor.requestHash !== job.request_hash || descriptor.packageFingerprint !== job.package_fingerprint || descriptor.deviceId !== job.device_id)) throw new Error("local-output-identity-mismatch");
   return result;
@@ -65,6 +68,7 @@ export async function submitLocalBridgeJob(job: LocalJobRecord, epoch: string) {
   const result = statusSchema.parse(await localBridgeRequest("/submit", {
     id: job.id, owner: job.owner_id, key: job.submission_key, intent: job.intent,
     hash: job.request_hash, fingerprint: job.package_fingerprint, device: job.device_id, ledgerIdentity: job.worker_identity, epoch,
+    ...(job.recipe_snapshot?{recipeSnapshot:validateSnapshotIntent(job.intent,job.recipe_snapshot,job.package_fingerprint)}:{}),
   }));
   return verifyJobStatus(job, result);
 }

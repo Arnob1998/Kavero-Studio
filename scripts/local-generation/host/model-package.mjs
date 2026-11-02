@@ -4,29 +4,42 @@ import { FINGERPRINT } from '../profile.mjs';
 import { sha,canonical } from '../install/manifest.mjs';
 import { InstallFiles } from '../install/filesystem.mjs';
 import { PackageInstaller } from '../install/transaction.mjs';
-import { qwenResearchDelivery } from '../install/qwen-delivery.mjs';
+import { qwenResearchDelivery,qwenQ3Delivery } from '../install/qwen-delivery.mjs';
+import {nativeProfile,Q3_FINGERPRINT} from '../profiles.mjs';
 import { validateManifest } from '../install/manifest.mjs';
 export const EVALUATION_PACKAGE='qwen-2-1-internal-evaluation';
+export const Q3_PACKAGE='qwen-2-1-q3-internal-evaluation';
 const pinned=JSON.parse(readFileSync(new URL('../profile.json',import.meta.url),'utf8'));
 const entries=[...pinned.files,{path:'evidence/package-manifest.json',bytes:5009,sha256:'a1a8dca181f17f960657f6d606510287ea8199368c9c1294ae4f2cebf5862c9f'}];
 export const MODEL_RECEIPT={schema:1,packageId:EVALUATION_PACKAGE,purpose:'internal-evaluation',publicApproved:false,profile:FINGERPRINT,files:entries};
 export const MODEL_RECEIPT_HASH=sha(canonical(MODEL_RECEIPT));
 export const MODEL_VERSION=`model-versions/${MODEL_RECEIPT_HASH}`;
+// Only verified, committed packages belong here. Discovery metadata and user
+// links cannot authorize an executable package or supply an activation receipt.
+export function managedPackageIdentity(packageId) {
+  if(packageId===Q3_PACKAGE){const profile=nativeProfile(Q3_FINGERPRINT),receipt={schema:1,packageId:Q3_PACKAGE,purpose:'internal-evaluation',publicApproved:false,profile:Q3_FINGERPRINT,files:[...profile.recipe.files,profile.metadata]};
+    return Object.freeze({packageId:Q3_PACKAGE,receipt:sha(canonical(receipt)),profile:Q3_FINGERPRINT});}
+  if(packageId!==EVALUATION_PACKAGE)throw Error('activation-package-unavailable');
+  return Object.freeze({packageId:EVALUATION_PACKAGE,receipt:MODEL_RECEIPT_HASH,profile:FINGERPRINT});
+}
+export function managedPackageDelivery(packageId){managedPackageIdentity(packageId);return packageId===Q3_PACKAGE?qwenQ3Delivery():qwenResearchDelivery();}
 export function readOnlyPackageSource(root){
   const absolute=path.resolve(root),actual=realpathSync(absolute);if(actual.toLowerCase()!==absolute.toLowerCase())throw Error('unsafe-install-link');
   const info=lstatSync(actual);if(!info.isDirectory()||info.isSymbolicLink())throw Error('unsafe-install-link');
   const guard=Object.create(InstallFiles.prototype);Object.assign(guard,{root:actual,device:info.dev,inode:info.ino});guard.check();
   return Object.freeze({matches:(relative,entry)=>guard.matches(relative,entry),resolve:relative=>guard.resolve(relative)});
 }
-export async function verifyModel(files,{check=()=>{}}={}) {
-  const manifest=qwenResearchDelivery(),verified=validateManifest(manifest,'internal-evaluation');
+export async function verifyModel(files,{check=()=>{},packageId=EVALUATION_PACKAGE}={}) {
+  const identity=managedPackageIdentity(packageId);
+  const manifest=managedPackageDelivery(packageId),verified=validateManifest(manifest,'internal-evaluation');
   if(files.exists('delivery')){
     const installer=new PackageInstaller({root:files.resolve('delivery',{directory:true}),instanceId:files.instanceId,catalog:[manifest],purpose:'internal-evaluation'});
     try{const version=`versions/${verified.hash}`;
       if(installer.files.exists(version)){check();if(!await installer.verifyVersion(version,verified))throw Error('model-receipt-changed');check();
-        return {packageId:EVALUATION_PACKAGE,receipt:MODEL_RECEIPT_HASH,profile:FINGERPRINT,deliveryManifest:verified.hash,packageRoot:installer.files.resolve(version,{directory:true})};}
+        return {...identity,deliveryManifest:verified.hash,packageRoot:installer.files.resolve(version,{directory:true})};}
     }finally{installer.close();}
   }
+  if(packageId!==EVALUATION_PACKAGE)throw Error('model-package-not-installed');
   const receipt=files.read(`${MODEL_VERSION}/.receipt.json`,32768).toString();
   if(canonical(JSON.parse(receipt))!==canonical(MODEL_RECEIPT))throw Error('model-receipt-changed');
   const actual=files.listTree(MODEL_VERSION);

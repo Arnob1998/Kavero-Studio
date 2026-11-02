@@ -1141,7 +1141,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
       title: "Connect image model",
       description: "Add your image generation model API key before generating images.",
       confirmLabel: "Add API key",
-      href: "/settings/api-keys",
+      href: "/settings/models?source=cloud",
       cancelLabel: "Cancel",
       icon: "model",
     });
@@ -2579,7 +2579,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
     </div>
     {localSwitchError && !localSource && <p role="alert" className="mt-2 max-w-xs rounded-xl border border-amber-300/20 bg-black p-3 text-xs text-amber-200">{localSwitchError}</p>}
   </div> : null;
-  if (localSource && localEnabled) return <main className="h-svh w-full overflow-y-auto bg-black font-sans text-white"><SiteNav activeLabel="Generate" ariaLabel="Generate navigation" />{sourceSwitch}<LocalGenerationPanel prompt={promptText} onPromptChange={setPromptText} /></main>;
+  if (localSource && localEnabled) return <main className="h-svh w-full overflow-y-auto bg-background font-sans text-text-primary"><SiteNav activeLabel="Generate" ariaLabel="Generate navigation" />{sourceSwitch}<LocalGenerationPanel prompt={promptText} onPromptChange={setPromptText} /></main>;
   return (
     <FloatingTooltip.Provider className="bg-black/72 text-white">
       {sourceSwitch}

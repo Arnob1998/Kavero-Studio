@@ -1,13 +1,13 @@
 import { evaluationEnabled,modelSelectionMode } from './selection.mjs';
 import { createHash,createHmac,timingSafeEqual } from 'node:crypto';
 import { PackageInstaller } from '../install/transaction.mjs';
-import { qwenResearchDelivery } from '../install/qwen-delivery.mjs';
 import { validateManifest } from '../install/manifest.mjs';
 import { inspectHost } from '../profile.mjs';
-import { EVALUATION_PACKAGE } from './model-package.mjs';
+import { EVALUATION_PACKAGE,managedPackageDelivery } from './model-package.mjs';
 const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(v);
 export class SetupManager {
-  constructor(config,db,activation,{installer,manifest=qwenResearchDelivery(),hardware=inspectHost}={}) {
+  constructor(config,db,activation,{installer,packageId=EVALUATION_PACKAGE,manifest=managedPackageDelivery(packageId),hardware=inspectHost}={}) {
+    this.packageId=packageId;
     this.config=config;this.db=db;this.activation=activation;this.hardware=hardware;this.verified=validateManifest(manifest,modelSelectionMode(config)==='user-selected'?'user-selected':'internal-evaluation');this.busy=false;this.initializing=true;this.admitting=false;this.pending=null;
     this.installer=installer??new PackageInstaller({root:config.root+'/delivery',instanceId:config.instanceId,catalog:[manifest],purpose:modelSelectionMode(config)==='user-selected'?'user-selected':'internal-evaluation'});
     db.exec(`CREATE TABLE IF NOT EXISTS setup_consents(owner TEXT NOT NULL,submission_key TEXT NOT NULL,manifest TEXT NOT NULL,terms TEXT NOT NULL,purpose TEXT NOT NULL,accepted_at INTEGER NOT NULL,operation TEXT,PRIMARY KEY(owner,submission_key));
@@ -22,17 +22,18 @@ export class SetupManager {
   async snapshot(owner){
     if(!uuid(owner))throw Error('invalid-setup');
     let supported=false,hardware=null,compatibility='check-unavailable';try{hardware=await this.hardware(this.installer.files.root,false);supported=true;compatibility='eligible';}catch(error){if(['windows-only','multiple-gpus','gpu-unverified','gpu-too-small','ram-too-small'].includes(error.compatibility))compatibility=error.compatibility;}
-    const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? ORDER BY accepted_at DESC,rowid DESC LIMIT 1').get(owner);
+    const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? AND manifest=? ORDER BY accepted_at DESC,rowid DESC LIMIT 1').get(owner,this.verified.hash);
     const accepted=!!this.db.prepare('SELECT 1 FROM setup_consents WHERE owner=? AND manifest=? AND terms=?').get(owner,this.verified.hash,this.verified.manifest.termsDigest);
     return {packageId:this.verified.manifest.id,manifest:this.verified.hash,termsDigest:this.verified.manifest.termsDigest,purpose:'research-evaluation',consentToken:this.consentToken(owner),accepted,
       available:evaluationEnabled(this.config)&&!this.initializing&&supported,supported,compatibility,ready:this.access(owner),
-      installed:this.activation.model?.deliveryManifest===this.verified.hash,freeBytes:this.installer.files.freeBytes(),
+      installed:this.activation.model?.deliveryManifest===this.verified.hash||!!row?.operation&&this.installer.status(owner,row.operation)?.state==='installed',
+      active:this.activation.model?.deliveryManifest===this.verified.hash,switchRequired:!!this.activation.model&&this.activation.model.profile!==this.verified.manifest.profile,freeBytes:this.installer.files.freeBytes(),
       ...(hardware?{hardware:{freeVramMiB:hardware.freeVramMiB,freeRamBytes:hardware.freeRamBytes,...(hardware.name?{gpuName:hardware.name,totalVramMiB:hardware.totalVramMiB,totalRamBytes:hardware.totalRamBytes,confidence:hardware.confidence}:{})}}:{}),
       downloadBytes:this.verified.manifest.artifacts.reduce((n,a)=>n+a.bytes,0),workBytes:this.verified.totalBytes,requiredFreeBytes:this.verified.totalBytes+1024**3,
       operation:row?.operation?this.operation(owner,row.operation):null};
   }
   operation(owner,id){
-    const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? AND operation=?').get(owner,id);if(!row)return null;
+    const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? AND operation=? AND manifest=?').get(owner,id,this.verified.hash);if(!row)return null;
     const op=this.installer.status(owner,id);if(!op)return null;
     const activation=this.db.prepare('SELECT state,error FROM activations WHERE owner=? AND submission_key=?').get(owner,this.activationKey(row));
     const state=op.state!=='installed'?op.state:this.access(owner)?'installed':activation?.state==='failed'?'activation-failed':activation?.state==='interrupted'?'interrupted':this.busy?'activating':'activation-needed';
@@ -61,8 +62,11 @@ export class SetupManager {
     if(this.busy||this.initializing||this.admitting||this.pending&&this.pending!==id)throw Error('setup-busy');this.pending=null;this.busy=true;
     try{await this.installer.run(owner,id);if(this.installer.status(owner,id)?.state!=='installed')return;
       if(this.activation.model?.deliveryManifest===this.verified.hash&&this.activation.status().inferenceReady)return;
+      // A different active profile must be switched through the app's durable
+      // admission gate after download, never implicitly by the installer.
+      if(this.activation.model&&this.activation.model.profile!==this.verified.manifest.profile)return;
       const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? AND operation=?').get(owner,id);if(!row)throw Error('invalid-setup');
-      const op=this.activation.admit({owner,key:this.activationKey(row),packageId:EVALUATION_PACKAGE});await this.activation.run(owner,op.id);
+      const op=this.activation.admit({owner,key:this.activationKey(row),packageId:this.packageId});await this.activation.run(owner,op.id);
     }finally{this.busy=false;}
   }
   cancel(owner,id){const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? AND operation=?').get(owner,id);if(!row)return null;

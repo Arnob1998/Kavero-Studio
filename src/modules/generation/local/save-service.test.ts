@@ -19,6 +19,7 @@ vi.mock("@/modules/model-providers/local/bridge",()=>({acquireLocalOutputLease:m
 vi.mock("./save-storage",async importOriginal=>({...await importOriginal<typeof import("./save-storage")>(),resolveLocalSaveDestination:mock.resolve}));
 import { saveLocalOutput,getLocalSave } from "./save-service";
 import { sameLocalSaveDestination } from "./save-contract";
+import {existingJobSnapshot,jobRequestHash} from '@/modules/model-providers/local/job-snapshot';
 const owner="11111111-1111-4111-8111-111111111111",id="22222222-2222-4222-8222-222222222222",bytes=pngFixture();
 const destination:LocalSaveDestination={provider:"kavero-managed",backendId:"local-filesystem",location:"frozen-root"};
 const post=()=>saveLocalOutput(id,new Request("http://localhost",{method:"POST"}));
@@ -62,6 +63,14 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.useRealTimers();vi.unstubAllEnvs();});
 describe("Recoverable local save transaction",()=>{
+  it('recovers versioned metadata after storage failure without generating or changing save IDs',async()=>{
+    const snapshot=existingJobSnapshot();mock.job={...mock.job!,recipe_snapshot:snapshot,package_fingerprint:snapshot.packageFingerprint,request_hash:jobRequestHash(mock.job!.intent,snapshot)};
+    mock.job.output_descriptor={...mock.job.output_descriptor!,recipeSnapshot:snapshot,packageFingerprint:snapshot.packageFingerprint,requestHash:mock.job.request_hash};
+    mock.failMetadata=true;expect((await post()).status).toBe(503);const mapping=mock.save!.object_mapping!,generation=mock.save!.generation_id;
+    expect(JSON.parse(mapping.metadataBody).recipeSnapshot).toEqual(snapshot);
+    mock.failMetadata=false;expect((await post()).status).toBe(200);expect(mock.save!.generation_id).toBe(generation);expect(mock.save!.object_mapping).toEqual(mapping);
+    const readCount=mock.retrieve.mock.calls.length;expect((await post()).status).toBe(200);expect(mock.retrieve).toHaveBeenCalledTimes(readCount);expect(mock.finishCalls).toBe(1);
+  });
   it("blocks unverified Drive writes in the normal Local release before claiming or uploading",async()=>{
     vi.stubEnv("KAVERO_LOCAL_GENERATION_ENABLED","1");vi.stubEnv("KAVERO_LOCAL_GENERATION_DRIVE_EVALUATION","0");
     mock.resolve.mockResolvedValue({destination:{provider:"google-drive",connectionId:id,email:null,folderId:"isolated-folder"}});

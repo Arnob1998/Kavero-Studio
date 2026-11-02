@@ -3,6 +3,14 @@ import { afterEach, beforeEach, it, expect, vi } from "vitest";
 import { createHmac, createHash } from "node:crypto";
 import { localHostRequest } from "./host-bridge";
 const secret = "ab".repeat(32);
+it('allows larger signed metadata only on the model endpoints and rejects prototype actions',async()=>{
+ const body={snapshot:{text:'x'.repeat(20000)}};
+ vi.stubGlobal('fetch',vi.fn(async(_url,options)=>{const encoded=JSON.stringify(body);return new Response(encoded,{headers:{'x-kavero-response':createHmac('sha256',secret).update(options.headers['x-kavero-nonce']+'\n'+createHash('sha256').update(encoded).digest('hex')).digest('hex')}});}));
+ expect((await localHostRequest('/host/models/detail',{})).body).toEqual(body);
+ await expect(localHostRequest('/host/status',{})).rejects.toThrow('local-host-response-invalid');
+ await expect(localHostRequest('toString',{})).rejects.toThrow('local-host-action-invalid');
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response('x'.repeat(32769))));await expect(localHostRequest('/host/models/list',{})).rejects.toThrow('local-host-response-invalid');
+});
 beforeEach(() => { vi.stubEnv("KAVERO_LOCAL_HOST_SECRET", secret); vi.stubEnv("KAVERO_LOCAL_HOST_URL", "http://127.0.0.1:8792"); });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 it("accepts only a nonce-bound signed response, including owner-hidden 404", async () => { vi.stubGlobal("fetch", vi.fn(async (_url, options) => { const bytes = JSON.stringify({ operation: null }); const nonce = options.headers["x-kavero-nonce"]; const signature = createHmac("sha256", secret).update(nonce + "\n" + createHash("sha256").update(bytes).digest("hex")).digest("hex"); return new Response(bytes, { status: 404, headers: { "x-kavero-response": signature } }); })); expect(await localHostRequest("/host/activation", {})).toEqual({ status: 404, body: { operation: null } }); });

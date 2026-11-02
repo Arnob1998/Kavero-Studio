@@ -152,23 +152,16 @@ export function ProviderSettingsPanel() {
 
   return (
     <section
-      className="grid gap-4 rounded-lg border border-white/[0.1] bg-white/[0.045] p-4 shadow-[0_18px_70px_rgb(0_0_0_/_0.28)] sm:p-5"
+      className="grid gap-5 rounded-2xl border border-white/[0.1] bg-surface/85 p-5 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.055)] backdrop-blur-xl sm:p-6"
       aria-busy={isLoading || modelSettings.loading}
     >
       <div className="flex flex-col gap-3 border-b border-white/[0.08] pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <img src="/llm-providers/google.svg" alt="Google" className="h-6 w-auto" />
-          <span className="h-5 w-px bg-white/[0.14]" aria-hidden="true" />
-          <img
-            src="/llm-providers/google-gemini-icon.png"
-            alt=""
-            className="h-7 w-7 rounded-md bg-white object-contain p-1"
-            aria-hidden="true"
-          />
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/5 text-text-secondary"><KeyRound size={18}/></span>
           <div className="min-w-0">
             <h2 className="m-0 truncate text-[18px] font-semibold text-white">Providers and models</h2>
             <p className="m-0 mt-0.5 text-[12px] font-medium text-white/42">
-              Saved settings. Runtime stable.
+              Connect your providers and choose the models you use.
             </p>
           </div>
         </div>
@@ -276,7 +269,7 @@ function PanelBlock({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-black/16 p-4">
+    <section className="min-w-0 rounded-xl border border-white/[0.08] bg-background/50 p-4">
       <div className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-white">
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-white/[0.07] text-white/58">
           <Icon size={16} />

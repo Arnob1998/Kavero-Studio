@@ -7,6 +7,7 @@ import { createSupabaseStorageBackend } from "@/modules/storage/backends/supabas
 import { createLocalSaveMapping,ensureLocalSaveObject,readLocalSaveObject,objectSHA } from "./save-storage";
 import type { LocalSaveRecord } from "./save-contract";
 import type { LocalJobRecord } from "./contracts";
+import {existingJobSnapshot} from "@/modules/model-providers/local/job-snapshot";
 const roots: string[]=[];
 afterEach(async()=>{vi.unstubAllGlobals();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
 const save: LocalSaveRecord={job_id:"11111111-1111-4111-8111-111111111111",owner_id:"22222222-2222-4222-8222-222222222222",
@@ -15,6 +16,12 @@ const save: LocalSaveRecord={job_id:"11111111-1111-4111-8111-111111111111",owner
   attempt_token:"55555555-5555-4555-8555-555555555555",lease_until:"2099-01-01T00:00:00.000Z",created_at:"2026-10-03T00:00:00.000Z"};
 const job={id:save.job_id,intent:{prompt:"A vase",profile:"qwen-image-2.1-q4-evaluation"},package_fingerprint:"b".repeat(64)} as LocalJobRecord;
 describe("Create-only local save object recovery",()=>{
+  it('persists new model/settings provenance without changing legacy sidecar format',async()=>{
+    const snapshot=existingJobSnapshot(),current={...job,intent:{...job.intent,width:512,height:512,count:1},package_fingerprint:snapshot.packageFingerprint,recipe_snapshot:snapshot} as LocalJobRecord;
+    const metadata=JSON.parse((await createLocalSaveMapping(save,current,{destination:save.destination})).metadataBody);
+    expect(metadata.version).toBe(2);expect(metadata.recipeSnapshot).toEqual(snapshot);expect(metadata.model).toBe(snapshot.recipeId);expect(metadata.width).toBe(snapshot.settings.width);
+    const legacy=JSON.parse((await createLocalSaveMapping(save,job,{destination:save.destination})).metadataBody);expect(legacy.version).toBe(1);expect(legacy).not.toHaveProperty('recipeSnapshot');
+  });
   it("reconciles a real filesystem create whose acknowledgement is lost",async()=>{
     const root=await mkdtemp(path.join(os.tmpdir(),"kavero-save-"));roots.push(root);
     const backend=createLocalFilesystemStorageBackend({root}),runtime={destination:save.destination,backend};

@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import {validateSnapshotIntent} from '../../src/modules/model-providers/local/job-snapshot.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync,readFileSync,writeFileSync,lstatSync } from 'node:fs';
 import { spawn,execFile } from 'node:child_process';
@@ -32,14 +33,15 @@ async function supervisor(configPath,id,token,epoch) {
   },500);
   try {
     const dir=createJobDirectory(config.stateRoot,id);
-    stage='package';await verifyPackage(config.packageRoot);stage='hardware';const hardware=await inspectHost(config.stateRoot,true,config.packageRoot);
+    stage='package';await verifyPackage(config.packageRoot,config.profile??FINGERPRINT);stage='hardware';const hardware=await inspectHost(config.stateRoot,true,config.packageRoot);
     stage='intent';
     const payload=JSON.parse(row.payload);
-    if(payload.fingerprint!==FINGERPRINT)throw Error('identity-changed');assertHardwareBinding(payload,hardware);
+    if(payload.recipeSnapshot)validateSnapshotIntent(payload.intent,payload.recipeSnapshot,payload.fingerprint);
+    if(payload.fingerprint!==(config.profile??FINGERPRINT))throw Error('identity-changed');assertHardwareBinding(payload,hardware);
     if(cancelRequested){ledger.finish(id,token,'cancelled',null);return;}
     stage='input';writeFileSync(path.join(dir,'prompt.txt'),payload.intent.prompt,{encoding:'utf8',mode:0o600});
     stage='launch';
-    const {file,args}=engineCommand(config.packageRoot,dir,hardware.backendIndex);
+    const {file,args}=engineCommand(config.packageRoot,dir,hardware.backendIndex,config.profile??FINGERPRINT);
     log=createBoundedLog(path.join(dir,'engine.log'),()=>{ioFailure=true;if(ownedChild?.exitCode===null)ownedChild.kill();});
     const child=spawn(file,args,{windowsHide:true,stdio:['ignore','pipe','pipe']});nativeStarted=true;ownedChild=child;stage='inference';
     const append=chunk=>{try{log.append(chunk);}catch{ioFailure=true;if(child.exitCode===null)child.kill();}};
@@ -62,12 +64,13 @@ async function supervisor(configPath,id,token,epoch) {
 export async function startWorker(configPath) {
   if(process.versions.node!=='24.11.1')throw Error('worker-node-version-not-verified');
   const config=JSON.parse(readFileSync(configPath,'utf8'));
+  const fingerprint=config.profile??FINGERPRINT;
   if(typeof config.secret!=='string'||config.secret.length<64||!path.isAbsolute(config.packageRoot)||!path.isAbsolute(config.stateRoot))throw Error('invalid-worker-config');
   if(config.port!==8791)throw Error('invalid-worker-port');
   mkdirSync(config.stateRoot,{recursive:true});
   const ledger=new Ledger(path.join(config.stateRoot,'ledger.sqlite')),epoch=randomUUID();
   let selected;
-  try{await verifyPackage(config.packageRoot);selected=await inspectHost(config.stateRoot,false,config.packageRoot);}catch(error){ledger.close();throw error;}
+  try{await verifyPackage(config.packageRoot,fingerprint);selected=await inspectHost(config.stateRoot,false,config.packageRoot);}catch(error){ledger.close();throw error;}
   const checkDevice=hardware=>{if(JSON.stringify(hardware.identity)!==JSON.stringify(selected.identity))throw Error('device-identity-changed');return {...hardware,binding:selected.binding,backendIndex:selected.backendIndex};};
   let closing=false;
   const server=createServer(async(req,res)=>{
@@ -93,11 +96,11 @@ export async function startWorker(configPath) {
         if(ledger.maintenance())return reply(503,{error:'worker-maintenance'});
         assertVerifiedPackageUnchanged(config.packageRoot);
         const hardware=checkDevice(await inspectHost(config.stateRoot,false));
-        return reply(200,{ready:true,epoch,ledgerIdentity:ledger.identity,packageFingerprint:FINGERPRINT,deviceId:selected.deviceId,hardware});
+        return reply(200,{ready:true,epoch,ledgerIdentity:ledger.identity,packageFingerprint:fingerprint,deviceId:selected.deviceId,hardware});
       }
       if(!uuid(body.id)||!uuid(body.owner))return reply(400,{error:'invalid-job'});
       if(req.url==='/submit'){
-        if(!uuid(body.key)||body.epoch!==epoch||body.ledgerIdentity!==ledger.identity||body.fingerprint!==FINGERPRINT||body.device!==selected.deviceId) return reply(409,{error:'identity-changed'});
+        if(!uuid(body.key)||body.epoch!==epoch||body.ledgerIdentity!==ledger.identity||body.fingerprint!==fingerprint||body.device!==selected.deviceId) return reply(409,{error:'identity-changed'});
         const existing=ledger.get(body.owner,body.id);
         if(!existing){assertVerifiedPackageUnchanged(config.packageRoot);checkDevice(await inspectHost(config.stateRoot,false));}
         return reply(200,summary(ledger,config.stateRoot,ledger.submit({...body,hardwareBinding:selected.binding,backendIndex:selected.backendIndex},availableStagingBytes(config.stateRoot))));

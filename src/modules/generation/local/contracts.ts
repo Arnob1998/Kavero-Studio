@@ -3,11 +3,13 @@ import { z } from "zod";
 import { publicLocalOutput, type LocalOutputDescriptor, type LocalOutputStatus } from "./output-contract";
 import { LOCAL_IMAGE_CAPABILITIES as limits } from "./capabilities";
 import { localFailureMessage, validateLocalFailure, type LocalFailure } from "@/modules/model-providers/local/failure";
+import type {LocalRecipeSnapshot} from "@/modules/model-providers/local/job-snapshot";
+export {jobRequestHash as localJobRequestHash} from "@/modules/model-providers/local/job-snapshot";
 
 export const localJobIntentSchema = z.object({
   prompt: z.string().min(1).max(limits.maxPromptCharacters).refine(value => value.trim().length > 0),
   width: z.literal(limits.width), height: z.literal(limits.height), count: z.literal(limits.count),
-  profile: z.literal(limits.profile),
+  profile: z.enum([limits.profile,'qwen-image-2.1-q3-evaluation']),
 }).strict();
 export const localSubmissionSchema = z.object({
   idempotencyKey: z.string().uuid(), intent: localJobIntentSchema,
@@ -22,6 +24,7 @@ export type LocalJobRecord = {
   output_descriptor?: LocalOutputDescriptor | null;
   output_status?: LocalOutputStatus;
   failure?: LocalFailure;
+  recipe_snapshot?: LocalRecipeSnapshot | null;
 };
 export function localIntentHash(intent: LocalJobIntent) {
   return createHash("sha256").update(JSON.stringify({

@@ -67,7 +67,8 @@ async function ensureRuntime(files,config,lock,{transport,runFile=promisify(exec
 }
 async function ownedStatus(files,config,expected,request=hostControl) {
   const status=await request(config,'/host/status');
-  if(status.code!==expected.code||status.runtime!==expected.runtime||status.node!=='24.11.1'||typeof status.inferenceReady!=='boolean'||status.evaluationEnabled!==expected.evaluationEnabled||status.selectionMode!==expected.selectionMode||!['awaiting-package','recovering','recovery-required','evaluation-disabled','maintenance','activating','ready'].includes(status.state))throw Error('host-identity-changed');
+  if(status.code!==expected.code)throw Error('host-code-update-required: Stop Kavero with the original launcher after local jobs and model inspections finish, then run pnpm setup:run again. Installed models and history are retained.');
+  if(status.runtime!==expected.runtime||status.node!=='24.11.1'||typeof status.inferenceReady!=='boolean'||status.evaluationEnabled!==expected.evaluationEnabled||status.selectionMode!==expected.selectionMode||!['awaiting-package','recovering','recovery-required','evaluation-disabled','maintenance','activating','ready'].includes(status.state))throw Error('host-identity-changed');
   const record=JSON.parse(files.read('agent-process.json',2048));
   const identity=await inspectHostProcess(status.pid);
   if(!identity||record.pid!==status.pid||record.creation!==identity.creation||(record.epoch!==null&&record.epoch!==status.epoch))throw Error('host-process-changed');

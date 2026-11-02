@@ -8,6 +8,7 @@ export default defineConfig({
   timeout: 30_000,
   use: {
     baseURL: smokeBaseURL,
+    channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     trace: "on-first-retry",
   },
   webServer: process.env.PLAYWRIGHT_BASE_URL

@@ -7,6 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { assertLocalResources } from '../../src/modules/model-providers/local/failure.ts';
 import { assessHardware,mapVulkan,BASELINE_DEVICE,BASELINE_DRIVER } from './hardware.mjs';
+import {nativeProfile,Q3_FINGERPRINT} from './profiles.mjs';
+import {inspectGGUF} from './gguf.mjs';
 const exec = promisify(execFile);
 export const DEVICE=BASELINE_DEVICE; // Historical receipts/tests, never runtime selection.
 export const DRIVER=BASELINE_DRIVER;
@@ -19,13 +21,14 @@ export function resolvePackageFile(root,relative) {
   if(!actual.startsWith(base+path.sep) || !statSync(actual).isFile())throw Error('unsafe-package-path');
   return actual;
 }
-export async function verifyPackage(root) {
+export async function verifyPackage(root,expectedFingerprint=FINGERPRINT) {
+  const profile=nativeProfile(expectedFingerprint);
   const manifest=JSON.parse(readFileSync(path.join(root,'evidence/package-manifest.json'),'utf8'));
-  if(manifest.fingerprint!==FINGERPRINT || manifest.engine_commit!==ENGINE || manifest.backend!=='diffusion=vulkan1,clip=cpu,vae=vulkan1')throw Error('package-identity-changed');
+  if(manifest.fingerprint!==expectedFingerprint || manifest.engine_commit!==ENGINE || manifest.backend!=='diffusion=vulkan1,clip=cpu,vae=vulkan1')throw Error('package-identity-changed');
   // Do not trust a rewritten manifest to authorize changed executables.
   // Manifest digest serialization belongs to LG-1; pinned component hashes below
   // must be supplied through the committed profile rather than mutable metadata.
-  const pinned=JSON.parse(readFileSync(new URL('./profile.json',import.meta.url),'utf8'));
+  const pinned=expectedFingerprint===FINGERPRINT?JSON.parse(readFileSync(new URL('./profile.json',import.meta.url),'utf8')):profile.recipe;
   if(JSON.stringify(manifest.files)!==JSON.stringify(pinned.files))throw Error('package-manifest-changed');
   for(const component of pinned.files){
     const filename=resolvePackageFile(root,component.path);
@@ -33,11 +36,13 @@ export async function verifyPackage(root) {
     const hash=createHash('sha256');for await(const chunk of createReadStream(filename))hash.update(chunk);
     if(hash.digest('hex')!==component.sha256)throw Error('package-component-changed');
   }
+  if(expectedFingerprint===Q3_FINGERPRINT){const header=inspectGGUF(resolvePackageFile(root,profile.diffusion));
+    if(header.architecture!=='qwen_image'||header.tensorCount!==265||header.tensorLayoutSha256!=='8e1df77f39a383d4abbe38492e6b87a2b854e4767e82c89c9f41e3ccf2c4c898')throw Error('model-header-mismatch');}
   snapshots.set(realpathSync(root),pinned.files.map(component=>{
     const filename=resolvePackageFile(root,component.path),stat=statSync(filename);
     return {path:component.path,filename,size:stat.size,mtime:stat.mtimeMs,ctime:stat.ctimeMs};
   }));
-  return FINGERPRINT;
+  return expectedFingerprint;
 }
 export function assertVerifiedPackageUnchanged(root) {
   const files=snapshots.get(realpathSync(root));
@@ -64,10 +69,11 @@ export async function inspectHost(root, requireResources=true,packageRoot=null) 
   if(requireResources)assertLocalResources({freeVramMiB:hardware.freeVramMiB,freeRamBytes:os.freemem(),freeDiskBytes:disk.bavail*disk.bsize});
   return {...hardware,freeRamBytes:os.freemem()};
 }
-export function engineCommand(root,jobDir,backendIndex=1) {
+export function engineCommand(root,jobDir,backendIndex=1,fingerprint=FINGERPRINT) {
+  const profile=nativeProfile(fingerprint);
   if(!Number.isInteger(backendIndex)||backendIndex<0||backendIndex>=16)throw Error('backend-mapping-unknown');
   return {file:resolvePackageFile(root,'engine/sd-cli.exe'),args:[
-    '--diffusion-model',resolvePackageFile(root,'downloads/qwen_image_2.1_Q4_K_M.gguf'),
+    '--diffusion-model',resolvePackageFile(root,profile.diffusion),
     '--llm',resolvePackageFile(root,'downloads/Qwen3VL-8B-Instruct-Q4_K_M.gguf'),
     '--vae',resolvePackageFile(root,'downloads/qwen_image_2.1_vae_bf16.safetensors'),
     '--backend',`diffusion=vulkan${backendIndex},clip=cpu,vae=vulkan${backendIndex}`,'--offload-to-cpu','--max-vram','6','--fa','--vae-tiling',

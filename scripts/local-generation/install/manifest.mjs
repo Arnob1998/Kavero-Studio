@@ -56,7 +56,7 @@ export function validateManifest(input,purpose='public') {
   const hash=sha(canonical(manifest));
   // Only the reviewed direct-upstream research recipe may bypass redistribution
   // approval. This is host-owned policy, never a purpose supplied by a browser.
-  if(purpose==='user-selected'&&(manifest.purpose!=='research-evaluation-only'||hash!=='35086bb8307f51d101eb4826b466300d49f0bea72957765efd6816498e7c9822'))throw Error('user-selected-package-rejected');
+  if(purpose==='user-selected'&&(manifest.purpose!=='research-evaluation-only'||!['35086bb8307f51d101eb4826b466300d49f0bea72957765efd6816498e7c9822','d730d6d53b7c7fb0c39d5fce0a60c93ae1b00113db3ec4009854463e0c5c29bb'].includes(hash)))throw Error('user-selected-package-rejected');
   return {manifest,hash,files,totalBytes:total};
   function validateFile(file) {relativePath(file.path);if(!bytes(file.bytes)||!digest(file.sha256))throw Error('invalid-install-manifest');}
   function add(file) {const key=file.path.toLowerCase();if(outputs.has(key)||key==='.receipt.json')throw Error('install-path-collision');outputs.set(key,{path:file.path,bytes:file.bytes,sha256:file.sha256});}

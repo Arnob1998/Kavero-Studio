@@ -1,17 +1,18 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { createHash,randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { validateLocalFailure } from '../../src/modules/model-providers/local/failure.ts';
+import {jobRequestHash,validateSnapshotIntent,canonicalSnapshot} from '../../src/modules/model-providers/local/job-snapshot.ts';
 
 export const outstanding = ['queued','dispatching','running','cancel-requested','submission-unknown'];
 export const STAGING_RESERVATION = 64 * 1024 * 1024;
 export const STAGING_CAPACITY = 1024 * 1024 * 1024;
 export const OUTPUT_LEASE_MS = 60000;
-export const intentHash = intent => createHash('sha256').update(JSON.stringify({ profile:intent.profile,prompt:intent.prompt,width:intent.width,height:intent.height,count:intent.count })).digest('hex');
+export const intentHash = jobRequestHash;
 export function validateIntent(intent) {
   if (!intent || Object.keys(intent).sort().join(',') !== 'count,height,profile,prompt,width'
-    || intent.profile !== 'qwen-image-2.1-q4-evaluation' || typeof intent.prompt !== 'string'
+    || !['qwen-image-2.1-q4-evaluation','qwen-image-2.1-q3-evaluation'].includes(intent.profile) || typeof intent.prompt !== 'string'
     || !intent.prompt.trim() || intent.prompt.length > 1000 || intent.width !== 512 || intent.height !== 512 || intent.count !== 1) throw Error('unsupported-intent');
 }
 export class Ledger {
@@ -36,6 +37,10 @@ export class Ledger {
       this.db.exec(`CREATE TABLE IF NOT EXISTS output_leases(token TEXT PRIMARY KEY,job_id TEXT NOT NULL,owner TEXT NOT NULL,expires INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS output_leases_job ON output_leases(job_id,expires);`);
       this.db.exec('CREATE TABLE IF NOT EXISTS lifecycle(slot INTEGER PRIMARY KEY CHECK(slot=1),token TEXT NOT NULL,purpose TEXT NOT NULL)');
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS immutable_versioned_job BEFORE UPDATE ON jobs WHEN
+       (json_extract(OLD.payload,'$.recipeSnapshot') IS NOT NULL OR json_extract(NEW.payload,'$.recipeSnapshot') IS NOT NULL)
+       AND (OLD.id IS NOT NEW.id OR OLD.owner IS NOT NEW.owner OR OLD.key IS NOT NEW.key OR OLD.hash IS NOT NEW.hash OR OLD.payload IS NOT NEW.payload OR OLD.created IS NOT NEW.created)
+       BEGIN SELECT RAISE(ABORT,'immutable-job-identity'); END;`);
       this.db.exec(`UPDATE jobs SET finished_at=coalesce(heartbeat,created) WHERE finished_at IS NULL AND state IN ('generated-unvalidated','failed','cancelled')`);
     });
   }
@@ -45,10 +50,12 @@ export class Ledger {
   reservedBytes() { return this.db.prepare('SELECT coalesce(sum(reserved_bytes),0) n FROM jobs').get().n; }
   submit(payload,availableBytes=Infinity) {
     validateIntent(payload.intent);
-    if (intentHash(payload.intent)!==payload.hash) throw Error('intent-hash-mismatch');
+    if(payload.intent.profile==='qwen-image-2.1-q3-evaluation'&&!payload.recipeSnapshot)throw Error('job-recipe-required');
+    if(payload.recipeSnapshot)validateSnapshotIntent(payload.intent,payload.recipeSnapshot,payload.fingerprint);
+    if (intentHash(payload.intent,payload.recipeSnapshot)!==payload.hash) throw Error('intent-hash-mismatch');
     return this.atomic(()=>{
       const found=this.db.prepare('SELECT * FROM jobs WHERE owner=? AND key=?').get(payload.owner,payload.key);
-      if(found){if(found.hash!==payload.hash || found.id!==payload.id || JSON.parse(found.payload).fingerprint!==payload.fingerprint || JSON.parse(found.payload).device!==payload.device)throw Error('idempotency-conflict');return found;}
+      if(found){if(found.hash!==payload.hash || found.id!==payload.id || JSON.parse(found.payload).fingerprint!==payload.fingerprint || JSON.parse(found.payload).device!==payload.device || canonicalSnapshot(JSON.parse(found.payload).recipeSnapshot??null)!==canonicalSnapshot(payload.recipeSnapshot??null))throw Error('idempotency-conflict');return found;}
       if(this.maintenance())throw Error('worker-maintenance');
       // Reserve before a job can be claimed, not after lengthy inference.
       const reserved=this.reservedBytes();

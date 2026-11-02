@@ -1,26 +1,66 @@
+# Dependencies and generated build/test output
 node_modules/
 .next/
+out/
 dist/
 coverage/
 test-results/
 playwright-report/
+blob-report/
 tsconfig.tsbuildinfo
 .wrangler/
+.turbo/
+.cache/
 
+# Logs
 *.log
 debug.log*
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 
+# Local credentials (commit examples only)
 .env
 .env.*
 !.env.example
 !.env.docker.local.example
 !.env.local.example
+*.pem
+*.key
+*.p12
+*.pfx
 
-AGENTS.md
-IMPLEMENTATION.md
-Roadmap.md
+# Downloaded model weights and local inference state
+# Keep model catalogs/recipes, installer code and license notices tracked.
+*.gguf
+*.safetensors
+*.ckpt
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+/.kavero/
+/.local-generation/
+
+# Local tooling, scratch work and OS/editor artifacts
+/.agents/
+/.codex/
+/branch-archive/
+/tmp/
+/temp/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+
+# Existing private planning/documentation policy
+/AGENTS.md
+/IMPLEMENTATION.md
+/Roadmap.md
 docs
-demo/clips
+/demo/clips/

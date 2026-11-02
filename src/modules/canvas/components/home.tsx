@@ -10,8 +10,8 @@ import {
   LayoutGrid,
   Maximize2,
   Plus,
-  Sparkles,
   Trash2,
+  Sparkles,
   WandSparkles,
   X,
 } from "lucide-react";
@@ -218,7 +218,7 @@ export function Home({
   );
 
   return (
-    <main className="h-svh overflow-y-auto overscroll-contain bg-[#030304] text-white">
+    <main className="h-full overflow-y-auto overscroll-contain bg-[#030304] text-white">
       <div
         className="pointer-events-none fixed inset-0 z-0 bg-[#030304]"
         aria-hidden="true"
@@ -227,7 +227,7 @@ export function Home({
         <Hero onCreate={handleCreate} />
 
         {error ? (
-          <div className="fixed right-4 top-4 z-50 flex max-w-[420px] items-start gap-3 rounded-2xl border border-white/[0.14] bg-white/[0.08] px-4 py-3 text-[13px] leading-5 text-white/76 shadow-[0_24px_90px_rgb(0_0_0_/_0.48),inset_0_1px_0_rgb(255_255_255_/_0.11)] backdrop-blur-2xl">
+          <div className="fixed right-4 top-20 z-50 flex max-w-[420px] items-start gap-3 rounded-2xl border border-white/[0.14] bg-white/[0.08] px-4 py-3 text-[13px] leading-5 text-white/76 shadow-[0_24px_90px_rgb(0_0_0_/_0.48),inset_0_1px_0_rgb(255_255_255_/_0.11)] backdrop-blur-2xl">
             <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/[0.08] text-accent">
               <CircleAlert size={17} />
             </span>
@@ -364,10 +364,6 @@ function Hero({ onCreate }: { onCreate: () => void }) {
       <div className="absolute inset-0 bg-black/56" aria-hidden="true" />
       <div className="relative z-10 flex min-h-[320px] items-center px-6 pb-20 pt-8 sm:px-9 lg:min-h-[380px] lg:px-12">
         <div className="max-w-[820px]">
-          <span className="mb-5 inline-flex h-9 items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.055] px-3 text-[12px] font-black uppercase tracking-[0.08em] text-white/58 backdrop-blur-xl">
-            <Sparkles size={14} className="text-accent" />
-            Canvas workspace
-          </span>
           <h1 className="m-0 text-[clamp(48px,7vw,96px)] font-light leading-[0.95] tracking-normal text-white">
             {brand.name} Canvas
           </h1>

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import {validateJobSnapshot,type LocalRecipeSnapshot} from "@/modules/model-providers/local/job-snapshot";
+const snapshotSchema=z.custom<LocalRecipeSnapshot>(value=>{try{validateJobSnapshot(value);return true;}catch{return false;}});
 
 export const localOutputDescriptorSchema = z.object({
   jobId: z.string().uuid(), ownerId: z.string().uuid(), ledgerIdentity: z.string().uuid(),
@@ -7,6 +9,7 @@ export const localOutputDescriptorSchema = z.object({
   sizeBytes: z.number().int().positive().max(32 * 1024 * 1024),
   width: z.literal(512), height: z.literal(512), mimeType: z.literal("image/png"),
   generatedAt: z.string().datetime(), expiresAt: z.string().datetime(),
+  recipeSnapshot:snapshotSchema.optional(),
 }).strict().refine(value => Date.parse(value.expiresAt) - Date.parse(value.generatedAt) === 24 * 60 * 60 * 1000);
 export type LocalOutputDescriptor = z.infer<typeof localOutputDescriptorSchema>;
 export const localOutputStatusSchema = z.object({

@@ -14,7 +14,7 @@ function printHelp() {
   console.log("  pnpm kavero run");
   console.log("");
   console.log("Shortcuts:");
-  console.log("  pnpm setup");
+  console.log("  pnpm run setup");
   console.log("  pnpm setup:doctor");
   console.log("  pnpm setup:run");
 }

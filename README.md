@@ -37,25 +37,32 @@ Prerequisites:
 
 - Node.js 22+ or 24+
 - pnpm
-- Docker Desktop or Docker Engine
+- Docker Desktop or Docker Engine with Docker Compose, installed and running
 
 ```bash
 pnpm install
-pnpm setup
+pnpm run setup
+```
+
+Choose **Local Docker** in the setup wizard. If you let the wizard start Kavero, leave that terminal open. Otherwise, start it with:
+
+```bash
 pnpm setup:run
 ```
 
-Open Kavero:
+The first Docker build can take several minutes. Wait for the **app** service to print `Ready`, then open [Kavero](http://127.0.0.1:3000). The terminal keeps streaming service logs while Kavero runs; it does not return to the prompt.
 
-```txt
-http://127.0.0.1:3000
-```
+Create an account on the sign-in page using an email and password. The default local setup does not require Google sign-in.
 
-The setup wizard creates local env files safely, protects existing secrets, and can start the local Docker stack for you.
+The setup wizard creates local env files safely and protects existing secrets. Use `pnpm run setup` explicitly: `pnpm setup` is pnpm's own installation command.
+
+The public homepage is at `/`; the app launcher is at `/dashboard`. Local and hosted installations use the same pages and navigation. Normal sign-in opens Dashboard, while links to a specific tool return you to that tool after signing in.
 
 On supported Windows x64 machines, **Generate → Local** offers the user-selected Qwen image research profile. Kavero checks the GPU/RAM, shows the pinned model terms, and downloads and installs the engine, model, encoder and VAE after you accept. No separate ComfyUI installation, planning model or paid provider key is needed. Initial support is one NVIDIA RTX 30/40 GPU with at least 8 GB VRAM and 16 GB RAM; other eligible GPUs have no measured timing yet. Operators can disable Local by setting `KAVERO_LOCAL_GENERATION_ENABLED=0` in `.env.docker.local` before starting the stack.
 
 Local generation saves to the configured destination; inference on your GPU does not change that destination. The default Docker setup uses local managed storage and does not need Google sign-in. Deployments configured for Drive use a separate **Settings → Storage → Connect Drive** connection; live acceptance of local-generation Drive saves is still pending.
+
+Model Hub development now includes metadata-only imports. Operators can edit `scripts/local-generation/models.json` for supplied source entries; signed-in users can inspect public Hugging Face links through `/api/local-generation/models` on a configured local host. Imports remain private to the signed-in user and cannot overwrite supplied entries. A valid import does not enable installation or generation; the Model Hub screen and additional runnable profiles are still under development. After changing bundled host code or supplied entries, finish local jobs/inspections, stop the original launcher, then run `pnpm setup:run` again. Kavero refuses to replace a running host with different code and retains installed models and history.
 
 ## Choose Your Setup
 
@@ -63,10 +70,21 @@ Local generation saves to the configured destination; inference on your GPU does
 
 Recommended for trying Kavero with the full local stack.
 
+After completing the first-time setup above, subsequent launches only need:
+
 ```bash
-pnpm setup
 pnpm setup:run
 ```
+
+Leave the terminal open and visit [http://127.0.0.1:3000](http://127.0.0.1:3000) once the app prints `Ready`. Stop the attached stack with **Ctrl+C**. Accounts and files persist in Docker volumes across normal restarts.
+
+If startup fails, run this from the Kavero project folder and check the reported failures:
+
+```bash
+pnpm setup:doctor
+```
+
+On Windows PowerShell, if execution policy blocks `pnpm.ps1`, use `pnpm.cmd` instead, for example `pnpm.cmd setup:run`. If you need help, include the failing command and its error text; keep `.env` values and secrets private.
 
 Local Docker runs:
 
@@ -91,15 +109,17 @@ KAVERO_LOCAL_STORAGE_ROOT=/data/kavero-storage
 
 `/data/kavero-storage` is a container path backed by the `kavero-local-storage` Docker volume.
 
-Manual Docker command:
+Manual Docker command (app and backend services only):
 
 ```bash
 docker compose --env-file .env.docker.local up --build
 ```
 
+Use `pnpm setup:run` for the full supported Windows Local image-generation setup: it also starts Kavero's managed host helper and connects it to the Docker app. The manual Compose command does not perform that host setup.
+
 The LiteLLM service is not published to the host by default. Kavero receives only server-side gateway envs inside the Docker network.
 
-`pnpm setup` generates the local LiteLLM secrets and can collect optional server-side Gemini, OpenAI, Groq, and Ollama values for the gateway. Normal setup does not require editing `docker/litellm/config.yaml`.
+`pnpm run setup` generates the local LiteLLM secrets and can collect optional server-side Gemini, OpenAI, Groq, and Ollama values for the gateway. Normal setup does not require editing `docker/litellm/config.yaml`.
 
 ### Host Development
 
@@ -156,7 +176,7 @@ pnpm gateway:down
 Use this path when you already have a Supabase project or a hosted Supabase-compatible stack.
 
 ```bash
-pnpm setup
+pnpm run setup
 pnpm kavero doctor cloud-self-host
 pnpm build
 pnpm start
@@ -216,7 +236,7 @@ From there, generate assets, keep them in Gallery, place them into the canvas, e
 
 | File | Purpose |
 |---|---|
-| `.env.docker.local` | Local Docker stack. Created by `pnpm setup`. |
+| `.env.docker.local` | Local Docker stack. Created by `pnpm run setup`. |
 | `.env.local` | Local development or Cloud/self-host env. |
 | `.env.local.example` | Host development reference for `pnpm dev` plus Docker LiteLLM. |
 | `.env.example` | Manual Cloud/self-host reference. |
@@ -263,7 +283,7 @@ The setup CLI keeps existing non-empty values by default, asks before replacing 
 
 | Command | Description |
 |---|---|
-| `pnpm setup` | Guided setup wizard. |
+| `pnpm run setup` | Guided setup wizard. |
 | `pnpm setup:doctor` | Check Local Docker configuration. |
 | `pnpm kavero doctor cloud-self-host` | Check Cloud/self-host configuration. |
 | `pnpm setup:run` | Run Local Docker with `docker compose up --build`. |
@@ -311,6 +331,8 @@ pnpm exec vitest run src/modules/generation
 pnpm exec tsc --noEmit
 pnpm build
 ```
+
+The full suite includes local-generation installer tests that require **Node.js 24.11.1**, matching the verified managed runtime. Use that version for a complete `pnpm test` run; the installer deliberately rejects other runtime versions. Kavero provisions that runtime automatically for local model installation.
 
 Local Supabase helper scripts are available when you want to work outside the Docker Compose app flow:
 

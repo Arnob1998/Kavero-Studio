@@ -4,6 +4,7 @@ import { validateLocalPNG,LOCAL_IMAGE_MAX_BYTES } from '../../src/modules/model-
 import { FINGERPRINT } from './profile.mjs';
 import { validJobHardware } from './hardware.mjs';
 import { intentHash } from './ledger.mjs';
+import {validateSnapshotIntent} from '../../src/modules/model-providers/local/job-snapshot.ts';
 
 export const OUTPUT_RETENTION_MS=24*60*60*1000;
 export const LOG_MAX_BYTES=4*1024*1024;
@@ -54,11 +55,12 @@ export function inspectStagedOutput(ledger,root,owner,id,now=Date.now()) {
   if(row.output_state==='pending' && row.state==='generated-unvalidated') {
     try {
       const payload=JSON.parse(row.payload);
-      if(payload.fingerprint!==FINGERPRINT || !validJobHardware(payload) || intentHash(payload.intent)!==row.hash
+      if(payload.recipeSnapshot)validateSnapshotIntent(payload.intent,payload.recipeSnapshot,payload.fingerprint);
+      if((!payload.recipeSnapshot&&(payload.fingerprint!==FINGERPRINT||payload.intent.profile!=='qwen-image-2.1-q4-evaluation')) || !validJobHardware(payload) || intentHash(payload.intent,payload.recipeSnapshot)!==row.hash
         || payload.intent.count!==1 || payload.intent.width!==512 || payload.intent.height!==512 || !row.finished_at)throw Error('output-identity-changed');
       const {info}=readFinal(root,row),generatedAt=new Date(row.finished_at).toISOString();
       const descriptor={...info,jobId:id,ownerId:owner,ledgerIdentity:ledger.identity,requestHash:row.hash,
-        packageFingerprint:payload.fingerprint,deviceId:payload.device,generatedAt,expiresAt:new Date(row.finished_at+OUTPUT_RETENTION_MS).toISOString()};
+        packageFingerprint:payload.fingerprint,deviceId:payload.device,generatedAt,expiresAt:new Date(row.finished_at+OUTPUT_RETENTION_MS).toISOString(),...(payload.recipeSnapshot?{recipeSnapshot:payload.recipeSnapshot}:{})};
       ledger.db.prepare("UPDATE jobs SET output_state='generated',output_descriptor=? WHERE id=? AND output_state='pending'").run(JSON.stringify(descriptor),id);
     } catch {
       ledger.db.prepare("UPDATE jobs SET output_state='invalid' WHERE id=? AND output_state='pending'").run(id);

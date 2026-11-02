@@ -7,6 +7,7 @@ import { StorageError, type StoredObjectRef, type StoragePurpose } from "@/modul
 import { reserveLocalDriveIds, readLocalDriveObject, createLocalDriveObject } from "@/modules/storage/providers/google-drive/local-image-save";
 import type { LocalSaveDestination, LocalSaveMapping, LocalSaveRecord } from "./save-contract";
 import type { LocalJobRecord } from "./contracts";
+import {jobSnapshotForRecord} from "@/modules/model-providers/local/job-snapshot";
 
 export const objectSHA = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 type DestinationRuntime = { destination: LocalSaveDestination; backend?: ManagedStorageBackend; token?: string };
@@ -54,11 +55,13 @@ function refFor(save: LocalSaveRecord, purpose: StoragePurpose, name: string, ex
     metadata: { backendProviderId: destination.backendId, name, contentType: mimeType }, status: "available", version: 1 };
 }
 export async function createLocalSaveMapping(save: LocalSaveRecord, job: LocalJobRecord, runtime: DestinationRuntime): Promise<LocalSaveMapping> {
+  const snapshot=job.recipe_snapshot?jobSnapshotForRecord(job):null;
   const ids = runtime.token ? await reserveLocalDriveIds(runtime.token) : undefined;
   const imageRef = refFor(save, "generated-image", `${save.image_id}.png`, ids?.[0]);
   const metadataRef = refFor(save, "generated-metadata", `${save.image_id}.json`, ids?.[1]);
-  const metadataBody = JSON.stringify({ version: 1, localJobId: job.id, generationId: save.generation_id, imageId: save.image_id,
-    prompt: job.intent.prompt, model: job.intent.profile, variant: 1, mimeType: "image/png", width: 512, height: 512,
+  const metadataBody = JSON.stringify({ version: snapshot?2:1, localJobId: job.id, generationId: save.generation_id, imageId: save.image_id,
+    prompt: job.intent.prompt, model: snapshot?.recipeId??job.intent.profile, variant: 1, mimeType: "image/png", width: snapshot?.settings.width??512, height: snapshot?.settings.height??512,
+    ...(snapshot?{recipeSnapshot:snapshot}:{}),
     sha256: save.sha256, packageFingerprint: job.package_fingerprint, imageObjectKey: imageRef.objectKey, createdAt: save.created_at });
   return { imageRef, metadataRef, metadataBody };
 }

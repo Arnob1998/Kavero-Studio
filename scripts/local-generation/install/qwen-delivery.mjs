@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { sha,validateManifest } from './manifest.mjs';
+import {nativeProfile,Q3_FINGERPRINT} from '../profiles.mjs';
 const fingerprint='d9cd1dc7cc93a20c2ffc8cc780393a04cfc6043a5560ddf12f2924c3ea575f07';
 const terms='35dc562ce673a5602f6f03d377538b52a8af144384ec85829d430c63f0e9ad41';
 // Host-owned research proof catalog. Never construct this from browser input or
@@ -39,5 +40,15 @@ export function qwenResearchDelivery() {
   if(artifacts.length!==4)throw Error('delivery-audit-changed');
   const manifest={schema:1,id:'qwen-2-1-research-delivery-v1',publicApproved:false,noticesVerified:false,
     termsDigest:terms,purpose:'research-evaluation-only',profile:fingerprint,artifacts,bundledFiles};
+  validateManifest(manifest,'internal-evaluation');return manifest;
+}
+export function qwenQ3Delivery(){
+  const manifest=qwenResearchDelivery(),profile=nativeProfile(Q3_FINGERPRINT),recipe=profile.recipe;
+  const weights=recipe.files.find(file=>file.path===profile.diffusion);
+  manifest.id='qwen-2-1-q3-research-delivery-v1';manifest.profile=Q3_FINGERPRINT;
+  manifest.artifacts=manifest.artifacts.map(file=>file.role==='image-weights'?{...file,bytes:weights.bytes,sha256:weights.sha256,destination:weights.path,
+    url:`https://huggingface.co/Abiray/Qwen-Image-2.1-GGUF/resolve/${recipe.model_revision}/qwen_image_2.1_Q3_K_M.gguf`}:file);
+  const bytes=readFileSync(new URL('./qwen-q3-recipe.json',import.meta.url));
+  manifest.bundledFiles=manifest.bundledFiles.map(file=>file.role==='recipe-metadata'?{...file,...profile.metadata,dataBase64:bytes.toString('base64')}:file);
   validateManifest(manifest,'internal-evaluation');return manifest;
 }

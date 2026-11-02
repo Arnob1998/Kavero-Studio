@@ -7,6 +7,7 @@ import {
   LogOut,
   Settings,
   WalletCards,
+  ArrowUpRight,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
@@ -20,9 +21,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { brand } from "@/lib/brand";
 import { createClient } from "@/lib/supabase/client";
+import { getSafeAuthRedirectPath } from "@/lib/auth/redirect";
+import styles from "./site-nav.module.css";
 
 const defaultNavItems = [
-  { label: "Home", href: "/" },
+  { label: "Dashboard", href: "/dashboard" },
   { label: "Gallery", href: "/gallery" },
   { label: "Generate", href: "/generate" },
   { label: "Canvas", href: "/canvas" },
@@ -37,6 +40,7 @@ interface SiteNavClientProps {
   activeLabel: string;
   ariaLabel?: string;
   excludedLabels?: string[];
+  variant?: "workspace" | "landing";
 }
 
 type NavUser = {
@@ -50,9 +54,10 @@ export function SiteNavClient({
   activeLabel,
   ariaLabel = "Main navigation",
   excludedLabels = [],
+  variant = "workspace",
 }: SiteNavClientProps) {
   const [user, setUser] = useState<NavUser | null>(null);
-  const [signInHref, setSignInHref] = useState("/auth/login");
+  const [signInHref, setSignInHref] = useState("/auth/login?next=%2Fdashboard");
   const excluded = new Set(excludedLabels);
   const navItems = defaultNavItems.filter((item) => !excluded.has(item.label));
   const displayName = user?.name || user?.email || "Account";
@@ -87,9 +92,22 @@ export function SiteNavClient({
   }, []);
 
   useEffect(() => {
-    const next = `${window.location.pathname}${window.location.search}`;
+    const next = window.location.pathname === "/" ? "/dashboard" : getSafeAuthRedirectPath(`${window.location.pathname}${window.location.search}`);
     setSignInHref(`/auth/login?next=${encodeURIComponent(next)}`);
   }, []);
+
+  if (variant === "landing") {
+    return <header className={styles.header}>
+      <div className={styles.bar}>
+        <Link className={styles.brand} href="/" aria-label={`${brand.name} home`}><BrandMark className="h-[21px] w-[21px] gap-[3px]"/><span>{brand.name}</span></Link>
+        <nav className={styles.actions} aria-label="Homepage navigation">
+          <a className={styles.github} href={brand.repositoryUrl} target="_blank" rel="noreferrer" aria-label="Kavero source on GitHub"><img src="/icons/brands/github.svg" width="17" height="17" alt=""/><span>GitHub</span></a>
+          <Button asChild className={styles.cta}><Link href={user?"/dashboard":"/auth/login?next=%2Fdashboard"}>{user?"Open dashboard":"Get started"}<ArrowUpRight size={14}/></Link></Button>
+        </nav>
+      </div>
+    </header>;
+  }
+
 
   return (
     <>
@@ -209,9 +227,9 @@ function UserMenu({
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/settings/api-keys">
+          <Link href="/settings/models">
             <KeyRound size={15} />
-            API keys
+            Model Hub
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

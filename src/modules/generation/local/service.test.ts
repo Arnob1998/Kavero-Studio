@@ -5,10 +5,26 @@ vi.mock('@/lib/supabase/admin',()=>({createAdminClient:mock.admin}));
 vi.mock('@/modules/model-providers/local/bridge',()=>({localBridgeConfigured:()=>mock.enabled,getLocalReadiness:vi.fn(),inspectLocalBridgeJob:vi.fn(),submitLocalBridgeJob:mock.submit}));
 vi.mock('@/modules/model-providers/local/host-bridge',()=>({localHostRequest:mock.host}));
 import { submitLocalJob,manageLocalJob,inspectAndCheckpoint } from './service';
-import { inspectLocalBridgeJob } from '@/modules/model-providers/local/bridge';
+import { inspectLocalBridgeJob,getLocalReadiness } from '@/modules/model-providers/local/bridge';
+import {existingJobSnapshot,q3JobSnapshot,jobRequestHash} from '@/modules/model-providers/local/job-snapshot';
 import { localJobSummary, type LocalJobRecord } from './contracts';
 beforeEach(()=>{mock.enabled=false;mock.user=null;vi.clearAllMocks();});
 describe('Internal local job route safety',()=>{
+ it.each([existingJobSnapshot,q3JobSnapshot])('admits a server-derived snapshot and replays it without a second database admission',async snapshotFactory=>{
+  mock.enabled=true;mock.user={id:'110fce0e-22ba-4a44-a68a-6619b477ca1b'};
+  const id='11111111-1111-4111-8111-111111111111',snapshot=snapshotFactory(),intent:LocalJobRecord['intent']={profile:snapshot.profile as LocalJobRecord['intent']['profile'],prompt:'A vase',width:512,height:512,count:1};
+  let stored:LocalJobRecord|null=null;
+  const rpc=vi.fn(async(_name:string,p:Record<string,unknown>)=>{stored={id,owner_id:mock.user!.id,submission_key:id,intent,request_hash:String(p.p_hash),recipe_snapshot:p.p_snapshot as typeof snapshot,package_fingerprint:snapshot.packageFingerprint,device_id:'gpu',worker_identity:id,state:'pending',created_at:new Date().toISOString()};return {data:stored,error:null};});
+  mock.admin.mockReturnValue({rpc,from:()=>{
+   const chain={select:()=>chain,eq:()=>chain,in:()=>chain,limit:async()=>({data:[],error:null}),update:(changes:Partial<LocalJobRecord>)=>{if(stored)stored={...stored,...changes};return chain;},maybeSingle:async()=>({data:stored,error:null})};return chain;
+  }});
+  mock.host.mockResolvedValue({status:200,body:{allowed:true}});vi.mocked(getLocalReadiness).mockResolvedValue({ready:true,epoch:id,ledgerIdentity:id,packageFingerprint:snapshot.packageFingerprint,deviceId:'gpu'});
+  vi.mocked(inspectLocalBridgeJob).mockResolvedValue({id,state:'queued',ledgerIdentity:id,output:{state:'pending',descriptor:null}});
+  const request=()=>new Request('http://localhost',{method:'POST',body:JSON.stringify({idempotencyKey:id,intent})});
+  expect((await submitLocalJob(request())).status).toBe(202);expect(rpc).toHaveBeenCalledWith('admit_local_generation_job_v2',expect.objectContaining({p_snapshot:snapshot,p_hash:jobRequestHash(intent,snapshot)}));
+  expect(mock.host).toHaveBeenCalledWith('/host/setup/access',snapshot.profile==='qwen-image-2.1-q3-evaluation'?{owner:mock.user!.id,profile:snapshot.profile}:{owner:mock.user!.id});
+  expect((await submitLocalJob(request())).status).toBe(202);expect(rpc).toHaveBeenCalledTimes(1);expect(mock.submit).not.toHaveBeenCalled();
+ });
  it.each(['failed','generated-unvalidated'] as const)('returns a bounded diagnosis only when its checkpoint state wins: %s',async finalState=>{
   const job={id:'id',owner_id:'owner',state:'running',created_at:'2026-10-03T00:00:00.000Z'} as LocalJobRecord;
   const failure={stage:'hardware' as const,code:'gpu-memory-low' as const,recordedAt:'2026-10-03T00:00:01.000Z'};

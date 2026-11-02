@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  Activity,
   ArrowRight,
   HardDrive,
   KeyRound,
   Mail,
   Palette,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { brand } from "@/lib/brand";
 import { getDeploymentProfile } from "@/lib/deployment-profile";
 import { createClient } from "@/lib/supabase/server";
@@ -40,7 +38,7 @@ export default async function SettingsPage() {
     >
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard label="Workspace" value="Full access" helper="No subscription limits" icon={Palette} />
-        <StatCard label="API access" value="Ready" helper="Connect provider keys" icon={KeyRound} />
+        <StatCard label="Models" value="Your choice" helper="Local models & cloud providers" icon={KeyRound} />
         <StatCard
           label="Storage"
           value={settingsCopy.storageStat.value}
@@ -49,16 +47,11 @@ export default async function SettingsPage() {
         />
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
         <SettingsPanel>
           <SettingsPanelHeader
             title="Profile"
             description="This information is used across your workspace and account emails."
-            action={
-              <Button variant="secondary" size="default" disabled>
-                Edit profile
-              </Button>
-            }
           />
           <div className="grid gap-5 p-5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
             <div className="grid h-20 w-20 place-items-center overflow-hidden rounded-2xl border border-white/[0.1] bg-white/[0.07] text-2xl font-semibold text-white">
@@ -85,7 +78,7 @@ export default async function SettingsPage() {
         <SettingsPanel>
           <SettingsPanelHeader title="Quick actions" />
           <div className="grid gap-2 p-3">
-            <QuickLink href="/settings/api-keys" icon={KeyRound} label="Manage API keys" />
+            <QuickLink href="/settings/models" icon={KeyRound} label="Open Model Hub" />
             <QuickLink
               href="/settings/storage"
               icon={HardDrive}
@@ -96,35 +89,6 @@ export default async function SettingsPage() {
         </SettingsPanel>
       </div>
 
-      <div className="mt-4">
-        <SettingsPanel>
-          <SettingsPanelHeader
-            title="Workspace activity"
-            description="A quick overview of your creative workspace."
-          />
-          <div className="p-5">
-            <div className="rounded-2xl border border-white/[0.08] bg-black/24 p-4">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/[0.07] text-white/64">
-                  <Activity size={17} />
-                </div>
-                <div>
-                  <p className="m-0 text-[14px] font-semibold text-white">Ready</p>
-                  <p className="m-0 mt-0.5 text-[12px] font-medium text-white/42">
-                    Your workspace is ready for generation and design workflows.
-                  </p>
-                </div>
-              </div>
-              <Button asChild variant="secondary" className="w-full">
-                <Link href="/generate">
-                  Open Generate
-                  <ArrowRight size={15} />
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </SettingsPanel>
-      </div>
     </SettingsShell>
   );
 }

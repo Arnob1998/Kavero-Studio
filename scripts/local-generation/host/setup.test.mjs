@@ -8,6 +8,15 @@ import { SetupManager } from './setup.mjs';
 import { PackageInstaller } from '../install/transaction.mjs';
 import { sha } from '../install/manifest.mjs';
 const contexts=[];
+
+it('installs alongside a different active package without bypassing fenced switching',async()=>{
+ const c=fixture();c.activation.model={deliveryManifest:'other-manifest',profile:'different-active-profile'};
+ const operation=await c.manager.admit(c.body);await c.manager.run(c.owner,operation.id);
+ expect(c.manager.installer.status(c.owner,operation.id).state).toBe('installed');
+ expect(c.activation.admit).not.toHaveBeenCalled();expect(c.activation.model.deliveryManifest).toBe('other-manifest');expect(c.manager.access(c.owner)).toBe(false);
+ expect(await c.manager.snapshot(c.owner)).toMatchObject({installed:true,active:false,switchRequired:true,ready:false,accepted:true});
+ expect(await c.manager.snapshot(randomUUID())).toMatchObject({installed:false,ready:false,accepted:false});
+});
 afterEach(()=>{for(const ctx of contexts.splice(0)){ctx.manager.initializing=false;ctx.manager.pending=null;ctx.manager.close();ctx.db.close();rmSync(ctx.root,{recursive:true,force:true});}});
 function fixture(){
   const data=Buffer.from('fixture model'),manifest={schema:1,id:'qwen-2-1-research-delivery-v1',publicApproved:false,noticesVerified:true,termsDigest:sha('terms'),artifacts:[{id:'model',role:'test-fixture',revision:'a'.repeat(40),url:'https://example.com/model',hosts:['example.com'],bytes:data.length,sha256:sha(data),destination:'weights/model.gguf'}]};

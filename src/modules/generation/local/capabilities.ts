@@ -1,4 +1,5 @@
-// Browser-safe metadata for the one internally verified evaluation workload.
+import type {LocalProfile} from '@/modules/model-providers/local/browser-profiles';
+// Historical Q4 descriptor retained for existing callers; selection uses the registry.
 export const LOCAL_IMAGE_CAPABILITIES = {
   profile: "qwen-image-2.1-q4-evaluation", label: "Qwen Image 2.1 · Q4",
   width: 512, height: 512, count: 1, maxPromptCharacters: 1000,
@@ -20,6 +21,7 @@ export type LocalBrowserSave = { state: "unsaved" | "saving" | "save-failed" | "
 export type LocalBrowserReadiness = {
   ownerId: string; ready: boolean; saveAvailable: boolean; saveDestination: string;
   hardware?: { freeVramMiB: number; freeRamBytes: number };
+  model?: {profile:LocalProfile;label:string;width:512;height:512;count:1;maxPromptCharacters:1000;references:false;editing:false;planning:false;sequence:false}|null;
 };
 export function localJobMessage(job: LocalBrowserJob | null, reconnecting: boolean, save: LocalBrowserSave) {
   if (save.state === "saved") return save.historyRemoved ? "This image was removed from Gallery." : "Saved to Gallery.";

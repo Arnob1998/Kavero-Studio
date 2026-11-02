@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { sha,canonical } from '../install/manifest.mjs';
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 export const WORKER_SOURCES=[
+  'scripts/local-generation/host/setup-hub.mjs',
+  'scripts/local-generation/profiles.mjs','scripts/local-generation/gguf.mjs','scripts/local-generation/install/qwen-q3-recipe.json',
+  'src/modules/model-providers/local/job-snapshot.ts',
+  'scripts/local-generation/host/imports.mjs','scripts/local-generation/model-imports.mjs','scripts/local-generation/model-discovery.mjs','scripts/local-generation/model-catalog.mjs','scripts/local-generation/models.json','src/modules/model-providers/local/model-contract.ts',
   'scripts/local-generation/host/selection.mjs','scripts/local-generation/host/agent.mjs','scripts/local-generation/host/activation.mjs','scripts/local-generation/host/model-package.mjs',
   'scripts/local-generation/worker.mjs','scripts/local-generation/ledger.mjs','scripts/local-generation/profile.mjs','scripts/local-generation/profile.json','scripts/local-generation/hardware.mjs',
   'scripts/local-generation/staging.mjs','scripts/local-generation/protocol.mjs',

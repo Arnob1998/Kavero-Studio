@@ -4,16 +4,16 @@ import {
   HardDrive,
   KeyRound,
   LayoutDashboard,
-  SlidersHorizontal,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand";
 import { SiteNav } from "@/components/site-nav";
 import { brand } from "@/lib/brand";
 import { cn } from "@/lib/utils";
+import styles from "./settings.module.css";
 
 const settingsNav = [
   { label: "Overview", href: "/settings", icon: LayoutDashboard },
-  { label: "API Keys", href: "/settings/api-keys", icon: KeyRound },
+  { label: "Model Hub", href: "/settings/models", icon: KeyRound },
   { label: "Storage", href: "/settings/storage", icon: HardDrive },
 ];
 
@@ -29,17 +29,12 @@ export function SettingsShell({
   children: ReactNode;
 }) {
   return (
-    <main className="h-svh overflow-y-auto overscroll-contain bg-[#050506] text-white [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <main className={styles.page}>
       <SiteNav activeLabel="Settings" />
 
-      <div
-        className="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_18%_16%,rgb(255_255_255_/_0.08),transparent_28%),radial-gradient(circle_at_82%_4%,rgb(59_130_246_/_0.08),transparent_24%),linear-gradient(180deg,rgb(255_255_255_/_0.035),transparent_28%)]"
-        aria-hidden="true"
-      />
-
-      <div className="relative z-10 mx-auto grid w-full max-w-[1340px] gap-6 px-4 pb-10 pt-24 sm:px-6 lg:grid-cols-[260px_minmax(0,1fr)] lg:px-8">
-        <aside className="lg:sticky lg:top-24 lg:h-[calc(100svh-7rem)]">
-          <div className="rounded-2xl border border-white/[0.1] bg-white/[0.045] p-3 shadow-[0_24px_90px_rgb(0_0_0_/_0.42),inset_0_1px_0_rgb(255_255_255_/_0.06)] backdrop-blur-xl">
+      <div className={styles.layout}>
+        <aside className={styles.sidebar}>
+          <div>
             <div className="mb-3 flex items-center gap-3 px-2 py-2">
               <div className="grid h-9 w-9 place-items-center rounded-xl bg-white/[0.1]">
                 <BrandMark className="h-[20px] w-[20px] gap-[3px]" />
@@ -50,7 +45,7 @@ export function SettingsShell({
               </div>
             </div>
 
-            <nav className="flex gap-1 overflow-x-auto [scrollbar-width:none] lg:block [&::-webkit-scrollbar]:hidden">
+            <nav className={styles.navigation} aria-label="Settings navigation">
               {settingsNav.map((item) => (
                 <SettingsNavItem key={item.label} active={active === item.label} {...item} />
               ))}
@@ -59,16 +54,12 @@ export function SettingsShell({
         </aside>
 
         <section className="min-w-0">
-          <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div className={styles.heading}>
             <div>
-              <div className="mb-3 inline-flex h-8 items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.055] px-3 text-[12px] font-medium text-white/58">
-                <SlidersHorizontal size={13} />
-                Account controls
-              </div>
-              <h1 className="m-0 text-[clamp(38px,5vw,74px)] font-light leading-none tracking-normal">
+              <h1>
                 {title}
               </h1>
-              <p className="mt-4 max-w-[720px] text-[14px] font-medium leading-6 text-white/52">
+              <p>
                 {description}
               </p>
             </div>
@@ -95,10 +86,11 @@ function SettingsNavItem({
   return (
     <Link
       className={cn(
-        "flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-[13px] font-medium text-white/54 transition hover:bg-white/[0.07] hover:text-white lg:w-full",
-        active && "bg-white/[0.12] text-white shadow-[inset_0_1px_0_rgb(255_255_255_/_0.06)]",
+        styles.navItem,
+        active && styles.navActive,
       )}
       href={href}
+      aria-current={active ? "page" : undefined}
     >
       <Icon size={15} />
       {label}
@@ -119,7 +111,7 @@ export function SettingsPanel({
     <section
       id={id}
       className={cn(
-        "rounded-2xl border border-white/[0.1] bg-white/[0.045] shadow-[0_24px_90px_rgb(0_0_0_/_0.36),inset_0_1px_0_rgb(255_255_255_/_0.055)] backdrop-blur-xl",
+        styles.panel,
         className,
       )}
     >
@@ -138,11 +130,11 @@ export function SettingsPanelHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col justify-between gap-4 border-b border-white/[0.08] p-5 sm:flex-row sm:items-center">
+    <div className={styles.panelHeader}>
       <div>
-        <h2 className="m-0 text-[18px] font-semibold tracking-normal text-white">{title}</h2>
+        <h2>{title}</h2>
         {description ? (
-          <p className="m-0 mt-1 max-w-[64ch] text-[13px] font-medium leading-5 text-white/48">
+          <p>
             {description}
           </p>
         ) : null}
@@ -164,15 +156,15 @@ export function StatCard({
   icon: ComponentType<{ size?: number; className?: string }>;
 }) {
   return (
-    <SettingsPanel className="p-5">
-      <div className="mb-5 flex items-center justify-between">
-        <p className="m-0 text-[12px] font-medium uppercase text-white/42">{label}</p>
+    <SettingsPanel className={styles.stat}>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="m-0 text-[12px] font-medium text-text-secondary">{label}</p>
         <div className="grid h-9 w-9 place-items-center rounded-xl bg-white/[0.07] text-white/66">
           <Icon size={16} />
         </div>
       </div>
-      <p className="m-0 text-3xl font-light tracking-normal text-white">{value}</p>
-      <p className="m-0 mt-2 text-[12px] font-medium text-white/42">{helper}</p>
+      <p className="m-0 text-[22px] font-medium tracking-tight text-text-primary">{value}</p>
+      <p className="m-0 mt-2 text-[12px] leading-5 text-text-secondary">{helper}</p>
     </SettingsPanel>
   );
 }

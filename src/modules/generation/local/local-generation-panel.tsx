@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
-import { LocalModelSetup } from "./local-model-setup";
 import { useEffect, useRef, useState } from "react";
 import { Cpu, Download, Loader2, Sparkles } from "lucide-react";
 import { LOCAL_IMAGE_CAPABILITIES as limits, localJobMessage, localPromptError, type LocalBrowserJob, type LocalBrowserSave, type LocalBrowserReadiness } from "./capabilities";
+import styles from "./local-generation.module.css";
+import {localProfile,type LocalProfile} from '@/modules/model-providers/local/browser-profiles';
 
-type Submission = { idempotencyKey: string; intent: { prompt: string; profile: typeof limits.profile; width: 512; height: 512; count: 1 } };
+type Submission = { idempotencyKey: string; intent: { prompt: string; profile: LocalProfile; width: 512; height: 512; count: 1 } };
 type Resume = { submission: Submission; jobId?: string };
 const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 text-sm font-semibold transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400";
 async function api(url: string, method = "GET", body?: unknown) {
@@ -21,7 +22,7 @@ export function LocalGenerationPanel({ prompt, onPromptChange }: { prompt: strin
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [switchPending, setSwitchPending] = useState(false);
   const resume = useRef<Resume | null>(null), ownerKey = useRef<string | null>(null), locked = useRef(false);
   const mounted = useRef(false);
   const jobRef = useRef(job); jobRef.current = job;
@@ -37,14 +38,19 @@ export function LocalGenerationPanel({ prompt, onPromptChange }: { prompt: strin
     if (!mounted.current) return;
     const nextKey = `kavero-local-job:${data.ownerId}`;
     if (ownerKey.current && ownerKey.current !== nextKey) {
-      resume.current = null; setJob(null); setSave({ state: "unsaved" }); setAcceptedTerms(false); setReconnecting(false);
+      resume.current = null; setJob(null); setSave({ state: "unsaved" }); setReconnecting(false);
     }
-    setReady(data);
+    const pendingSwitch = ['', ':q3'].some(suffix => {
+      try { return Boolean(JSON.parse(localStorage.getItem(`kavero-local-setup:${data.ownerId}${suffix}:switch`) || 'null')?.key); }
+      catch { return false; }
+    });
+    setSwitchPending(pendingSwitch);
+    setReady({...data,ready:data.ready&&!!localProfile(data.model?.profile)&&!pendingSwitch});
     ownerKey.current = nextKey;
     if (!resume.current) {
       try {
         const restored = JSON.parse(sessionStorage.getItem(ownerKey.current) || "null") as Resume | null;
-        if (restored && /^[a-f0-9-]{36}$/i.test(restored.submission?.idempotencyKey ?? "") && restored.submission.intent.profile === limits.profile && !localPromptError(restored.submission.intent.prompt)) {
+        if (restored && /^[a-f0-9-]{36}$/i.test(restored.submission?.idempotencyKey ?? "") && localProfile(restored.submission.intent.profile) && restored.submission.intent.width===512&&restored.submission.intent.height===512&&restored.submission.intent.count===1 && typeof restored.submission.intent.prompt==='string'&&!localPromptError(restored.submission.intent.prompt)) {
           resume.current = restored; onPromptChange(restored.submission.intent.prompt);
           if (restored.jobId && /^[a-f0-9-]{36}$/i.test(restored.jobId)) setJob({ id: restored.jobId, state: "submission-unknown", createdAt: "" });
           else setReconnecting(true);
@@ -55,7 +61,8 @@ export function LocalGenerationPanel({ prompt, onPromptChange }: { prompt: strin
   useEffect(() => {
     mounted.current = true;
     void checkReadiness().catch(e => { if (mounted.current) setError(e.message); });
-    return () => { mounted.current = false; };
+    const timer=setInterval(()=>{if(!locked.current)void checkReadiness().catch(e=>{if(mounted.current){setReady(value=>value?{...value,ready:false}:null);setError(e.message);}});},4000);
+    return () => { mounted.current = false;clearInterval(timer); };
     // The resumed prompt belongs to the authenticated owner, not every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -87,8 +94,9 @@ export function LocalGenerationPanel({ prompt, onPromptChange }: { prompt: strin
   const submit = () => act(async () => {
     const existing = resume.current;
     if (!existing) {
+      if(!ready?.ready||!localProfile(ready.model?.profile))throw Error('Choose and prepare a model in Model Hub before creating an image.');
       const invalid = localPromptError(prompt); if (invalid) throw new Error(invalid);
-      persist({ submission: { idempotencyKey: crypto.randomUUID(), intent: { prompt, profile: limits.profile, width: limits.width, height: limits.height, count: limits.count } } });
+      persist({ submission: { idempotencyKey: crypto.randomUUID(), intent: { prompt, profile: ready.model!.profile, width: limits.width, height: limits.height, count: limits.count } } });
     }
     const { response, data } = await api("/api/local-generation/jobs", "POST", resume.current!.submission);
     if (data.job) { persist({ ...resume.current!, jobId: data.job.id }); if (mounted.current) setJob(data.job); }
@@ -118,20 +126,27 @@ export function LocalGenerationPanel({ prompt, onPromptChange }: { prompt: strin
   const generated = job?.output?.state === "generated";
   const imageURL = save.state === "saved" && !save.historyRemoved ? `/api/gallery/images/${save.imageId}/content` : generated && job ? `/api/local-generation/jobs/${job.id}/output` : null;
   const promptError = localPromptError(prompt);
-  return <section className="mx-auto w-full max-w-3xl px-5 pb-16 pt-32 text-white sm:pt-28" aria-label="Local image generation">
-    <div className="mb-7"><p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-400">Local</p><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Create on your machine.</h1><p className="mt-3 text-sm text-white/50">Your prompt, your GPU. No planning model or paid key needed.</p></div>
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-      <div className="flex items-start gap-4"><span className="rounded-xl bg-blue-500/15 p-3 text-blue-400"><Cpu size={24} /></span><div className="min-w-0 flex-1"><h2 className="font-semibold">{limits.label}</h2><p className="mt-1 text-sm text-white/50">One image · 512 × 512 · text to image</p></div><span className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60">{ready ? ready.ready ? "Verified setup" : "Offline" : "Checking…"}</span></div>
-      <LocalModelSetup ownerId={ready?.ownerId} onAccess={setAcceptedTerms} onReady={() => void checkReadiness().catch(e => setError(e.message))} />
+  const model=localProfile(resume.current?.submission.intent.profile??ready?.model?.profile);
+  return <section className={styles.page} aria-label="Local image generation">
+    <div className={styles.heading}><p className={styles.eyebrow}>Local generation</p><h1>Create on your machine.</h1><p>Your prompt, your GPU. No planning model or paid key needed.</p></div>
+    <div className={styles.layout}>
+    <div className={styles.modelCard}>
+      <div className={styles.modelHeading}><span className={styles.modelIcon}><Cpu size={24} /></span><div className="min-w-0 flex-1"><h2>{model?.label??'Choose a local model'}</h2><p>One image · 512 × 512 · text to image</p></div></div>
+      <span className={styles.badge} data-ready={Boolean(ready?.ready)}>{ready ? ready.ready ? "Verified setup" : "Setup needed" : "Checking…"}</span>
+      <Link href="/settings/models" className={`${button} mt-4`}>{ready?.ready?'Change model':'Open Model Hub'}</Link>
+      {switchPending&&<p className="mt-3 text-xs text-amber-200">Finish or recover the model switch in Model Hub before creating another image.</p>}
+      {resume.current&&ready?.model&&resume.current.submission.intent.profile!==ready.model.profile&&<p className="mt-3 text-xs text-white/50">This result keeps its original model. The active model is {ready.model.label}.</p>}
       <div className="mt-5 grid gap-3 border-t border-white/10 pt-4 text-xs text-white/50 sm:grid-cols-2"><p>Inference <strong className="ml-2 font-medium text-white/80">This machine</strong></p><p>Save to <strong className="ml-2 font-medium text-white/80">{ready?.saveDestination ?? "Checking storage…"}</strong></p></div>
       {ready?.hardware && (ready.hardware.freeVramMiB < 6144 || ready.hardware.freeRamBytes < 8 * 1024 ** 3) && <p className="mt-3 text-xs text-amber-200">Memory is busy. Your job will wait for at least 6 GB of free GPU memory and 8 GB of free RAM.</p>}
     </div>
-    <div className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035]">
+    <div className={styles.creation}>
+    <div className={styles.promptCard}>
+      <div className={styles.promptHeading}><Sparkles size={16}/><h2>Describe your image</h2></div>
       <label htmlFor="local-image-prompt" className="sr-only">Local image prompt</label><textarea id="local-image-prompt" value={prompt} onChange={e => onPromptChange(e.target.value)} readOnly={Boolean(resume.current)} placeholder="Describe the image you have in mind…" className="min-h-40 w-full resize-y bg-transparent p-5 text-base outline-none placeholder:text-white/30 focus:ring-2 focus:ring-inset focus:ring-blue-500" aria-describedby="local-prompt-limit" />
-      <div className="flex items-center justify-between gap-3 border-t border-white/10 p-4"><span id="local-prompt-limit" className={`text-xs ${prompt.length > limits.maxPromptCharacters ? "text-amber-300" : "text-white/40"}`}>{prompt.length.toLocaleString()} / 1,000</span><button className={`${button} bg-blue-600 hover:bg-blue-500`} disabled={busy || Boolean(job) || !ready?.ready || !acceptedTerms || (!resume.current && Boolean(promptError))} onClick={() => void submit()}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}{resume.current ? "Check submission" : "Create image"}</button></div>
+      <div className="flex items-center justify-between gap-3 border-t border-white/10 p-4"><span id="local-prompt-limit" className={`text-xs ${prompt.length > limits.maxPromptCharacters ? "text-amber-300" : "text-white/40"}`}>{prompt.length.toLocaleString()} / 1,000</span><button className={`${button} bg-blue-600 hover:bg-blue-500`} disabled={busy || Boolean(job) || (!resume.current && !ready?.ready) || (!resume.current && Boolean(promptError))} onClick={() => void submit()}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}{resume.current ? "Check submission" : "Create image"}</button></div>
     </div>
     {prompt.length > limits.maxPromptCharacters && <p className="mt-3 text-sm text-amber-300" role="alert">{promptError}</p>}
-    <div className="mt-5" aria-live="polite"><p className="text-sm text-white/70">{localJobMessage(job, reconnecting, save)}</p>{error && <p className="mt-2 text-sm text-amber-300" role="alert">{error}</p>}</div>
+    <div className="mt-5" aria-live="polite"><p className="text-sm text-white/70">{!ready?.ready && !job && !reconnecting ? "Choose and prepare a model in Model Hub to create an image." : localJobMessage(job, reconnecting, save)}</p>{error && <p className="mt-2 text-sm text-amber-300" role="alert">{error}</p>}</div>
     {imageURL && !save.historyRemoved && <div className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.025]"><img src={imageURL} alt="Your locally generated image" className="mx-auto aspect-square w-full max-w-lg object-contain" /></div>}
     <div className="mt-4 flex flex-wrap gap-3">
       {imageURL && !save.historyRemoved && <a href={imageURL} download={`kavero-${job?.id}.png`} className={button}><Download size={16} />Download image</a>}
@@ -142,6 +157,8 @@ export function LocalGenerationPanel({ prompt, onPromptChange }: { prompt: strin
       {(!ready?.ready || reconnecting || (generated && !ready?.saveAvailable)) && <button className={button} disabled={busy} onClick={() => void act(checkReadiness)}>Check connection</button>}
     </div>
     {generated && save.state !== "saved" && job?.output?.expiresAt && <p className="mt-3 text-xs text-white/40">Download available until {new Date(job.output.expiresAt).toLocaleString()}. Saving can be retried without generating again.</p>}
-    <details className="mt-7 text-xs text-white/45"><summary className="cursor-pointer py-2">More details</summary><div className="mt-2 space-y-2 leading-relaxed"><p>Q4 evaluation package · Windows x64 / one RTX 30 or 40 series GPU / Vulkan. Requires 8 GB VRAM and 16 GB system memory. Device identity and settings are checked again before execution.</p>{ready?.hardware && <p>Free GPU memory: {(ready.hardware.freeVramMiB / 1024).toFixed(1)} GB · free RAM: {(ready.hardware.freeRamBytes / 1024 ** 3).toFixed(1)} GB. Competing work can delay generation.</p>}<p>References, editing, sequences and cloud quality controls are unavailable here. Prompts over 1,000 characters are rejected, never shortened. Cloud settings are preserved when you return.</p><p>Local inference does not make sign-in or remote storage work offline. Kavero manages the engine and model download after you accept the pinned terms.</p></div></details>
+    <details className="mt-7 text-xs text-white/45"><summary className="cursor-pointer py-2">More details</summary><div className="mt-2 space-y-2 leading-relaxed"><p>{model?.label??"Verified local profile"} · Windows x64 / one RTX 30 or 40 series GPU / Vulkan. Requires 8 GB VRAM and 16 GB system memory. Device identity and settings are checked again before execution.</p>{ready?.hardware && <p>Free GPU memory: {(ready.hardware.freeVramMiB / 1024).toFixed(1)} GB · free RAM: {(ready.hardware.freeRamBytes / 1024 ** 3).toFixed(1)} GB. Competing work can delay generation.</p>}<p>References, editing, sequences and cloud quality controls are unavailable here. Prompts over 1,000 characters are rejected, never shortened. Cloud settings are preserved when you return.</p><p>Local inference does not make sign-in or remote storage work offline. Kavero manages the engine and model download after you accept the pinned terms.</p></div></details>
+    </div>
+    </div>
   </section>;
 }

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { inspectLocalBridgeJob, retrieveLocalOutput } from "./bridge";
 import { validateLocalPNG } from "./png";
 import type { LocalJobRecord } from "@/modules/generation/local/contracts";
+import {existingJobSnapshot,jobRequestHash} from './job-snapshot';
 // @ts-expect-error Native fixture has no declarations.
 import { pngFixture } from "../../../../scripts/local-generation/png-fixture.mjs";
 const bytes = pngFixture();
@@ -18,6 +19,14 @@ beforeEach(() => { vi.stubEnv("KAVERO_LOCAL_GENERATION_INTERNAL", "1"); vi.stubE
   vi.stubEnv("KAVERO_LOCAL_BRIDGE_URL", "http://127.0.0.1:8791"); vi.stubGlobal("fetch", fetcher); fetcher.mockReset(); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe("Signed bounded output transport", () => {
+  it('requires the frozen recipe in versioned output and rejects recipe downgrade',async()=>{
+    const snapshot=existingJobSnapshot(),current={...job,recipe_snapshot:snapshot,package_fingerprint:snapshot.packageFingerprint,request_hash:jobRequestHash(job.intent,snapshot)};
+    const descriptor={...job.output_descriptor!,packageFingerprint:current.package_fingerprint,requestHash:current.request_hash,recipeSnapshot:snapshot};
+    const status={id:job.id,state:job.state,ledgerIdentity:job.worker_identity,output:{state:'generated',descriptor}};
+    fetcher.mockResolvedValueOnce(Response.json(status));expect((await inspectLocalBridgeJob(current)).output.descriptor?.recipeSnapshot).toEqual(snapshot);
+    const {recipeSnapshot,...legacy}=descriptor;fetcher.mockResolvedValueOnce(Response.json({...status,output:{state:'generated',descriptor:legacy}}));await expect(inspectLocalBridgeJob(current)).rejects.toThrow('local-output-identity-mismatch');
+    fetcher.mockResolvedValueOnce(Response.json({...status,output:{state:'generated',descriptor:{...descriptor,recipeSnapshot:{...recipeSnapshot,label:'changed'}}}}));await expect(inspectLocalBridgeJob(current)).rejects.toThrow();
+  });
   it("accepts bounded failure codes but rejects raw diagnostic fields", async () => { const status = { id: job.id, state: "failed", ledgerIdentity: job.worker_identity, output: { state: "invalid", descriptor: null }, failure: { stage: "hardware", code: "gpu-memory-low", recordedAt: new Date().toISOString() } }; fetcher.mockResolvedValueOnce(Response.json(status)); expect((await inspectLocalBridgeJob(job)).failure?.code).toBe("gpu-memory-low"); fetcher.mockResolvedValueOnce(Response.json({ ...status, failure: { ...status.failure, stderr: "private" } })); await expect(inspectLocalBridgeJob(job)).rejects.toThrow(); });
   it("signs the owner/job/ledger body and checks decoded bytes against the frozen checksum", async () => {
     fetcher.mockResolvedValue(new Response(bytes, { headers: { "content-type": "image/png", "x-kavero-sha256": job.output_descriptor!.sha256 } }));

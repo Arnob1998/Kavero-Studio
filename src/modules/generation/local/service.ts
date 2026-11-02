@@ -1,7 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getLocalReadiness, inspectLocalBridgeJob, localBridgeConfigured, submitLocalBridgeJob, retrieveLocalOutput } from "@/modules/model-providers/local/bridge";
-import { localIntentHash, localJobSummary, localSubmissionSchema, type LocalJobRecord } from "./contracts";
+import { localJobRequestHash, localJobSummary, localSubmissionSchema, type LocalJobRecord } from "./contracts";
+import {jobSnapshotForProfile,validateSnapshotIntent,canonicalSnapshot} from "@/modules/model-providers/local/job-snapshot";
 import { z } from "zod";
 import { localOutputDescriptorSchema, type LocalOutputStatus } from "./output-contract";
 import type { LocalFailure } from "@/modules/model-providers/local/failure";
@@ -94,20 +95,24 @@ export async function submitLocalJob(request: Request) {
       .eq("owner_id", ctx.owner).eq("submission_key", idempotencyKey).maybeSingle<LocalJobRecord>();
     if (previous.error) return reply("Local job storage unavailable.", 503);
     let job = previous.data;
-    if (job && job.request_hash !== localIntentHash(intent)) return reply("Idempotency key already used with another request.", 409);
+    if (job && job.request_hash !== localJobRequestHash(intent,job.recipe_snapshot)) return reply("Idempotency key already used with another request.", 409);
     if (!job) {
-      const access=await localHostRequest("/host/setup/access",{owner:ctx.owner});
+      const access=await localHostRequest("/host/setup/access",{owner:ctx.owner,...(intent.profile==='qwen-image-2.1-q3-evaluation'?{profile:intent.profile}:{})});
       if(access.status!==200||(access.body as {allowed?:boolean}).allowed!==true)return reply("Accept this model's research terms and finish setup before creating an image.",403);
       await refreshOutstandingJobs();
       const ready = await getLocalReadiness();
-      const { data, error } = await createAdminClient().rpc("admit_local_generation_job", {
-        p_owner: ctx.owner, p_key: idempotencyKey, p_hash: localIntentHash(intent), p_intent: intent,
+      const snapshot=validateSnapshotIntent(intent,jobSnapshotForProfile(intent.profile),ready.packageFingerprint);
+      const { data, error } = await createAdminClient().rpc("admit_local_generation_job_v2", {
+        p_owner: ctx.owner, p_key: idempotencyKey, p_hash: localJobRequestHash(intent,snapshot), p_intent: intent,p_snapshot:snapshot,
         p_package: ready.packageFingerprint, p_device: ready.deviceId, p_worker: ready.ledgerIdentity,
       });
-      if (error) return reply(error.message.includes("queue-full") ? "Local queue is full." : "Unable to admit local job.", error.message.includes("queue-full") ? 429 : error.message.includes("idempotency-conflict") ? 409 : 503);
+      if (error) {
+        if(/local-runtime-switching|local-runtime-identity-changed/.test(error.message))return reply("Local model is switching or readiness changed. Refresh and retry.",409);
+        return reply(error.message.includes("queue-full") ? "Local queue is full." : "Unable to admit local job.", error.message.includes("queue-full") ? 429 : error.message.includes("idempotency-conflict") ? 409 : 503);
+      }
       // PostgREST may encode a composite RPC result as a one-row array.
       job = (Array.isArray(data) ? data[0] : data) as LocalJobRecord;
-      if (!job?.id || job.owner_id !== ctx.owner || job.request_hash !== localIntentHash(intent)) {
+      if (!job?.id || job.owner_id !== ctx.owner || job.request_hash !== localJobRequestHash(intent,snapshot) || canonicalSnapshot(job.recipe_snapshot??null)!==canonicalSnapshot(snapshot)) {
         return reply("Invalid local admission record.", 503);
       }
     }

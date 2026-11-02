@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { beforeEach, afterEach, it, expect, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ context: vi.fn(), host: vi.fn() }));
+const mocks = vi.hoisted(() => ({ context: vi.fn(), host: vi.fn(), switch:vi.fn(), reconcile:vi.fn(async(_owner,value)=>value) }));
 vi.mock("./service", () => ({ context: mocks.context }));
 vi.mock("@/modules/model-providers/local/host-bridge", () => ({ localHostRequest: mocks.host }));
+vi.mock("@/modules/model-providers/local/runtime-switch",async importOriginal=>({...await importOriginal<typeof import("@/modules/model-providers/local/runtime-switch")>(),switchManagedLocalPackage:mocks.switch,reconcileLocalSwitch:mocks.reconcile}));
 import { localSetupGET, localSetupPOST } from "./setup-service";
 const id = "44697489-d22b-432b-818b-155f201cc52d", owner = "110fce0e-22ba-4a44-a68a-6619b477ca1b";
 const operation = { id, packageId: "qwen-2-1-internal-evaluation", state: "admitted", error: null };
@@ -13,6 +14,11 @@ afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 it("keeps the setup endpoint gated before authentication", async () => { vi.stubEnv("KAVERO_LOCAL_GENERATION_UI_INTERNAL", "0"); expect((await localSetupGET(get())).status).toBe(404); expect(mocks.context).not.toHaveBeenCalled(); });
 it("requires a signed-in owner", async () => { mocks.context.mockResolvedValue({ response: new Response(null, { status: 401 }) }); expect((await localSetupPOST(post({}))).status).toBe(401); expect(mocks.host).not.toHaveBeenCalled(); });
 it("derives ownership from auth and preserves the retry key", async () => { const response = await localSetupPOST(post({ action: "activate", key: id, packageId: operation.packageId })); expect(response.status).toBe(202); expect(mocks.host).toHaveBeenCalledWith("/host/activate", { owner, key: id, packageId: operation.packageId }); expect(await response.json()).toEqual({ operation }); });
+it("derives switch ownership from auth and rejects browser fence overrides",async()=>{
+ mocks.switch.mockResolvedValue({status:202,body:{operation}});expect((await localSetupPOST(post({action:"switch",key:id,packageId:operation.packageId}))).status).toBe(202);
+ expect(mocks.switch).toHaveBeenCalledWith(owner,id,operation.packageId);
+ expect((await localSetupPOST(post({action:"switch",key:id,packageId:operation.packageId,appFence:{id}}))).status).toBe(400);
+});
 it("rejects browser-supplied owners and arbitrary packages", async () => { for (const body of [{ action: "activate", key: id, packageId: operation.packageId, owner: id }, { action: "activate", key: id, packageId: "arbitrary" }]) expect((await localSetupPOST(post(body))).status).toBe(400); expect(mocks.host).not.toHaveBeenCalled(); });
 it("cancels and reads only the authenticated owner's operation", async () => { mocks.host.mockResolvedValue({ status: 404, body: { operation: null } }); expect((await localSetupGET(get("?id=" + id))).status).toBe(404); expect(mocks.host).toHaveBeenCalledWith("/host/activation", { owner, id }); expect((await localSetupPOST(post({ action: "cancel", id }))).status).toBe(404); expect(mocks.host).toHaveBeenCalledWith("/host/activation/cancel", { owner, id }); });
 it("rejects duplicate and unexpected query fields", async () => { for (const query of ["?id=", "?id=x", "?id=" + id + "&id=" + id, "?owner=" + owner]) expect((await localSetupGET(get(query))).status).toBe(400); expect(mocks.host).not.toHaveBeenCalled(); });
