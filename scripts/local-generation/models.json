@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "id": "qwen-image-2-1",
+      "source": "https://huggingface.co/Abiray/Qwen-Image-2.1-GGUF",
+      "preferredFile": "qwen_image_2.1_Q4_K_M.gguf"
+    },
+    {
+      "id":"qwen-image-2-1-q3",
+      "source":"https://huggingface.co/Abiray/Qwen-Image-2.1-GGUF",
+      "preferredFile":"qwen_image_2.1_Q3_K_M.gguf"
+    }
+  ]
+}

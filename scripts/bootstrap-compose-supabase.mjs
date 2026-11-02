@@ -15,6 +15,13 @@ const requiredBuckets = [
 ];
 
 const requiredFunctions = [
+  "public.local_q3_recipe_snapshot()",
+  "public.local_recipe_snapshot_supported(jsonb)",
+  "public.read_local_runtime_switch(uuid,uuid,uuid)",
+  "public.begin_local_runtime_switch(uuid,uuid,text,text,jsonb)",
+  "public.bind_local_runtime_switch(uuid,uuid,uuid)",
+  "public.finish_local_runtime_switch(uuid,uuid,text,jsonb)",
+  "public.admit_local_generation_job_v2(uuid,uuid,text,jsonb,text,text,uuid,jsonb)",
   "public.upsert_provider_key(uuid,text,text,text)",
   "public.get_provider_key(uuid,text)",
   "public.upsert_google_drive_connection(uuid,text,text,text,text,text)",
@@ -106,8 +113,11 @@ function isTruthySqlValue(value) {
   return value === "t" || value === "true" || value === "1";
 }
 
-async function fetchOk(url, init) {
+export async function fetchOk(url, init) {
   const response = await fetch(url, init);
+  // These probes only need headers. Release unread bodies so the one-shot
+  // bootstrap can exit and Compose can start services waiting for completion.
+  await response.body?.cancel();
   return response.ok;
 }
 
@@ -151,6 +161,13 @@ async function main() {
 
   console.log("Applying supabase/local-foundation.sql...");
   applySql("local foundation", options.foundation);
+
+  applySql("local generation jobs", path.join(repoRoot, "supabase", "migrations", "202610020001_local_generation_jobs.sql"));
+  applySql("local generation outputs", path.join(repoRoot, "supabase", "migrations", "202610020002_local_generation_outputs.sql"));
+  applySql("local generation saves", path.join(repoRoot, "supabase", "migrations", "202610030001_local_generation_saves.sql"));
+  applySql("local generation recipe snapshots", path.join(repoRoot, "supabase", "migrations", "202611010001_local_generation_recipe_snapshots.sql"));
+  applySql("local generation switch fencing", path.join(repoRoot, "supabase", "migrations", "202611010002_local_generation_switch_fencing.sql"));
+  applySql("local generation Q3 recipe", path.join(repoRoot, "supabase", "migrations", "202611010003_local_generation_q3_recipe.sql"));
 
   console.log("Verifying required extensions...");
   const extensions = queryScalar(
@@ -198,7 +215,9 @@ async function main() {
   console.log("Supabase Compose bootstrap completed.");
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

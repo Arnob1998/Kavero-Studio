@@ -29,7 +29,7 @@ describe("GET /auth/callback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getRequestSiteOrigin.mockReturnValue("https://app.example");
-    mocks.getSafeAuthRedirectPath.mockImplementation((value: string | null | undefined) => value ?? "/");
+    mocks.getSafeAuthRedirectPath.mockImplementation((value: string | null | undefined) => value ?? "/dashboard");
     mocks.getAuthModeConfig.mockReturnValue({
       mode: "google",
       googleEnabled: true,
@@ -56,6 +56,13 @@ describe("GET /auth/callback", () => {
 
     expect(mocks.createClient).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toBe("https://app.example/auth/auth-code-error");
+  });
+
+  it("returns a normal successful OAuth sign-in to Dashboard", async () => {
+    mocks.createClient.mockResolvedValue({auth:{exchangeCodeForSession:vi.fn().mockResolvedValue({error:null})}});
+    const response=await GET(new Request("https://app.example/auth/callback?code=example"));
+    expect(mocks.getSafeAuthRedirectPath).toHaveBeenCalledWith(null);
+    expect(response.headers.get("location")).toBe("https://app.example/dashboard");
   });
 
   it("fails gracefully when password-only auth mode is active", async () => {

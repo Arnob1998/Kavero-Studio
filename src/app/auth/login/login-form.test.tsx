@@ -73,7 +73,7 @@ describe("LoginForm", () => {
     expect(client.auth.signInWithOAuth).toHaveBeenCalledWith({
       provider: "google",
       options: {
-        redirectTo: "https://app.example/auth/callback?next=%2F",
+        redirectTo: "https://app.example/auth/callback?next=%2Fdashboard",
       },
     });
   });
@@ -95,7 +95,7 @@ describe("LoginForm", () => {
       email: "user@example.com",
       password: "secret-pass",
     });
-    await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/"));
+    await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/dashboard"));
   });
 
   it("renders both auth paths in mixed mode", () => {

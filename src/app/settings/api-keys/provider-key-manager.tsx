@@ -187,14 +187,14 @@ export function ProviderKeyManager({
   }
 
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-black/16 p-4">
+    <section className="min-w-0 rounded-xl border border-white/[0.08] bg-background/50 p-4">
       <div className="mb-4 flex items-center gap-2 text-[14px] font-semibold text-white">
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-white/[0.07] text-white/58">
           <KeyRound size={16} />
         </span>
         Provider keys
       </div>
-      <div className="grid gap-2">
+      <div className="grid min-w-0 gap-2">
         {providers.map((provider) => {
           const savedKey = savedByProvider.get(provider.id);
           const expanded = expandedProviderId === provider.id;
@@ -203,7 +203,7 @@ export function ProviderKeyManager({
           const canSubmit = hasRequiredFields(provider);
 
           return (
-            <div key={provider.id} className="rounded-lg border border-white/[0.08] bg-white/[0.025]">
+            <div key={provider.id} className="min-w-0 rounded-lg border border-white/[0.08] bg-white/[0.025]">
               <button
                 type="button"
                 className="flex min-h-12 w-full items-center gap-3 px-3 text-left"
@@ -238,7 +238,7 @@ export function ProviderKeyManager({
               </button>
 
               {expanded ? (
-                <div className="grid gap-3 border-t border-white/[0.07] p-3">
+                <div className="grid min-w-0 gap-3 border-t border-white/[0.07] p-3">
                   <p className="m-0 text-[11px] font-medium text-white/38">
                     {provider.checkMode === "live" ? "Credentials are checked with the provider before saving." : "Credentials are validated locally before saving."}
                   </p>
@@ -246,14 +246,14 @@ export function ProviderKeyManager({
                     const visibilityKey = `${provider.id}:${field.id}`;
                     const showSecret = Boolean(visibleSecrets[visibilityKey]);
                     return (
-                      <label key={field.id} className="grid gap-1.5">
+                      <label key={field.id} className="grid min-w-0 gap-1.5">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.07em] text-white/42">
                           {field.label}{field.required ? " *" : " (optional)"}
                         </span>
                         <span className="relative">
                           {field.inputType === "select" ? (
                             <select
-                              className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 text-[13px] font-medium text-white outline-none focus:border-accent/70"
+                              className="h-10 min-w-0 w-full rounded-lg border border-white/[0.08] bg-black/40 px-3 text-[13px] font-medium text-white outline-none focus:border-accent/70"
                               aria-label={`${provider.label} ${field.label}`}
                               value={forms[provider.id]?.[field.id] ?? ""}
                               disabled={loading || saveState === "saving"}
@@ -266,7 +266,7 @@ export function ProviderKeyManager({
                             </select>
                           ) : (
                           <input
-                            className="h-10 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 pr-10 text-[13px] font-medium text-white outline-none placeholder:text-white/25 focus:border-accent/70"
+                            className="h-10 min-w-0 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 pr-10 text-[13px] font-medium text-white outline-none placeholder:text-white/25 focus:border-accent/70"
                             aria-label={`${provider.label} ${field.label}`}
                             type={field.secret && !showSecret ? "password" : field.inputType === "password" ? "text" : field.inputType}
                             autoComplete="off"

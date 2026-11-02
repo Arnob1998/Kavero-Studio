@@ -148,7 +148,7 @@ export default function PricingPage() {
                 </Link>
               </Button>
               <Button asChild variant="ghost" className="h-11 rounded-xl text-white/46">
-                <Link href="/settings/api-keys">
+                <Link href="/settings/models?source=cloud">
                   <LockKeyhole size={15} />
                   Add API key
                 </Link>

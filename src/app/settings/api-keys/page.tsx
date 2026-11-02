@@ -1,21 +1,5 @@
-import type { Metadata } from "next";
-import { brand } from "@/lib/brand";
-import { SettingsShell } from "../settings-shell";
-import { ProviderSettingsPanel } from "./provider-settings-panel";
-
-export const metadata: Metadata = {
-  title: `API Providers | ${brand.name}`,
-  description: `Connect provider API keys for ${brand.name}.`,
-};
+import { redirect } from "next/navigation";
 
 export default function ApiKeysPage() {
-  return (
-    <SettingsShell
-      active="API Keys"
-      title="API Providers"
-      description="Manage provider keys and default model selections."
-    >
-      <ProviderSettingsPanel />
-    </SettingsShell>
-  );
+  redirect("/settings/models?source=cloud");
 }

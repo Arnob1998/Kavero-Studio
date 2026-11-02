@@ -116,6 +116,10 @@ try {
   console.log(`Applying supabase/local-foundation.sql to ${options.container}...`);
   applySql({ label: "local foundation", filePath: options.foundation, options });
 
+  applySql({ label: "local generation jobs", filePath: path.join(repoRoot, "supabase", "migrations", "202610020001_local_generation_jobs.sql"), options });
+  applySql({ label: "local generation outputs", filePath: path.join(repoRoot, "supabase", "migrations", "202610020002_local_generation_outputs.sql"), options });
+  applySql({ label: "local generation saves", filePath: path.join(repoRoot, "supabase", "migrations", "202610030001_local_generation_saves.sql"), options });
+
   console.log("Local Supabase foundation bootstrap completed.");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { brand } from "@/lib/brand";
 import { GeneratePage } from "@/modules/generation/components/generate-page";
+import { localUIEnabled } from "@/modules/generation/local/readiness-service";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: `Generate | ${brand.name}`,
@@ -8,5 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return <GeneratePage />;
+  return <GeneratePage localEnabled={localUIEnabled()} />;
 }

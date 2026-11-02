@@ -1,0 +1,26 @@
+.page { --home-accent:#ced4df; --home-accent-hover:#eef0f5; --home-on-accent:#101216; --home-subtle:#858a94; --page-gutter:clamp(1.5rem,3vw,3rem); --content-width:120rem; --radius-card:1.5rem; --radius-control:.75rem; height:100svh; overflow-y:auto; overflow-x:hidden; isolation:isolate; background:var(--kavero-background); color:var(--kavero-text-primary); scroll-behavior:smooth; }
+.skipLink { position:fixed; z-index:100; top:10px; left:20px; transform:translateY(-150%); background:var(--kavero-text-primary); color:var(--kavero-background); padding:10px 16px; border-radius:8px; }
+.skipLink:focus { transform:none; }
+.page :global(.landing-section),.page :global(.landing-hero-section) { position:relative; display:flex; align-items:center; scroll-margin-top:5rem; padding-block:clamp(3.5rem,5.5svh,5rem); }
+.page :global(.landing-section) { min-height:100svh; }
+.page :global(.landing-hero-section) { min-height:100svh; padding-top:115px; }
+.page :global(.landing-content-gap) { margin-top:clamp(1.75rem,3.25svh,2.25rem); }
+.page :global(.landing-heading) { color:var(--kavero-text-primary); font-size:clamp(2.625rem,4vw,3.5rem); font-weight:500; letter-spacing:-.055em; line-height:1.02; }
+.page :global(.landing-lede) { color:var(--kavero-text-secondary); font-size:clamp(1.0625rem,1.25vw,1.125rem); line-height:1.65; }
+.page :global(.landing-card) { min-width:0; overflow:hidden; border:1px solid var(--kavero-glass-border); border-radius:var(--radius-card); background:linear-gradient(145deg,rgb(29 32 38 / .8),rgb(18 20 24 / .92)); backdrop-filter:blur(18px); box-shadow:inset 0 1px 0 var(--kavero-glass-highlight),0 18px 48px rgb(0 0 0 / .12); }
+.page :global(.landing-card-title) { color:var(--kavero-text-primary); font-size:clamp(1.25rem,1.5vw,1.375rem); font-weight:500; letter-spacing:-.035em; line-height:1.2; }
+.page :global(.landing-card-copy) { color:var(--kavero-text-secondary); font-size:1rem; line-height:1.625; }
+.page :global(.solution-preview) { height:11rem; }
+.page :global(.how-step-card) { min-height:32rem; }
+.page [aria-hidden="true"][class*="blur-"] { opacity:.12; }
+.page [class*="text-transparent"] { background-image:none; color:var(--kavero-text-primary); }
+.page [class*="font-semibold"] { font-weight:500; }
+.page [class*="bg-violet-"],.page [class*="bg-teal-"],.page [class*="bg-emerald-"] { background-color:rgb(255 255 255 / .04); border-color:var(--kavero-glass-border); }
+.page a:focus-visible { outline:2px solid var(--kavero-focus); outline-offset:4px; }
+@media(min-width:80rem) { .page :global(.how-step-card) { height:clamp(35rem,63svh,39rem); min-height:0; } }
+@media(min-width:80rem) and (min-height:50rem) { .page :global(.solution-preview) { height:13rem; } }
+@media(min-width:80rem) and (min-height:59.375rem) { .page :global(.solution-preview) { height:14rem; } }
+@media(min-width:80rem) and (max-height:59.3125rem) { .page :global(.solution-foundation-strip) { display:none; } }
+@media(prefers-reduced-motion:reduce) { .page { scroll-behavior:auto; } }
+
+.page > section { overflow:clip; }

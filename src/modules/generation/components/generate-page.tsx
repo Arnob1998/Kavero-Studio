@@ -85,6 +85,8 @@ import {
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "../utils/prompt-refiner-policy";
 import { ModelQuickPicker } from "./model-quick-picker";
+import { LocalGenerationPanel } from "../local/local-generation-panel";
+import { localSourceBlockReason } from "../local/capabilities";
 import { GenerationResultsWorkspace } from "./generation-results-workspace";
 import { SequencePlannerPanel, SequenceToggle, type SequenceExecutionViewState, type SequenceExecutionVisual, type SequencePlannerViewState } from "./sequence-planner-panel";
 import { SequenceImportDialog } from "./sequence-import-dialog";
@@ -929,7 +931,12 @@ function PromptLibrarySkeleton() {
   );
 }
 
-export function GeneratePage() {
+export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean } = {}) {
+  const [localSource, setLocalSource] = useState(false);
+  const [localSwitchError, setLocalSwitchError] = useState<string | null>(null);
+  useEffect(() => {
+    if (localEnabled) setLocalSource(sessionStorage.getItem("kavero-local-source") === "local");
+  }, [localEnabled]);
   const modelProvider = useModelProviderSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSetting, setActiveSetting] = useState<SettingKey>("aspect");
@@ -1134,7 +1141,7 @@ export function GeneratePage() {
       title: "Connect image model",
       description: "Add your image generation model API key before generating images.",
       confirmLabel: "Add API key",
-      href: "/settings/api-keys",
+      href: "/settings/models?source=cloud",
       cancelLabel: "Cancel",
       icon: "model",
     });
@@ -2561,8 +2568,21 @@ export function GeneratePage() {
     </div>
   ) : null;
 
+  const sourceSwitch = localEnabled ? <div className="fixed right-4 top-16 z-50 max-w-[calc(100vw-2rem)]">
+    <div className="flex rounded-xl border border-white/15 bg-black/90 p-1 text-xs text-white shadow-lg" aria-label="Inference source">
+      <button type="button" className={`rounded-lg px-4 py-2 ${!localSource ? "bg-white/15" : "text-white/50"}`} aria-pressed={!localSource} onClick={() => { setLocalSource(false); sessionStorage.setItem("kavero-local-source", "cloud"); }}>Cloud</button>
+      <button type="button" className={`rounded-lg px-4 py-2 ${localSource ? "bg-white/15" : "text-white/50"}`} aria-pressed={localSource} onClick={() => {
+        const blocked = localSourceBlockReason({ references: referenceImages.length, activeResult: Boolean(activeRun), generating: isGenerating, sequence: sequenceEnabled || sequenceExecution.status !== "idle" });
+        if (blocked) { setLocalSwitchError(blocked); return; }
+        setLocalSwitchError(null); setSettingsOpen(false); setLocalSource(true); sessionStorage.setItem("kavero-local-source", "local");
+      }}>Local</button>
+    </div>
+    {localSwitchError && !localSource && <p role="alert" className="mt-2 max-w-xs rounded-xl border border-amber-300/20 bg-black p-3 text-xs text-amber-200">{localSwitchError}</p>}
+  </div> : null;
+  if (localSource && localEnabled) return <main className="h-svh w-full overflow-y-auto bg-background font-sans text-text-primary"><SiteNav activeLabel="Generate" ariaLabel="Generate navigation" />{sourceSwitch}<LocalGenerationPanel prompt={promptText} onPromptChange={setPromptText} /></main>;
   return (
     <FloatingTooltip.Provider className="bg-black/72 text-white">
+      {sourceSwitch}
       <main className="relative min-h-svh w-full overflow-hidden bg-black font-sans text-white [isolation:isolate]">
       <div
         className="pointer-events-none fixed left-1/2 top-[25px] z-20 hidden h-px w-[min(880px,76vw)] -translate-x-1/2 bg-[linear-gradient(90deg,transparent,rgb(255_255_255_/_0.16),transparent)] blur-[0.5px] md:block"

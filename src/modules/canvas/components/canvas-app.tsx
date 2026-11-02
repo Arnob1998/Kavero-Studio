@@ -12,6 +12,9 @@ import { LockKeyhole, Sparkles } from "lucide-react";
 import { canvasToolSuccess, type CanvasToolName } from "@/modules/canvas/actions/canvas-tool-registry";
 import { getCanvasAccessPolicyDecision } from "@/modules/canvas/utils/canvas-access-policy";
 import type { DeploymentProfile } from "@/lib/deployment-profile";
+import { SiteNav } from "@/components/site-nav";
+import { usePathname } from "next/navigation";
+import styles from "./canvas-app.module.css";
 
 interface ClientAppProps {
   initialDesignId?: string | null;
@@ -27,6 +30,16 @@ type CanvasAccessStatus = {
 };
 
 export function ClientApp({ initialDesignId = null }: ClientAppProps) {
+  const pathname = usePathname();
+  return (
+    <div className={styles.shell}>
+      {pathname === "/canvas" && <header className={styles.header}><SiteNav activeLabel="Canvas" /></header>}
+      <div className={styles.workspace}><CanvasWorkspace initialDesignId={initialDesignId} /></div>
+    </div>
+  );
+}
+
+function CanvasWorkspace({ initialDesignId = null }: ClientAppProps) {
   const { navigate, designId } = useRouter(initialDesignId);
   const [editorError, setEditorError] = useState<string | null>(null);
   const activeDesignIdRef = useRef<string | null>(null);

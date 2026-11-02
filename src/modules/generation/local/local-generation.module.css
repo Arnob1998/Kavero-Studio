@@ -1,0 +1,31 @@
+.page { width:100%; max-width:1200px; padding:125px 36px 64px; margin:0 auto; color:var(--kavero-text-primary); }
+.heading { margin-bottom:32px; }
+.eyebrow { margin-bottom:14px; color:var(--kavero-accent); font-size:12px; font-weight:500; }
+.heading h1 { margin:0; font-size:38px; font-weight:500; line-height:1.15; letter-spacing:-.045em; }
+.heading>p:last-child { margin-top:14px; font-size:13px; line-height:1.85; color:var(--kavero-text-secondary); }
+.layout { display:grid; grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr); gap:26px; align-items:start; }
+.modelCard,.promptCard { min-width:0; border:1px solid var(--kavero-glass-border); border-radius:18px; background:linear-gradient(145deg,rgb(28 31 37 / .8),var(--kavero-glass-tint)); box-shadow:inset 0 1px 0 var(--kavero-glass-highlight); backdrop-filter:blur(18px); }
+.modelCard { padding:25px; }
+.modelHeading { display:flex; align-items:center; gap:14px; }
+.modelIcon { display:grid; place-items:center; flex-shrink:0; height:46px; width:46px; border:1px solid rgb(59 130 246 / .25); border-radius:12px; background:var(--kavero-accent-tint); color:var(--kavero-accent); }
+.modelHeading h2 { font-size:16px; font-weight:500; line-height:1.5; letter-spacing:-.02em; }
+.modelHeading p { margin-top:6px; font-size:11px; line-height:1.7; color:var(--kavero-text-secondary); }
+.badge { display:inline-flex; align-items:center; gap:7px; padding:6px 10px; border:1px solid var(--kavero-border); border-radius:99px; font-size:10px; color:var(--kavero-text-secondary); margin-top:19px; }
+.badge::before { content:""; width:5px; height:5px; border-radius:50%; background:#8b9099; }
+.badge[data-ready="true"]::before { background:#4ade80; }
+.creation { min-width:0; }
+.promptCard { overflow:hidden; }
+.promptHeading { display:flex; align-items:center; gap:10px; padding:19px 22px; border-bottom:1px solid var(--kavero-border); color:var(--kavero-text-secondary); }
+.promptHeading h2 { font-size:13px; font-weight:500; color:var(--kavero-text-primary); }
+.promptCard textarea { min-height:220px; font-size:14px; line-height:1.8; padding:22px; }
+.creation>details { border-top:1px solid var(--kavero-border); padding-top:12px; line-height:1.85; }
+.setup { border-top:1px solid var(--kavero-border); margin-top:20px; padding-top:18px; }
+.setup>label { padding:14px; border:1px solid var(--kavero-border); border-radius:10px; background:rgb(255 255 255 / .02); font-size:12px; line-height:1.8; color:var(--kavero-text-secondary); }
+.setup input { flex-shrink:0; accent-color:var(--kavero-accent); }
+.setup>details { border-top:1px solid var(--kavero-border); padding-top:7px; line-height:1.8; color:var(--kavero-text-secondary); }
+.setup>p { line-height:1.85; }
+.setup summary { line-height:1.8; overflow-wrap:anywhere; }
+.setup button { font-size:12px; }
+.setup progress { height:5px; border-radius:99px; }
+@media(max-width:900px) { .layout { grid-template-columns:1fr; gap:22px; } .page { max-width:720px; padding-inline:25px; } }
+@media(max-width:600px) { .page { padding:124px 20px 40px; } .heading { margin-bottom:25px; } .heading h1 { font-size:31px; } .modelCard { padding:21px; } .promptCard textarea { min-height:175px; padding:19px; } .promptHeading { padding:17px 19px; } .setup>div:first-child { font-size:10px; } }
