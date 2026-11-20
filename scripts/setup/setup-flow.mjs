@@ -20,6 +20,24 @@ export const setupGatewayProviders = [
   { value: "azure-openai-image", label: "Azure OpenAI (image)", hint: "Independent GPT Image 2 deployment" },
 ];
 
+export const setupImageGenerationChoices = [
+  { value: "local", label: "Local models", hint: "Start with a supported image model on your PC; no API key." },
+  { value: "providers", label: "API provider", hint: "Start with a provider image model; you can add Local later." },
+  { value: "later", label: "Set up models later", hint: "Launch Kavero and choose models in Model Hub." },
+];
+
+export const setupLocalModels = [
+  { value: "qwen-image-2.1-q4-evaluation", label: "Qwen Image 2.1 · Q4", hint: "Recommended starting profile; hardware and terms checked after launch." },
+  { value: "qwen-image-2.1-q3-evaluation", label: "Qwen Image 2.1 · Q3", hint: "Smaller quantization; hardware and terms checked after launch." },
+];
+export const setupApiModels = [
+  { provider: "gemini", value: "kavero-image-generation-default", label: "Nano Banana 2" },
+  { provider: "gemini", value: "kavero-image-gemini-3-pro", label: "Nano Banana Pro" },
+  { provider: "gemini", value: "kavero-image-gemini-2-5-flash", label: "Nano Banana" },
+  { provider: "openai", value: "kavero-image-openai-gpt-image-2", label: "GPT Image 2" },
+  { provider: "azure-openai-image", value: "kavero-image-azure-gpt-image-2", label: "Azure GPT Image 2" },
+];
+
 function gatewayProviderEnv(inputs = {}) {
   return {
     OPENAI_API_KEY: inputs.OPENAI_API_KEY ?? "",
@@ -59,6 +77,10 @@ export function buildSetupValues({
       throw new Error("Local Docker setup supports password auth only.");
     }
 
+    if (inputs.imageGeneration !== undefined && !setupImageGenerationChoices.some(choice => choice.value === inputs.imageGeneration)) {
+      throw new Error("Unknown image generation choice.");
+    }
+
     const secrets = dockerSecrets ?? createDockerSecrets();
     return {
       KAVERO_APP_PORT: inputs.KAVERO_APP_PORT ?? "3000",
@@ -80,7 +102,9 @@ export function buildSetupValues({
       KAVERO_LITELLM_API_KEY: secrets.KAVERO_LITELLM_API_KEY,
       KAVERO_LITELLM_ROUTING_SECRET: secrets.KAVERO_LITELLM_ROUTING_SECRET,
       LITELLM_MASTER_KEY: secrets.LITELLM_MASTER_KEY,
-      ...gatewayProviderEnv(inputs),
+      ...(inputs.imageGeneration === "local" ? { KAVERO_LOCAL_GENERATION_ENABLED: "1" } : {}),
+      // A starter choice never disables another source or clears its credentials.
+      ...(inputs.imageGeneration === undefined ? gatewayProviderEnv(inputs) : Object.fromEntries(Object.entries(gatewayProviderEnv(inputs)).filter(([key]) => Object.hasOwn(inputs, key)))),
     };
   }
 
@@ -115,10 +139,10 @@ function assertNotCanceled(value, prompts) {
   return value;
 }
 
-export async function promptForGatewayProviders({ prompts, inputs, target = "gateway" }) {
-  const selectedProviders = assertNotCanceled(
+export async function promptForGatewayProviders({ prompts, inputs, target = "gateway", selectedProviders: configuredProviders }) {
+  const selectedProviders = configuredProviders ?? assertNotCanceled(
     await prompts.multiselect({
-      message: "Choose model providers to configure",
+      message: "Optional API providers — leave empty to skip",
       options: setupGatewayProviders,
       required: false,
     }),
@@ -202,11 +226,46 @@ export async function promptForGatewayProviders({ prompts, inputs, target = "gat
   return selectedProviders;
 }
 
+export async function promptForImageGeneration({ prompts, inputs, platform = process.platform, arch = process.arch }) {
+  const localSupported = platform === "win32" && arch === "x64";
+  inputs.imageGeneration = assertNotCanceled(await prompts.select({
+    message: "Choose your first image-model source",
+    initialValue: localSupported ? "local" : "providers",
+    options: setupImageGenerationChoices.map(choice => choice.value === "local" && !localSupported ? { ...choice, disabled: true, hint: "Currently requires Windows x64." } : choice),
+  }), prompts);
+  if (!setupImageGenerationChoices.some(choice => choice.value === inputs.imageGeneration)) throw new Error("Unknown image generation choice.");
+  if (inputs.imageGeneration === "local") {
+    if (!localSupported) throw new Error("Local models currently require Windows x64.");
+    inputs.starterLocalProfile = assertNotCanceled(await prompts.select({ message: "Choose your starting local image model", initialValue: setupLocalModels[0].value, options: setupLocalModels }), prompts);
+    if (!setupLocalModels.some(model => model.value === inputs.starterLocalProfile)) throw new Error("Unknown starting local model.");
+    prompts.note("The current runnable local catalog contains Qwen Q4/Q3. After launch, sign in and follow the Model Hub link to review your starting model, check hardware and accept component terms. No model download or terms acceptance happens in this wizard. Other imports are not automatically runnable.", "Starting local model");
+  } else if (inputs.imageGeneration === "providers") {
+    const options = setupGatewayProviders.filter(provider => setupApiModels.some(model => model.provider === provider.value));
+    inputs.starterProvider = assertNotCanceled(await prompts.select({ message: "Choose your starting image provider", options }), prompts);
+    if (!options.some(provider => provider.value === inputs.starterProvider)) throw new Error("Unknown starting image provider.");
+    await promptForGatewayProviders({ prompts, inputs, selectedProviders: [inputs.starterProvider] });
+    const models = setupApiModels.filter(model => model.provider === inputs.starterProvider);
+    inputs.starterModelAlias = assertNotCanceled(await prompts.select({ message: "Choose your starting provider image model", initialValue: models[0].value, options: models }), prompts);
+    if (!models.some(model => model.value === inputs.starterModelAlias)) throw new Error("Unknown starting provider model.");
+  }
+  prompts.note("This is a starting choice, not an exclusive mode. In Model Hub you can add more Local or API models, change the active model, and remove configurations where supported. Deleting downloaded files is separate. Chat models for features such as Copilot are configured independently.", "Manage models later");
+  return inputs.imageGeneration;
+}
+
+export function starterModelHubUrl(inputs) {
+  const url = new URL(`http://127.0.0.1:${inputs.KAVERO_APP_PORT}/settings/models`);
+  if (inputs.imageGeneration === "local") { url.searchParams.set("source", "local"); url.searchParams.set("starterProfile", inputs.starterLocalProfile); }
+  if (inputs.imageGeneration === "providers") { url.searchParams.set("source", "cloud"); url.searchParams.set("starterModel", inputs.starterModelAlias); }
+  return url.href;
+}
+
 export async function runSetupWizard({
   prompts,
   cwd = process.cwd(),
   now = new Date(),
   runLocalDocker = runLocalDockerStack,
+  platform = process.platform,
+  arch = process.arch,
 }) {
   prompts.intro("Kavero setup");
 
@@ -275,11 +334,7 @@ export async function runSetupWizard({
       }),
       prompts,
     );
-    prompts.note(
-      "Select only the providers you want on the bundled gateway. The in-app API key screen remains unchanged.",
-      "Model gateway",
-    );
-    await promptForGatewayProviders({ prompts, inputs });
+    await promptForImageGeneration({ prompts, inputs, platform, arch });
   } else {
     inputs.NEXT_PUBLIC_SUPABASE_URL = assertNotCanceled(
       await prompts.text({ message: "Supabase public URL", placeholder: "https://project.supabase.co" }),
@@ -399,7 +454,12 @@ export async function runSetupWizard({
 
   spinner.stop(result.wrote ? `Wrote ${profile.envFile}` : `${profile.envFile} already up to date`);
 
+  if (result.preserved.includes("KAVERO_LOCAL_GENERATION_ENABLED")) {
+    prompts.note("Your existing local-generation setting was kept. To apply the image-generation choice you just selected, rerun setup and allow updates to existing non-secret values.", "Existing setting preserved");
+  }
+
   if (profileId === "local-docker") {
+    prompts.note(`After Kavero starts, sign in and open:\n${starterModelHubUrl(inputs)}\n\nReview and activate your starting model there. You can add more models later.`, "Your starting model");
     prompts.note(
       [
         "pnpm setup:run",

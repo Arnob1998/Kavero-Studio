@@ -20,8 +20,10 @@ export class PackageInstaller {
   cancel(owner,id) {const row=this.store.cancel(owner,id);return row?publicInstall(row):null;}
   recover() {return this.store.recover(this.dependencies.inspectProcess??processIdentity);}
   async run(owner,id) {
+    this.store.assertNoRemoval();
     const row=this.store.get(owner,id);if(!row)throw Error('install-not-found');
     const verified=this.catalog.get(row.package_id);if(!verified||verified.hash!==row.manifest)throw Error('install-manifest-changed');
+    if(row.state==='removed')throw Error('install-removed');
     if(row.state==='cancelled')return publicInstall(row);
     const version=`versions/${verified.hash}`,stage=`staging/${row.id}`;
     if(row.state==='installed') {if(!await this.verifyVersion(version,verified))throw Error('installed-package-changed');return publicInstall(row);}

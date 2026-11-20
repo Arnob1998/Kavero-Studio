@@ -1,0 +1,12 @@
+// @vitest-environment node
+import {beforeEach,afterEach,it,expect,vi} from "vitest";
+import {computersGET,connectWebsiteEnabled} from "./computer-service";
+const m=vi.hoisted(()=>({rpc:vi.fn(),user:vi.fn()}));
+vi.mock("@/lib/supabase/admin",()=>({createAdminClient:()=>({rpc:m.rpc})}));
+vi.mock("@/lib/supabase/server",()=>({createClient:async()=>({auth:{getUser:m.user}})}));
+const origin="https://kavero.test",owner="110fce0e-22ba-4a44-a68a-6619b477ca1b",req=()=>new Request(origin+"/api/connect/computers");
+beforeEach(()=>{vi.clearAllMocks();for(const f of ["ENABLED","DELIVERY_ENABLED","EXECUTION_ENABLED","RESULTS_ENABLED"])vi.stubEnv("KAVERO_CONNECT_"+f,"1");vi.stubEnv("KAVERO_CONNECT_ORIGIN",origin);vi.stubEnv("KAVERO_STORAGE_PROVIDER","kavero-managed");vi.stubEnv("KAVERO_MANAGED_STORAGE_BACKEND","supabase-storage");m.user.mockResolvedValue({data:{user:{id:owner}}});m.rpc.mockResolvedValue({data:{computers:[],ownerOutstanding:0}});});afterEach(()=>vi.unstubAllEnvs());
+it("uses server owner and canonical origin and emits no-store snapshot",async()=>{const r=await computersGET(req());expect(r.status).toBe(200);expect(r.headers.get("cache-control")).toBe("private, no-store");expect(m.rpc).toHaveBeenCalledWith("connect_computers_owner",{p_owner:owner,p_origin:origin});expect((await r.json()).computers).toEqual([]);});
+it.each(["ENABLED","DELIVERY_ENABLED","EXECUTION_ENABLED","RESULTS_ENABLED"])("gates website and route with %s",async f=>{vi.stubEnv("KAVERO_CONNECT_"+f,"0");expect(connectWebsiteEnabled()).toBe(false);expect((await computersGET(req())).status).toBe(404);expect(m.user).not.toHaveBeenCalled();});
+it("fails closed for unsupported storage, no account, queries and absent migrations",async()=>{vi.stubEnv("KAVERO_STORAGE_PROVIDER","google-drive");expect(connectWebsiteEnabled()).toBe(false);expect((await computersGET(req())).status).toBe(503);vi.stubEnv("KAVERO_STORAGE_PROVIDER","kavero-managed");m.user.mockResolvedValueOnce({data:{user:null}});expect((await computersGET(req())).status).toBe(401);expect((await computersGET(new Request(req().url+"?owner=other"))).status).toBe(400);m.rpc.mockResolvedValue({error:{message:"missing RPC"}});expect((await computersGET(req())).status).toBe(503);});
+it("rejects malformed or unbounded projection rather than leaking raw data",async()=>{m.rpc.mockResolvedValue({data:{computers:Array.from({length:51},()=>({})),ownerOutstanding:0}});expect((await computersGET(req())).status).toBe(503);});

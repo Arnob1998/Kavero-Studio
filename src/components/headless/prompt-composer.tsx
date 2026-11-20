@@ -38,6 +38,7 @@ interface PromptComposerProps extends Omit<ComponentPropsWithoutRef<"form">, "on
   onValueChange: (value: string) => void;
   onSubmit?: (value: string) => void;
   isLoading?: boolean;
+  submitDisabled?: boolean;
   placeholder?: string;
   ariaLabel?: string;
   leadingAction?: PromptComposerAction;
@@ -61,6 +62,7 @@ export function PromptComposer({
   onValueChange,
   onSubmit,
   isLoading = false,
+  submitDisabled = false,
   placeholder = "Describe...",
   ariaLabel = "Prompt",
   leadingAction,
@@ -95,7 +97,7 @@ export function PromptComposer({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    onSubmit?.(value);
+    if (!submitDisabled && !isLoading) onSubmit?.(value);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -107,7 +109,7 @@ export function PromptComposer({
 
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      onSubmit(value);
+      if (!submitDisabled && !isLoading) onSubmit(value);
     }
   };
 
@@ -156,7 +158,7 @@ export function PromptComposer({
             {action.icon}
           </button>
         ))}
-        <button className={classNames.submitButton} type="submit" aria-label={submitLabel} disabled={isLoading}>
+        <button className={classNames.submitButton} type="submit" aria-label={submitLabel} disabled={isLoading || submitDisabled}>
           {submitIcon && <span className={classNames.desktopSubmitIcon}>{submitIcon}</span>}
           <span className={classNames.submitLabel}>{submitLabel}</span>
           {mobileSubmitIcon && <span className={classNames.mobileSubmitIcon}>{mobileSubmitIcon}</span>}

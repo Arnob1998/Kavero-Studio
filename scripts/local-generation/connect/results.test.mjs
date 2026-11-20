@@ -1,0 +1,30 @@
+// @vitest-environment node
+import {describe,it,expect,vi,afterEach} from 'vitest';
+import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
+import {ExecutionJournal} from './native.mjs';import {ResultTransfer} from './results.mjs';import {pngFixture} from '../png-fixture.mjs';
+import {digest} from '../../../src/modules/model-providers/local/connect/protocol.ts';
+const dispose=[];afterEach(()=>{for(const f of dispose.splice(0).reverse())f();});
+function fixture(){
+ const dir=mkdtempSync(path.join(tmpdir(),'kc3a-unit-'));dispose.push(()=>rmSync(dir,{recursive:true,force:true}));const journal=new ExecutionJournal(path.join(dir,'journal.sqlite'));dispose.push(()=>journal.close());
+ const owner=randomUUID(),id=randomUUID(),key=randomUUID(),ledgerIdentity=randomUUID(),device='private-GPU',bytes=pngFixture();
+ const descriptor={jobId:id,ownerId:owner,ledgerIdentity,deviceId:device,requestHash:'a'.repeat(64),packageFingerprint:'b'.repeat(64),sha256:digest(bytes),sizeBytes:bytes.length,width:512,height:512,mimeType:'image/png',generatedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+86400000).toISOString()};
+ const job={id,owner,key,attempt:2,payload:{execute:true,hash:descriptor.requestHash,recipeSnapshot:{packageFingerprint:descriptor.packageFingerprint}},binding:{ledgerIdentity,executionDevice:digest(device)}};journal.prepare(job);journal.state(id,'generated-unvalidated');
+ const status={id,state:'generated-unvalidated',ledgerIdentity,requestHash:descriptor.requestHash,submissionKey:key,packageFingerprint:descriptor.packageFingerprint,executionDevice:device,output:{state:'generated',descriptor}};
+ const adapter={worker:vi.fn(async route=>route==='/status'?status:route==='/lease'?{token:randomUUID(),descriptor}:{released:true}),output:vi.fn(async()=>bytes)};
+ const transfer=new ResultTransfer({client:{},adapter,journal,owner});const result={jobId:id,state:'available',sha256:descriptor.sha256,sizeBytes:bytes.length};transfer.client={offer:vi.fn(async()=>({result:{...result,state:'pending'},token:randomUUID()})),upload:vi.fn(async()=>({result}))};return {journal,transfer,adapter,job,descriptor,result,status};
+}
+describe('native result transfer recovery',()=>{
+ it('holds/releases a native lease and marks only transfer receipt, never saved',async()=>{const f=fixture();expect(await f.transfer.tick()).toEqual(f.result);expect(f.journal.get(f.job.id).transferred).toBe(1);expect(f.adapter.worker.mock.calls.map(c=>c[0])).toEqual(['/status','/lease','/lease/release']);expect(f.transfer.client.offer.mock.calls[0][1]).toBe(2);expect(JSON.stringify(f.transfer.client.offer.mock.calls)).not.toContain('private-GPU');});
+ it('recovers upload acknowledgement loss with original available result',async()=>{const f=fixture();f.transfer.client.upload.mockRejectedValueOnce(Error('lost-ack'));await expect(f.transfer.tick()).rejects.toThrow('lost-ack');expect(f.journal.get(f.job.id).transferred).toBe(0);f.journal.db.prepare('update execution set transfer_after=0').run();f.transfer.client.offer.mockResolvedValueOnce({result:f.result});expect(await f.transfer.tick()).toEqual(f.result);expect(f.transfer.client.upload).toHaveBeenCalledOnce();});
+ it('refuses changed native identity before requesting bytes',async()=>{const f=fixture();f.status.ledgerIdentity=randomUUID();await expect(f.transfer.tick()).rejects.toThrow('identity-changed');expect(f.adapter.output).not.toHaveBeenCalled();expect(f.transfer.client.offer).not.toHaveBeenCalled();});
+ it('does not transfer another owner or nonfinal execution',async()=>{const f=fixture();f.transfer.owner=randomUUID();expect(await f.transfer.tick()).toBeNull();expect(f.adapter.worker).not.toHaveBeenCalled();});
+ it('retains transfer journal across reconstruction and never resubmits inference',async()=>{const f=fixture();await f.transfer.tick();expect(await f.transfer.tick()).toBeNull();expect(f.adapter.worker.mock.calls.some(c=>c[0]==='/submit')).toBe(false);});
+});
+
+describe('native saved receipt acknowledgement',()=>{
+ function savedFixture(){const f=fixture();f.journal.db.prepare('update execution set transferred=1,transfer_after=0').run();f.transfer.client.saved=vi.fn(async()=>({result:{jobId:f.job.id,sha256:f.descriptor.sha256,saved:true}}));const base=f.adapter.worker.getMockImplementation();f.adapter.worker.mockImplementation(async(route,...args)=>route==='/saved'?{saved:true}:base(route,...args));return f;}
+ it('only marks saved after durable server receipt and native acknowledgement',async()=>{const f=savedFixture();expect((await f.transfer.acknowledge()).saved).toBe(true);expect(f.journal.get(f.job.id).saved).toBe(1);expect(f.adapter.worker.mock.calls.map(c=>c[0])).toEqual(['/status','/saved']);expect(await f.transfer.acknowledge()).toBeNull();});
+ it('does not equate upload availability with saved',async()=>{const f=savedFixture();f.transfer.client.saved.mockResolvedValueOnce({result:{jobId:f.job.id,sha256:f.descriptor.sha256,saved:false}});expect(await f.transfer.acknowledge()).toBeNull();expect(f.journal.get(f.job.id).saved).toBe(0);expect(f.adapter.worker.mock.calls.map(c=>c[0])).toEqual(['/status']);});
+ it('retries a lost native saved acknowledgement without submitting or uploading',async()=>{const f=savedFixture();f.adapter.worker.mockRejectedValueOnce(Error('offline'));await expect(f.transfer.acknowledge()).rejects.toThrow('offline');f.journal.db.prepare('update execution set transfer_after=0').run();expect((await f.transfer.acknowledge()).saved).toBe(true);expect(f.journal.get(f.job.id).saved).toBe(1);expect(f.transfer.client.upload).not.toHaveBeenCalled();expect(f.adapter.worker.mock.calls.some(c=>c[0]==='/submit')).toBe(false);});
+ it('rejects mismatched saved receipts',async()=>{const f=savedFixture();f.transfer.client.saved.mockResolvedValueOnce({result:{jobId:randomUUID(),sha256:f.descriptor.sha256,saved:true}});await expect(f.transfer.acknowledge()).rejects.toThrow('receipt-invalid');expect(f.journal.get(f.job.id).saved).toBe(0);});
+});

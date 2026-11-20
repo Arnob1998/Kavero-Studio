@@ -5,6 +5,8 @@ import { randomUUID,createHmac,createHash } from 'node:crypto';
 import { verifyRequest } from '../protocol.mjs';
 import { ActivationManager } from './activation.mjs';
 import { SetupHub as SetupManager } from './setup-hub.mjs';
+import { NativeRemovalManager } from './removal.mjs';
+import { RemovalWire,REMOVAL_PATHS } from './removal-wire.mjs';
 import { HostImports,IMPORT_PATHS } from './imports.mjs';
 if(process.versions.node!=='24.11.1'||process.platform!=='win32')throw Error('host-runtime-unverified');
 const config=JSON.parse(readFileSync(process.argv[2],'utf8'));
@@ -13,14 +15,21 @@ const db=new DatabaseSync(config.database);db.exec('PRAGMA journal_mode=WAL; PRA
 const epoch=randomUUID(),ledger={nonce(nonce,now){db.prepare('DELETE FROM nonces WHERE expires<?').run(now);if(db.prepare('SELECT count(*) n FROM nonces').get().n>=1024)throw Error('nonce-limit');db.prepare('INSERT INTO nonces VALUES(?,?)').run(nonce,now+60000);}};
 const manager=new ActivationManager(config,db);
 const setup=new SetupManager(config,db,manager);
+const removal=new RemovalWire(new NativeRemovalManager(config,db,manager,setup));
 const imports=new HostImports(config);
 let stopping=false;
 const server=createServer(async(req,res)=>{
   const reply=(status,body,signed=false)=>{const encoded=JSON.stringify(body);res.writeHead(status,{'content-type':'application/json','cache-control':'no-store',...(signed?{'x-kavero-response':createHmac('sha256',config.secret).update(req.headers['x-kavero-nonce']+'\n'+createHash('sha256').update(encoded).digest('hex')).digest('hex')}:{})});res.end(encoded);};
   try {
-    if(req.method!=='POST'||![...IMPORT_PATHS,'/host/status','/host/shutdown','/host/activate','/host/activation','/host/activation/cancel','/host/setup','/host/setup/terms','/host/setup/install','/host/setup/status','/host/setup/cancel','/host/setup/access','/host/setup/permission'].includes(req.url))return reply(404,{error:'not-found'});
+    if(req.method!=='POST'||![...REMOVAL_PATHS,...IMPORT_PATHS,'/host/status','/host/shutdown','/host/activate','/host/activation','/host/activation/cancel','/host/setup','/host/setup/terms','/host/setup/install','/host/setup/status','/host/setup/receipt','/host/setup/cancel','/host/setup/access','/host/setup/permission'].includes(req.url))return reply(404,{error:'not-found'});
     let encoded='';for await(const chunk of req){encoded+=chunk.toString();if(Buffer.byteLength(encoded)>(IMPORT_PATHS.includes(req.url)?4096:1024)){reply(413,{error:'body-too-large'});req.destroy();return;}}
     verifyRequest(ledger,config.secret,'POST',req.url,req.headers,encoded);const body=JSON.parse(encoded);
+    if(REMOVAL_PATHS.includes(req.url)){
+      if(stopping)return reply(409,{instanceId:config.instanceId,error:'host-stopping'},true);
+      try{const result=await removal.handle(req.url,body);return reply(result.status,{instanceId:config.instanceId,...result.body},true);}
+      catch(error){const code=error.message;const status=code==='removal-not-found'?404:code==='invalid-removal-request'?400:code==='removal-idempotency-conflict'||code==='removal-manifest-changed'?409:503;
+        return reply(status,{instanceId:config.instanceId,error:status===503?'removal-unavailable':code},true);}
+    }
     if(IMPORT_PATHS.includes(req.url)){
       if(stopping)return reply(409,{instanceId:config.instanceId,error:'host-stopping'},true);
       try{const result=imports.handle(req.url,body);return reply(result.status,{instanceId:config.instanceId,...result.body},true);}
@@ -28,10 +37,11 @@ const server=createServer(async(req,res)=>{
     }
     if(req.url.startsWith('/host/setup')){
       if(req.url==='/host/setup/install'){const operation=await setup.admit(body);reply(202,{instanceId:config.instanceId,operation},true);setImmediate(()=>setup.run(body.owner,operation.id).catch(()=>{}));return;}
-      const expected=req.url==='/host/setup/permission'?'owner,packageId':['/host/setup/status','/host/setup/cancel'].includes(req.url)?'id,owner':'owner';
+      const expected=req.url==='/host/setup/permission'?'owner,packageId':req.url==='/host/setup/receipt'?'key,owner':['/host/setup/status','/host/setup/cancel'].includes(req.url)?'id,owner':'owner';
       const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
       const keys=Object.keys(body).sort().join(',');
-      if((keys!==expected&&!(expected==='owner'&&keys==='owner,profile'))||!uuid(body.owner)||(expected==='id,owner'&&!uuid(body.id)))throw Error('invalid-setup');
+      if((keys!==expected&&!(expected==='owner'&&keys==='owner,profile'))||!uuid(body.owner)||(expected==='id,owner'&&!uuid(body.id))||(expected==='key,owner'&&!uuid(body.key)))throw Error('invalid-setup');
+      if(req.url==='/host/setup/receipt')return reply(200,{instanceId:config.instanceId,operation:setup.receipt(body.owner,body.key)},true);
       if(req.url==='/host/setup')return reply(200,{instanceId:config.instanceId,setup:await setup.snapshot(body.owner,body.profile)},true);
       if(req.url==='/host/setup/terms')return reply(200,{instanceId:config.instanceId,terms:setup.terms(body.profile)},true);
       if(req.url==='/host/setup/access')return reply(200,{instanceId:config.instanceId,allowed:setup.access(body.owner,body.profile)},true);

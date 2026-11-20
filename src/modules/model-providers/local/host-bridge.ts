@@ -8,7 +8,7 @@ export async function localHostRequest(path: string, body: unknown) {
   const secret = process.env.KAVERO_LOCAL_HOST_SECRET ?? "";
   if (!/^[a-f0-9]{64}$/.test(secret)) throw Error("local-host-unconfigured");
   const modelLimits: Record<string, number> = {"/host/models/import":16384,"/host/models/list":32768,"/host/models/detail":2*1024*1024+32768,"/host/models/license":2*1024*1024};
-  if (!Object.hasOwn(modelLimits,path) && !["/host/status", "/host/activate", "/host/activation", "/host/activation/cancel", "/host/setup", "/host/setup/terms", "/host/setup/install", "/host/setup/status", "/host/setup/cancel", "/host/setup/access", "/host/setup/permission"].includes(path)) throw Error("local-host-action-invalid");
+  if (!Object.hasOwn(modelLimits,path) && !["/host/removal/review","/host/removal/start","/host/removal/status","/host/status", "/host/activate", "/host/activation", "/host/activation/cancel", "/host/setup", "/host/setup/terms", "/host/setup/install", "/host/setup/status", "/host/setup/cancel", "/host/setup/access", "/host/setup/permission"].includes(path)) throw Error("local-host-action-invalid");
   const encoded = JSON.stringify(body), signed = signLocalBridgeRequest(secret, "POST", path, encoded);
   const response = await fetch(new URL(path, url), { method: "POST", headers: { "content-type": "application/json", ...signed }, body: encoded,
     signal: AbortSignal.timeout(10000), redirect: "error", cache: "no-store" });

@@ -1,8 +1,9 @@
 // @vitest-environment node
 import {it,expect,beforeEach,afterEach,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({getUser:vi.fn(),host:vi.fn()}));
+const mocks=vi.hoisted(()=>({getUser:vi.fn(),host:vi.fn(),search:vi.fn()}));
 vi.mock('@/lib/supabase/server',()=>({createClient:async()=>({auth:{getUser:mocks.getUser}})}));
 vi.mock('./host-bridge',()=>({localHostRequest:mocks.host}));
+vi.mock('./hugging-face-search',async original=>({...await original<typeof import('./hugging-face-search')>(),searchHuggingFace:mocks.search}));
 import {modelImportsGET,modelImportsPOST} from './import-service';
 const owner='110fce0e-22ba-4a44-a68a-6619b477ca1b',key='44697489-d22b-432b-818b-155f201cc52d';
 const source={id:'example',source:'https://huggingface.co/owner/model'},summary={id:key,key,createdAt:1,state:'inspecting',source,requestedRevision:'main',revision:null,sourceValidity:'unverified',recipeSupport:'unverified',license:null,ready:false,installable:false};
@@ -35,4 +36,18 @@ it('returns bounded inert license text while removing host-only properties',asyn
  const license={identifier:'mit',text:{content:'<script>inert text</script>',bytes:26,sha256:'a'.repeat(64)},sourceUrl:'https://huggingface.co/owner/model/raw/'+ 'b'.repeat(40)+'/LICENSE',status:'cached-upstream-text'};
  mocks.host.mockResolvedValue({status:200,body:{license:{...license,privatePath:'hidden'},secret:'hidden'}});
  const response=await modelImportsGET(get('?id='+key+'&component=model'));expect(response.status).toBe(200);expect(await response.json()).toEqual({license});
+});
+it('requires authentication for discovery and never sends a search to the native helper',async()=>{
+ mocks.search.mockResolvedValue({models:[],nextCursor:null});
+ const response=await modelImportsGET(get('?discover=1&search=flux'));
+ expect(response.status).toBe(200);expect(await response.json()).toEqual({models:[],nextCursor:null});
+ expect(mocks.search).toHaveBeenCalledOnce();expect(mocks.host).not.toHaveBeenCalled();
+ mocks.search.mockClear();mocks.getUser.mockResolvedValue({data:{user:null},error:null});
+ expect((await modelImportsGET(get('?discover=1'))).status).toBe(401);
+ expect(mocks.search).not.toHaveBeenCalled();
+});
+it('does not expose upstream exceptions or credentials in discovery errors',async()=>{
+ mocks.search.mockRejectedValue(Error('private secret and path'));
+ const response=await modelImportsGET(get('?discover=1'));
+ expect(response.status).toBe(503);expect(await response.text()).not.toContain('private secret');
 });

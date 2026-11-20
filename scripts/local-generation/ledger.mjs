@@ -72,8 +72,9 @@ export class Ledger {
     return {...row,state:'dispatching',claim:token,epoch};
   }); }
   maintenance() {return this.db.prepare('SELECT token,purpose FROM lifecycle WHERE slot=1').get()??null;}
-  beginMaintenance(token,purpose='update') {return this.atomic(()=>{
-    if(!/^[a-f0-9-]{36}$/.test(token)||!['update','shutdown'].includes(purpose))throw Error('invalid-maintenance');
+  beginMaintenance(token,purpose='update',{quiescent=false}={}) {return this.atomic(()=>{
+    if(!/^[a-f0-9-]{36}$/.test(token)||!['update','shutdown','removal'].includes(purpose))throw Error('invalid-maintenance');
+    if(quiescent&&this.outstandingCount())throw Error('worker-jobs-outstanding');
     const active=this.maintenance();if(active){if(active.token!==token||active.purpose!==purpose)throw Error('worker-maintenance-busy');return active;}
     this.db.prepare('INSERT INTO lifecycle VALUES(1,?,?)').run(token,purpose);return this.maintenance();
   });}

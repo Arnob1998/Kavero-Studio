@@ -17,17 +17,24 @@ export class SetupManager {
   consentToken(owner,stamp=Date.now()){return `${stamp}.${createHmac('sha256',this.config.secret).update(['kavero-setup-consent-v1',owner,this.verified.hash,this.verified.manifest.termsDigest,'research-evaluation',stamp].join('\n')).digest('hex')}`;}
   validToken(owner,token){if(typeof token!=='string'||!/^\d{13}\.[a-f0-9]{64}$/.test(token))return false;const stamp=Number(token.split('.')[0]);return Math.abs(Date.now()-stamp)<=20*60*1000&&timingSafeEqual(Buffer.from(this.consentToken(owner,stamp)),Buffer.from(token));}
   terms(){return this.verified.manifest.bundledFiles.filter(f=>f.role==='notice').map(f=>({name:f.path.slice(8),text:Buffer.from(f.dataBase64,'base64').toString('utf8')}));}
-  access(owner){return !!this.db.prepare('SELECT 1 FROM setup_consents WHERE owner=? AND manifest=? AND terms=? AND purpose=?').get(owner,this.verified.hash,this.verified.manifest.termsDigest,'research-evaluation')
-    &&this.activation.model?.deliveryManifest===this.verified.hash&&this.activation.status().inferenceReady;}
+  access(owner){
+    if(this.installer.store.removalPending(this.verified.hash))return false;
+    const row=this.db.prepare('SELECT operation FROM setup_consents WHERE owner=? AND manifest=? AND terms=? AND purpose=? ORDER BY accepted_at DESC LIMIT 1').get(owner,this.verified.hash,this.verified.manifest.termsDigest,'research-evaluation');
+    // An already active model does not finish another owner's install receipt.
+    return !!row?.operation&&this.installer.status(owner,row.operation)?.state==='installed'
+      &&this.activation.model?.deliveryManifest===this.verified.hash&&this.activation.status().inferenceReady;
+  }
   async snapshot(owner){
     if(!uuid(owner))throw Error('invalid-setup');
     let supported=false,hardware=null,compatibility='check-unavailable';try{hardware=await this.hardware(this.installer.files.root,false);supported=true;compatibility='eligible';}catch(error){if(['windows-only','multiple-gpus','gpu-unverified','gpu-too-small','ram-too-small'].includes(error.compatibility))compatibility=error.compatibility;}
     const row=this.db.prepare('SELECT * FROM setup_consents WHERE owner=? AND manifest=? ORDER BY accepted_at DESC,rowid DESC LIMIT 1').get(owner,this.verified.hash);
     const accepted=!!this.db.prepare('SELECT 1 FROM setup_consents WHERE owner=? AND manifest=? AND terms=?').get(owner,this.verified.hash,this.verified.manifest.termsDigest);
+    const removedForOwner=!!this.installer.store.db.prepare("SELECT id FROM removals WHERE owner=? AND manifest=? AND state='removed'").get(owner,this.verified.hash)
+      &&!this.installer.store.db.prepare("SELECT id FROM installs WHERE owner=? AND manifest=? AND state='installed'").get(owner,this.verified.hash);
     return {packageId:this.verified.manifest.id,manifest:this.verified.hash,termsDigest:this.verified.manifest.termsDigest,purpose:'research-evaluation',consentToken:this.consentToken(owner),accepted,
       available:evaluationEnabled(this.config)&&!this.initializing&&supported,supported,compatibility,ready:this.access(owner),
-      installed:this.activation.model?.deliveryManifest===this.verified.hash||!!row?.operation&&this.installer.status(owner,row.operation)?.state==='installed',
-      active:this.activation.model?.deliveryManifest===this.verified.hash,switchRequired:!!this.activation.model&&this.activation.model.profile!==this.verified.manifest.profile,freeBytes:this.installer.files.freeBytes(),
+      installed:!removedForOwner&&(this.activation.model?.deliveryManifest===this.verified.hash||!!row?.operation&&this.installer.status(owner,row.operation)?.state==='installed'),
+      active:!removedForOwner&&this.activation.model?.deliveryManifest===this.verified.hash,switchRequired:!!this.activation.model&&this.activation.model.profile!==this.verified.manifest.profile,freeBytes:this.installer.files.freeBytes(),
       ...(hardware?{hardware:{freeVramMiB:hardware.freeVramMiB,freeRamBytes:hardware.freeRamBytes,...(hardware.name?{gpuName:hardware.name,totalVramMiB:hardware.totalVramMiB,totalRamBytes:hardware.totalRamBytes,confidence:hardware.confidence}:{})}}:{}),
       downloadBytes:this.verified.manifest.artifacts.reduce((n,a)=>n+a.bytes,0),workBytes:this.verified.totalBytes,requiredFreeBytes:this.verified.totalBytes+1024**3,
       operation:row?.operation?this.operation(owner,row.operation):null};
@@ -41,6 +48,7 @@ export class SetupManager {
   }
   activationKey(row){const h=createHash('sha256').update(row.owner+'\n'+row.submission_key+'\n'+row.manifest).digest('hex');return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`;}
   async admit(body){
+    this.installer.store.assertNoRemoval();
     if(Object.keys(body).sort().join(',')!=='accepted,consentToken,key,manifest,owner,purpose,termsDigest'||!uuid(body.owner)||!uuid(body.key)||body.accepted!==true||body.purpose!=='research-evaluation')throw Error('invalid-setup');
     if(!evaluationEnabled(this.config))throw Error('setup-unavailable');
     if(body.manifest!==this.verified.hash||body.termsDigest!==this.verified.manifest.termsDigest)throw Error('setup-terms-changed');
@@ -58,6 +66,7 @@ export class SetupManager {
     }finally{this.admitting=false;}
   }
   async run(owner,id){
+    this.installer.store.assertNoRemoval();
     if(this.installer.status(owner,id)?.state==='installed'&&this.access(owner)){if(this.pending===id)this.pending=null;return;}
     if(this.busy||this.initializing||this.admitting||this.pending&&this.pending!==id)throw Error('setup-busy');this.pending=null;this.busy=true;
     try{await this.installer.run(owner,id);if(this.installer.status(owner,id)?.state!=='installed')return;

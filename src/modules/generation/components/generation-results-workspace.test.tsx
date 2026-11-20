@@ -31,6 +31,12 @@ const run: GenerationRun = {
 };
 
 describe("GenerationResultsWorkspace", () => {
+  it('offers a local-model action alongside a cloud model error', () => {
+    const choose = vi.fn();
+    render(<GenerationResultsWorkspace run={null} isGenerating={false} loadingPhrase="" error="No cloud image model is selected." errorAction={<button onClick={choose}>Choose a local model</button>} onStartNewPrompt={vi.fn()} onEditImage={vi.fn()}/>);
+    expect(screen.getByText('No cloud image model is selected.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Choose a local model' })); expect(choose).toHaveBeenCalledOnce();
+  });
   it("uses JPEG download names in both collage and focus and offers a batch ZIP", () => {
     const jpegRun = { ...run, images: run.images.map((image) => ({ ...image, mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,one" })) };
     render(<GenerationResultsWorkspace run={jpegRun} isGenerating={false} loadingPhrase="" error={null} onStartNewPrompt={vi.fn()} onEditImage={vi.fn()} />);

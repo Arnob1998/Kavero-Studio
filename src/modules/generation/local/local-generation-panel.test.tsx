@@ -12,6 +12,61 @@ async function enable() { await screen.findByText("Verified setup"); }
 beforeEach(() => { requests = []; sessionStorage.clear(); localStorage.clear(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe("Internal local generation journey", () => {
+  it('blocks a submission if another model switch starts between readiness polls', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
+      requests.push({url, method: options.method!}); return response(ready);
+    }));
+    mount(); await enable();
+    localStorage.setItem('kavero-local-setup:owner-a:q3:switch', JSON.stringify({key}));
+    fireEvent.click(screen.getByRole('button', {name: 'Create image'}));
+    await screen.findByText('Prepare the selected local model before creating an image.');
+    expect(requests.every(request => request.method === 'GET')).toBe(true);
+  });
+  it('uses centralized Q3 selection without a second picker and submits only the confirmed active profile', async () => {
+    let switched = false;
+    vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
+      requests.push({ url, method: options.method!, body: options.body as string });
+      if (url.endsWith('readiness')) return response(switched ? { ...ready, model: {...localProfiles[1], ...localImageLimits} } : ready);
+      if (url.includes('/setup')) {
+        if (options.method === 'POST') {
+          expect(JSON.parse(options.body as string)).toMatchObject({action: 'switch', packageId: localProfiles[1].packageId});
+          switched = true;
+          return response({operation: {id, packageId: localProfiles[1].packageId, state: 'installed', error: null}});
+        }
+        return response({ownerId: ready.ownerId, setup: {packageId: 'qwen-2-1-q3-research-delivery-v1', manifest: localProfiles[1].manifest, termsDigest: 'b'.repeat(64), consentToken: '1760000000000.' + 'c'.repeat(64), purpose: 'research-evaluation', accepted: true, available: true, supported: true, installed: true, ready: switched, switchRequired: !switched, freeBytes: 100*1024**3, downloadBytes: 10*1024**3, workBytes: 20*1024**3, requiredFreeBytes: 21*1024**3, operation: null}});
+      }
+      return response({job: {id, state: 'queued'}},202);
+    }));
+    const modelChanged = vi.fn(), busyChanged = vi.fn();
+    const view = render(<LocalGenerationPanel prompt="A vase" onPromptChange={vi.fn()} centralized onSelectedModelChange={modelChanged} onBusyChange={busyChanged}/>); await enable();
+    expect(screen.queryByRole('combobox')).toBeNull();
+    view.rerender(<LocalGenerationPanel prompt="A vase" onPromptChange={vi.fn()} centralized requestedProfile={localProfiles[1].profile} onSelectedModelChange={modelChanged} onBusyChange={busyChanged}/>);
+    expect(screen.getByRole('button', {name: 'Create image'})).toBeDisabled();
+    const use = await screen.findByRole('button', {name: 'Use model'});
+    expect(requests.every(request => request.method === 'GET')).toBe(true);
+    fireEvent.click(use);
+    await waitFor(() => expect(screen.getByRole('button', {name: 'Create image'})).toBeEnabled(), {timeout: 6500});
+    fireEvent.click(screen.getByRole('button', {name: 'Create image'})); await screen.findByText(/Queued/);
+    const posts = requests.filter(request => request.method === 'POST');
+    expect(posts).toHaveLength(2);
+    expect(JSON.parse(posts[1].body!).intent.profile).toBe(localProfiles[1].profile);
+    expect(modelChanged).toHaveBeenLastCalledWith(localProfiles[1].profile);
+    expect(busyChanged).toHaveBeenLastCalledWith(true);
+  },10000);
+
+  it('can dismiss a model choice without switching or admitting a job', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
+      requests.push({url, method: options.method!});
+      return response(ready);
+    }));
+    mount(); await enable();
+    fireEvent.change(screen.getByRole('combobox'), {target: {value: localProfiles[1].profile}});
+    expect(screen.getByRole('button', {name: 'Create image'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', {name: 'Keep current model'}));
+    expect(screen.getByRole('combobox')).toHaveValue(localProfiles[0].profile);
+    expect(screen.getByRole('button', {name: 'Create image'})).toBeEnabled();
+    expect(requests.every(request => request.method === 'GET')).toBe(true);
+  });
   it('keeps pending switch recovery in Model Hub even when native readiness is true',async()=>{
     localStorage.setItem('kavero-local-setup:owner-a:q3:switch',JSON.stringify({key}));
     vi.stubGlobal('fetch',vi.fn(()=>response(ready)));mount();await screen.findByText(/Finish or recover the model switch/);
@@ -72,7 +127,11 @@ describe("Internal local generation journey", () => {
       }
       return response({ job: { id, state: "generated-unvalidated", output: { state: "generated", expiresAt: "2099-01-01T00:00:00Z" } } });
     }));
-    mount(); await screen.findByRole("button", { name: "Save to Gallery" });
+    const selected = vi.fn(), busy = vi.fn();
+    render(<LocalGenerationPanel prompt="A vase" onPromptChange={vi.fn()} centralized requestedProfile={localProfiles[0].profile} onSelectedModelChange={selected} onBusyChange={busy}/>); await screen.findByRole("button", { name: "Save to Gallery" });
+    expect(selected).toHaveBeenLastCalledWith(localProfiles[1].profile);
+    expect(busy).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByRole('heading', { name: localProfiles[1].label })).toBeVisible();
     expect(screen.getByText(/This result keeps its original model/)).toHaveTextContent(localProfiles[0].label);
     fireEvent.click(screen.getByRole("button", { name: "Save to Gallery" }));

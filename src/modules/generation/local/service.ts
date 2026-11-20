@@ -107,7 +107,7 @@ export async function submitLocalJob(request: Request) {
         p_package: ready.packageFingerprint, p_device: ready.deviceId, p_worker: ready.ledgerIdentity,
       });
       if (error) {
-        if(/local-runtime-switching|local-runtime-identity-changed/.test(error.message))return reply("Local model is switching or readiness changed. Refresh and retry.",409);
+        if(/local-runtime-switching|local-runtime-removing|local-runtime-identity-changed/.test(error.message))return reply("Local model is changing or readiness changed. Refresh and retry.",409);
         return reply(error.message.includes("queue-full") ? "Local queue is full." : "Unable to admit local job.", error.message.includes("queue-full") ? 429 : error.message.includes("idempotency-conflict") ? 409 : 503);
       }
       // PostgREST may encode a composite RPC result as a one-row array.

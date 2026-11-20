@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ChangeEvent, ComponentType, DragEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   BadgePlus,
@@ -85,8 +85,14 @@ import {
   shouldOpenPromptRefinerGeminiKeyGate,
 } from "../utils/prompt-refiner-policy";
 import { ModelQuickPicker } from "./model-quick-picker";
-import { LocalGenerationPanel } from "../local/local-generation-panel";
-import { localSourceBlockReason } from "../local/capabilities";
+import { generationImageOptions } from './generation-model-options';
+import {localProfiles, localProfile, type LocalProfile} from '@/modules/model-providers/local/browser-profiles';
+import { useLocalGeneration } from "../local/local-generation-panel";
+import { useAvailableLocalModels } from '../local/use-available-local-models';
+import { LocalWorkspaceActions, LocalWorkspaceSetup } from '../local/local-workspace-controls';
+import { localWorkspaceRun } from '../local/shared-workspace';
+import { ConnectGenerationPanel } from "../connect/connect-generation-panel";
+import { localSourceBlockReason, localProgressMessage } from "../local/capabilities";
 import { GenerationResultsWorkspace } from "./generation-results-workspace";
 import { SequencePlannerPanel, SequenceToggle, type SequenceExecutionViewState, type SequenceExecutionVisual, type SequencePlannerViewState } from "./sequence-planner-panel";
 import { SequenceImportDialog } from "./sequence-import-dialog";
@@ -931,17 +937,31 @@ function PromptLibrarySkeleton() {
   );
 }
 
-export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean } = {}) {
+export function GeneratePage({ localEnabled = false, connectOwnerId }: { localEnabled?: boolean; connectOwnerId?:string } = {}) {
+  const [connectSource,setConnectSource]=useState(false);
+  const [connectBusy,setConnectBusy]=useState(false);
+  const [localBusy, setLocalBusy] = useState(false);
+  const [modelSelectionBusy, setModelSelectionBusy] = useState(false);
+  const [requestedLocalProfile, setRequestedLocalProfile] = useState<LocalProfile>();
+  const [displayedLocalProfile, setDisplayedLocalProfile] = useState<LocalProfile>();
   const [localSource, setLocalSource] = useState(false);
   const [localSwitchError, setLocalSwitchError] = useState<string | null>(null);
   useEffect(() => {
-    if (localEnabled) setLocalSource(sessionStorage.getItem("kavero-local-source") === "local");
-  }, [localEnabled]);
+    if (localEnabled) {
+      const requested = new URLSearchParams(window.location.search).get("source");
+      setLocalSource(requested === "local" || (requested !== "cloud" && sessionStorage.getItem("kavero-local-source") === "local"));
+      if (requested === "local") sessionStorage.removeItem("kavero-connect-source");
+    }
+    if(connectOwnerId&&sessionStorage.getItem("kavero-connect-source")==="computer"){setConnectSource(true);setLocalSource(false);}
+  }, [localEnabled,connectOwnerId]);
   const modelProvider = useModelProviderSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSetting, setActiveSetting] = useState<SettingKey>("aspect");
   const [settings, setSettings] = useState<Record<SettingKey, string>>(defaultSettings);
   const [promptText, setPromptText] = useState("");
+  const availableLocalModels = useAvailableLocalModels(localEnabled);
+  const localRuntime = useLocalGeneration({prompt:promptText,onPromptChange:setPromptText,requestedProfile:requestedLocalProfile,centralized:true,enabled:localSource&&localEnabled,onSelectedModelChange:setDisplayedLocalProfile,onBusyChange:setLocalBusy});
+  const localRun = useMemo(()=>localWorkspaceRun(localRuntime),[localRuntime.job?.id,localRuntime.job?.createdAt,localRuntime.model?.profile,localRuntime.imageURL,localRuntime.requestPrompt]);
   const [promptBeforeRefineReplacement, setPromptBeforeRefineReplacement] = useState<string | null>(null);
   const [promptRefiner, setPromptRefiner] = useState<PromptRefinerState>({ status: "idle", answers: [] });
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
@@ -949,10 +969,14 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
   const [isDraggingReference, setIsDraggingReference] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadMessage, setUploadMessage] = useState("");
-  const [activeRun, setActiveRun] = useState<GenerationRun | null>(null);
+  const [cloudRun, setActiveRun] = useState<GenerationRun | null>(null);
+  const activeRun = localSource ? localRun : cloudRun;
   const [generationHistory, setGenerationHistory] = useState<GenerationRun[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [cloudGenerating, setIsGenerating] = useState(false);
+  const isGenerating = localSource ? localRuntime.pending : cloudGenerating;
+  const [cloudGenerationError, setCloudGenerationError] = useState<string | null>(null);
+  const setGenerationError = useCallback((value:string|null)=>{if(localSource)localRuntime.setError(value);else setCloudGenerationError(value);},[localSource,localRuntime.setError]);
+  const generationError = localSource ? (localRun ? null : localRuntime.error) : cloudGenerationError;
   const [sequenceEnabled, setSequenceEnabled] = useState(false);
   const [sequencePlannerState, setSequencePlannerState] = useState<SequencePlannerViewState>({ status: "idle" });
   const [sequencePlannerCalls, setSequencePlannerCalls] = useState(0);
@@ -991,7 +1015,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
     .filter((model): model is BrowserImageModel => Boolean(model));
   const activeChatModels = modelProvider.activeModels("chatOrchestration");
   const settingDefinitions = createSettingDefinitions(settings.model, activeImageModels);
-  const railSettingDefinitions = settingDefinitions.filter((definition) => definition.key !== "model");
+  const railSettingDefinitions = (localSource ? [] : settingDefinitions).filter((definition) => definition.key !== "model");
   const currentDefinition =
     settingDefinitions.find((definition) => definition.key === activeSetting) ?? settingDefinitions[0];
   const CurrentSettingIcon = currentDefinition.icon;
@@ -1020,17 +1044,17 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
     settingDefinitions[0].options.find((option) => option.value === settings.model) ??
     settingDefinitions[0].options[0];
   const loadingPhrase = loadingPhrases[loadingStep % loadingPhrases.length];
-  const generationActive = Boolean(activeRun || isGenerating || generationError);
+  const generationActive = Boolean(activeRun || isGenerating || generationError || (localSource && localRuntime.retained));
   const activeModel = settings.model as ModelId;
   const activeModelMetadata = getBrowserImageModelByLegacyId(activeModel);
   const modelReferenceImageLimit = activeModelMetadata?.maximumReferenceImages ?? 0;
   const referenceImageLimit = sequenceEnabled
     ? Math.min(modelReferenceImageLimit, 8)
     : modelReferenceImageLimit;
-  const supportsReferenceImages = activeModelMetadata?.supportsReferenceEditing ?? false;
+  const supportsReferenceImages = !localSource && (activeModelMetadata?.supportsReferenceEditing ?? false);
   const hasReferencePanel = referenceImages.length > 0 || Boolean(uploadMessage);
-  const hasPromptRefinerPanel = promptRefiner.status !== "idle";
-  const hasComposerTopPanel = hasReferencePanel || hasPromptRefinerPanel;
+  const hasPromptRefinerPanel = !localSource && promptRefiner.status !== "idle";
+  const hasComposerTopPanel = hasReferencePanel || hasPromptRefinerPanel || (localSource && promptText.length > 1000);
   const composerHasDraft = promptText.trim().length > 0 || referenceImages.length > 0;
   const isPromptComposerCollapsed = generationActive && !isComposerRaised && !composerHasDraft;
   const activeIterationRootId = activeRun?.iterationRootId ?? activeRun?.id ?? null;
@@ -1174,7 +1198,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
   }, []);
 
   useEffect(() => {
-    if (sequenceRestoreStartedRef.current || !modelProvider.settings || !workspaceStatus?.authenticated) return;
+    if (localSource || sequenceRestoreStartedRef.current || !modelProvider.settings || !workspaceStatus?.authenticated) return;
     const selectedImage = getBrowserImageModelByAlias(modelProvider.settings.selected.imageGenerationModelAlias);
     if (selectedImage && settings.model !== selectedImage.legacyModelId) return;
     sequenceRestoreStartedRef.current = true;
@@ -1225,7 +1249,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
       } catch { /* A missing local cache cannot start provider traffic. */ }
     })();
     return () => { active = false; };
-  }, [modelProvider.settings, workspaceStatus?.authenticated, settings.model]);
+  }, [modelProvider.settings, workspaceStatus?.authenticated, settings.model, localSource]);
 
   useEffect(() => {
     const alias = modelProvider.settings?.selected?.imageGenerationModelAlias;
@@ -1387,6 +1411,8 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
   };
 
   const usePrompt = async (preset: PromptPreset) => {
+    if(localSource && localRuntime.retained){setLocalSwitchError("Finish the current request before applying another prompt.");return;}
+    if(localSource && preset.referenceImages?.length){setLocalSwitchError("This preset includes reference images. Choose an editing-capable model before applying it.");return;}
     discardSequencePlan();
     const presetPrompt = preset.prompt.trim();
     setPromptText((current) => {
@@ -1808,11 +1834,12 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
   };
 
   const handleGenerate = async (value: string) => {
+    if (localSource) { await localRuntime.submit(); return; }
     const prompt = value.trim();
     if (!prompt || isGenerating) return;
     const selectedImageAlias = modelProvider.settings?.selected?.imageGenerationModelAlias;
     if (!selectedImageAlias || !activeImageModels.some((model) => model.modelAlias === selectedImageAlias)) {
-      setGenerationError("No active image model is selected. Add provider credentials or choose an active model in Settings.");
+      setGenerationError(localEnabled ? "No cloud image model is selected. Choose a local model to use your GPU, or configure a cloud provider in Settings." : "No active image model is selected. Add provider credentials or choose an active model in Settings.");
       return;
     }
 
@@ -1929,6 +1956,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
   }
 
   const startNewPrompt = () => {
+    if (localSource) { if (!localRuntime.retained || localRuntime.terminal) localRuntime.clear(); return; }
     setActiveRun(null);
     setRequestedFocusedImageId(null);
     setGenerationError(null);
@@ -2344,6 +2372,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
   };
 
   const handlePrimarySubmit = (value: string) => {
+    if (localSource) { if (!localRuntime.pending && !localRuntime.job) void localRuntime.submit(); return; }
     if (sequenceEnabled) {
       void requestSequencePlan(value);
       return;
@@ -2568,21 +2597,48 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
     </div>
   ) : null;
 
-  const sourceSwitch = localEnabled ? <div className="fixed right-4 top-16 z-50 max-w-[calc(100vw-2rem)]">
-    <div className="flex rounded-xl border border-white/15 bg-black/90 p-1 text-xs text-white shadow-lg" aria-label="Inference source">
-      <button type="button" className={`rounded-lg px-4 py-2 ${!localSource ? "bg-white/15" : "text-white/50"}`} aria-pressed={!localSource} onClick={() => { setLocalSource(false); sessionStorage.setItem("kavero-local-source", "cloud"); }}>Cloud</button>
-      <button type="button" className={`rounded-lg px-4 py-2 ${localSource ? "bg-white/15" : "text-white/50"}`} aria-pressed={localSource} onClick={() => {
-        const blocked = localSourceBlockReason({ references: referenceImages.length, activeResult: Boolean(activeRun), generating: isGenerating, sequence: sequenceEnabled || sequenceExecution.status !== "idle" });
-        if (blocked) { setLocalSwitchError(blocked); return; }
-        setLocalSwitchError(null); setSettingsOpen(false); setLocalSource(true); sessionStorage.setItem("kavero-local-source", "local");
-      }}>Local</button>
+  const imageChoices = generationImageOptions({cloud: activeImageModels, availableLocal: availableLocalModels, cloudLogos: Object.fromEntries((modelProvider.settings?.catalog??[]).map(model=>[model.modelAlias,model.providerLogoPath])), localEnabled, connectEnabled: Boolean(connectOwnerId), references: referenceImages.length, sequence: sequenceEnabled || sequenceExecution.status !== "idle", activeResult: Boolean(activeRun), generating: isGenerating});
+  const selectedImageChoice = connectSource ? 'connected' : localSource ? `local:${displayedLocalProfile ?? requestedLocalProfile ?? localProfiles[0].profile}` : `cloud:${modelProvider.settings?.selected.imageGenerationModelAlias ?? ''}`;
+  const chooseLocalSource = (profile?: LocalProfile) => {
+    if (connectBusy || localBusy || modelSelectionBusy) return;
+    const blocked = localSourceBlockReason({ references: referenceImages.length, activeResult: Boolean(activeRun), generating: isGenerating, sequence: sequenceEnabled || sequenceExecution.status !== "idle" });
+    if (blocked) { setLocalSwitchError(blocked); return; }
+    const target = profile ?? availableLocalModels[0];
+    if (!target || !availableLocalModels.includes(target)) { setLocalSwitchError("No local image model is ready for your account. Install or prepare one in Model Hub."); return; }
+    setRequestedLocalProfile(target);
+    setLocalSwitchError(null); setSettingsOpen(false); setConnectSource(false); sessionStorage.removeItem("kavero-connect-source"); setLocalSource(true); sessionStorage.setItem("kavero-local-source", "local");
+  };
+  const chooseImageModel = async (value: string) => {
+    if (connectBusy || localBusy || modelSelectionBusy || imageChoices.find(option => option.value === value)?.disabledReason) return;
+    if (value.startsWith('local:')) { const profile = localProfile(value.slice(6)); if (profile) chooseLocalSource(profile.profile); return; }
+    if (value === 'connected') {
+      setLocalSwitchError(null); setSettingsOpen(false); setLocalSource(false); setConnectSource(true); sessionStorage.setItem("kavero-local-source", "cloud"); sessionStorage.setItem("kavero-connect-source", "computer"); return;
+    }
+    if (!value.startsWith('cloud:') || !imageChoices.some(option => option.value === value)) return;
+    setModelSelectionBusy(true); setLocalSwitchError(null);
+    try {
+      const result = await modelProvider.saveSelection({imageGenerationModelAlias: value.slice(6)});
+      if (!result.ok) { setLocalSwitchError(result.message); return; }
+      setLocalSource(false); setConnectSource(false); sessionStorage.removeItem("kavero-connect-source"); sessionStorage.setItem("kavero-local-source", "cloud");
+    } catch { setLocalSwitchError('Could not select this model. Retry your selection.'); }
+    finally { setModelSelectionBusy(false); }
+  };
+  const modelControls = generationActive || connectBusy ? null : <div className="fixed right-4 top-16 z-50 w-[min(460px,calc(100vw-2rem))]">
+    <div className={`grid gap-2 ${!localSource && !connectSource ? 'grid-cols-2' : 'grid-cols-1'}`} aria-label="Generation models">
+      <ModelQuickPicker label="Image model" icon={Images} value={selectedImageChoice} options={imageChoices} emptyLabel={connectSource?"Connected computer":"Choose image model"} disabled={connectBusy || localBusy || modelSelectionBusy} onSelect={value => void chooseImageModel(value)} footer={<Link className="block border-t border-white/10 px-3 py-3 text-xs text-white/60 hover:text-white" href="/settings/models">Manage models & downloads</Link>}/>
+      {!localSource && !connectSource && <ModelQuickPicker label="Prompt assistant" icon={BrainCircuit} value={modelProvider.settings?.selected.chatOrchestrationModelAlias ?? ''} options={activeChatModels.map(model => ({value: model.modelAlias, label: model.displayLabel, logo:model.providerLogoPath, description: `Conversation / prompt assistance · ${model.providerLabel}`}))} emptyLabel="Optional" onSelect={chatOrchestrationModelAlias => void modelProvider.saveSelection({chatOrchestrationModelAlias})}/>}
     </div>
-    {localSwitchError && !localSource && <p role="alert" className="mt-2 max-w-xs rounded-xl border border-amber-300/20 bg-black p-3 text-xs text-amber-200">{localSwitchError}</p>}
-  </div> : null;
-  if (localSource && localEnabled) return <main className="h-svh w-full overflow-y-auto bg-background font-sans text-text-primary"><SiteNav activeLabel="Generate" ariaLabel="Generate navigation" />{sourceSwitch}<LocalGenerationPanel prompt={promptText} onPromptChange={setPromptText} /></main>;
+    {imageChoices.length === 0 && <Link href="/settings/models" className="mt-2 block text-right text-xs text-white/60 underline">Add an image model</Link>}
+    {connectOwnerId&&!connectSource&&<button className="mt-2 text-xs text-white/60 underline" disabled={localBusy||modelSelectionBusy||isGenerating||Boolean(activeRun)||referenceImages.length>0||sequenceEnabled} onClick={()=>{setLocalSource(false);setConnectSource(true);sessionStorage.setItem("kavero-connect-source","computer");}}>Connected computers</button>}
+    {localSource&&<div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-white/60"><span>512 × 512 · 1 image · {promptText.length.toLocaleString()} / 1,000 characters</span>{!localRuntime.selectedReady&&!localRuntime.retained&&<button className="underline" onClick={()=>localRuntime.setChoosingModel(true)}>Prepare selected model</button>}</div>}
+    {localSwitchError && <p role="alert" className="mt-2 rounded-xl border border-amber-300/20 bg-black p-3 text-xs text-amber-200">{localSwitchError}</p>}
+  </div>;
+  if(connectSource&&connectOwnerId)return <main className="h-svh w-full overflow-y-auto bg-background font-sans text-text-primary"><SiteNav activeLabel="Generate" ariaLabel="Generate navigation"/>{modelControls}<ConnectGenerationPanel ownerId={connectOwnerId} prompt={promptText} onPromptChange={setPromptText} onBusyChange={setConnectBusy}/></main>;
+
   return (
     <FloatingTooltip.Provider className="bg-black/72 text-white">
-      {sourceSwitch}
+      {modelControls}
+      {localSource&&<LocalWorkspaceSetup runtime={localRuntime}/>}
       <main className="relative min-h-svh w-full overflow-hidden bg-black font-sans text-white [isolation:isolate]">
       <div
         className="pointer-events-none fixed left-1/2 top-[25px] z-20 hidden h-px w-[min(880px,76vw)] -translate-x-1/2 bg-[linear-gradient(90deg,transparent,rgb(255_255_255_/_0.16),transparent)] blur-[0.5px] md:block"
@@ -2716,34 +2772,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
         </label>
       </motion.aside>
 
-      <motion.div
-        className="fixed bottom-5 left-1.5 z-30 hidden w-[172px] grid-cols-1 gap-1.5 rounded-xl px-1.5 py-1.5 text-white min-[920px]:grid min-[920px]:bottom-8 xl:w-[248px]"
-        initial={false}
-        animate={{
-          x: generationActive ? -280 : 0,
-          y: generationActive ? 24 : 0,
-          opacity: generationActive ? 0 : 1,
-          pointerEvents: generationActive ? "none" : "auto",
-        }}
-        transition={generationTransition}
-      >
-        <ModelQuickPicker
-          label="Image model"
-          icon={Images}
-          value={modelProvider.settings?.selected?.imageGenerationModelAlias ?? ""}
-          options={activeImageModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel, description: model.description }))}
-          emptyLabel="No active models"
-          onSelect={(imageGenerationModelAlias) => void modelProvider.saveSelection({ imageGenerationModelAlias })}
-        />
-        <ModelQuickPicker
-          label="Prompt model"
-          icon={BrainCircuit}
-          value={modelProvider.settings?.selected?.chatOrchestrationModelAlias ?? ""}
-          options={activeChatModels.map((model) => ({ value: model.modelAlias, label: model.displayLabel, description: model.providerLabel }))}
-          emptyLabel="No active models"
-          onSelect={(chatOrchestrationModelAlias) => void modelProvider.saveSelection({ chatOrchestrationModelAlias })}
-        />
-      </motion.div>
+
 
       <motion.aside
         className={`${glassPanelClass} fixed right-0 top-1/2 z-30 hidden w-16 flex-col items-center gap-2 rounded-l-2xl bg-black/35 px-2 py-3 min-[760px]:flex`}
@@ -3291,8 +3320,12 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
               <GenerationResultsWorkspace
                 run={activeRun}
                 isGenerating={isGenerating}
-                loadingPhrase={loadingPhrase}
+                loadingPhrase={localSource ? localProgressMessage(localRuntime.job,localRuntime.reconnecting,localRuntime.ready) : loadingPhrase}
                 error={generationError}
+                sourcePrompt={localSource ? localRuntime.requestPrompt : undefined}
+                actionsSlot={localSource ? <LocalWorkspaceActions runtime={localRuntime}/> : undefined}
+                canStartNew={!localSource || !localRuntime.retained || localRuntime.terminal}
+                errorAction={!localSource && localEnabled && availableLocalModels.length>0 && !modelProvider.settings?.selected.imageGenerationModelAlias ? <button type="button" className="mt-4 rounded-xl border border-white/20 px-4 py-3 text-sm text-white hover:bg-white/10" onClick={() => chooseLocalSource()}>Use a local image model</button> : undefined}
                 onStartNewPrompt={startNewPrompt}
                 onEditImage={editGeneratedImage}
                 iterationRuns={activeIterationRuns}
@@ -3317,8 +3350,8 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
               <p className="mt-4 text-[clamp(17px,1.35vw,24px)] font-semibold tracking-normal text-white/88 sm:mt-5">
                 Start by describing your picture
               </p>
-              <SequenceToggle enabled={sequenceEnabled} onToggle={setSequenceMode} />
-              {showSequenceSuggestion ? (
+              {!localSource&&<SequenceToggle enabled={sequenceEnabled} onToggle={setSequenceMode} />}
+              {!localSource&&showSequenceSuggestion ? (
                 <button
                   type="button"
                   className="mx-auto mt-2 block text-[11px] font-bold text-accent/88 underline decoration-accent/35 underline-offset-4 hover:text-white"
@@ -3494,6 +3527,8 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
             onValueChange={handlePromptTextChange}
             onSubmit={handlePrimarySubmit}
             isLoading={isGenerating || sequencePlannerState.status === "loading"}
+            submitDisabled={localSource && (localRuntime.busy || Boolean(localRuntime.job) || (!localRuntime.retained && (!localRuntime.selectedReady || Boolean(localRuntime.promptError))))}
+            textareaProps={localSource ? {readOnly:localRuntime.retained} : undefined}
             onDragEnter={handleReferenceDragEnter}
             onDragOver={handleReferenceDragOver}
             onDragLeave={handleReferenceDragLeave}
@@ -3516,7 +3551,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
             }}
             placeholder="Describe a picture..."
             maxHeight={hasPromptRefinerPanel ? 120 : 240}
-            attachmentsSlot={
+            attachmentsSlot={localSource && localRuntime.promptError && promptText.length>1000 ? <p role="alert" className="px-4 py-2 text-xs text-amber-200">{localRuntime.promptError}</p> :
               hasComposerTopPanel ? (
                 <div className="grid min-w-0 gap-2">
                   {promptRefinerPanel}
@@ -3622,7 +3657,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
               desktopSubmitIcon: "grid",
               mobileSubmitIcon: "sm:hidden",
             }}
-            leadingAction={{
+            leadingAction={localSource ? undefined : {
               label: supportsReferenceImages ? "Upload reference images" : `${activeModelOption.label} is text-to-image only`,
               icon: <ImageIcon size={17} />,
               onClick: () => supportsReferenceImages
@@ -3630,7 +3665,7 @@ export function GeneratePage({ localEnabled = false }: { localEnabled?: boolean 
                 : setUploadMessage(`${activeModelOption.label} is text-to-image only and does not accept reference images.`),
             }}
             actions={
-              hasPromptRefinerPanel
+              localSource || hasPromptRefinerPanel
                 ? []
                 : [
                     {

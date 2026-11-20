@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { localDockerRunCommand, runLocalDockerStack, userSelectedLocalEnabled } from "./run.mjs";
+import { localDockerRunCommand, runLocalDockerStack, userSelectedLocalEnabled, runAttachedCommand } from "./run.mjs";
 
 describe("setup runner", () => {
   it("reads operator disable from the Compose env file with shell precedence", () => {
@@ -47,5 +47,21 @@ describe("setup runner", () => {
   });
   it("closes the owned agent even if Docker launch fails", async () => {
     const close = vi.fn();await expect(runLocalDockerStack({ platform: "win32", arch: "x64", prepareHost: async () => ({ overlay: "private", assert() {}, close }), spawnSyncImpl: () => { throw Error("Docker missing"); } })).rejects.toThrow("Docker missing");expect(close).toHaveBeenCalledOnce();
+  });
+  it("keeps the host alive until an asynchronous Docker command has exited", async () => {
+    const close = vi.fn(); let finish;
+    const docker = new Promise(resolve => { finish = resolve; });
+    const running = runLocalDockerStack({ platform: "win32", arch: "x64", prepareHost: async () => ({ overlay: "private", assert() {}, close }), spawnSyncImpl: () => docker });
+    await Promise.resolve(); await Promise.resolve(); expect(close).not.toHaveBeenCalled();
+    finish({ status: 0 }); expect((await running).status).toBe(0); expect(close).toHaveBeenCalledOnce();
+  });
+  it("processes launcher events while its attached command is running", async () => {
+    let ticked = false;
+    const timer = setTimeout(() => { ticked = true; }, 20);
+    try {
+      const running = runAttachedCommand(process.execPath, ["-e", "setTimeout(()=>{},200)"], { cwd: process.cwd(), stdio: "ignore", shell: false });
+      await new Promise(resolve => setTimeout(resolve, 60)); expect(ticked).toBe(true);
+      expect(await running).toEqual({ status: 0, signal: null });
+    } finally { clearTimeout(timer); }
   });
 });

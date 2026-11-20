@@ -9,6 +9,19 @@ const options = [
 ];
 
 describe("ModelQuickPicker", () => {
+  it('shows cloud and local choices together, with visible capability limits and disabled reasons', async () => {
+    const select = vi.fn();
+    render(<ModelQuickPicker label="Image model" icon={Images} value="cloud:one" options={[
+      {value: 'cloud:one', label: 'Cloud image', location: 'Cloud', description: 'Text to image · Reference editing'},
+      {value: 'local:qwen', label: 'Qwen Image', location: 'This computer', description: 'Text to image only', disabledReason: 'Remove reference images before selecting.'},
+    ]} emptyLabel="Choose image model" onSelect={select}/>);
+    expect(screen.getByText('Image model · Cloud')).toBeVisible();
+    fireEvent.pointerDown(screen.getByRole('button', {name: /Image model: Cloud image/}), {button: 0});
+    const local = await screen.findByRole('menuitemradio', {name: /Qwen Image/});
+    expect(local).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Remove reference images before selecting.')).toBeVisible();
+    fireEvent.click(local); expect(select).not.toHaveBeenCalled();
+  });
   it("shows the selected model and exposes checked active options", async () => {
     render(
       <ModelQuickPicker

@@ -29,3 +29,8 @@
 .setup progress { height:5px; border-radius:99px; }
 @media(max-width:900px) { .layout { grid-template-columns:1fr; gap:22px; } .page { max-width:720px; padding-inline:25px; } }
 @media(max-width:600px) { .page { padding:124px 20px 40px; } .heading { margin-bottom:25px; } .heading h1 { font-size:31px; } .modelCard { padding:21px; } .promptCard textarea { min-height:175px; padding:19px; } .promptHeading { padding:17px 19px; } .setup>div:first-child { font-size:10px; } }
+
+.modelCard select { color-scheme:dark; min-height:44px; max-width:100%; cursor:pointer; }
+.modelCard select:focus-visible { outline:2px solid var(--kavero-accent); outline-offset:3px; }
+.modelCard select:disabled { cursor:not-allowed; opacity:.5; }
+.modelCard select option { background:var(--kavero-background,#101113); color:var(--kavero-text-primary); }

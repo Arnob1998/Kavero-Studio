@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Images, Loader2, PanelLeftOpen, Plus, Send, X } from "lucide-react";
 import { brand } from "@/lib/brand";
 import { imageDownloadName } from "@/lib/image-export";
@@ -155,6 +155,10 @@ export function GenerationResultsWorkspace({
   isGenerating,
   loadingPhrase,
   error,
+  errorAction,
+  actionsSlot,
+  sourcePrompt,
+  canStartNew = true,
   onStartNewPrompt,
   onEditImage,
   iterationRuns = [],
@@ -165,6 +169,10 @@ export function GenerationResultsWorkspace({
   isGenerating: boolean;
   loadingPhrase: string;
   error: string | null;
+  errorAction?: ReactNode;
+  actionsSlot?: ReactNode;
+  sourcePrompt?: string;
+  canStartNew?: boolean;
   onStartNewPrompt: () => void;
   onEditImage: (image: GeneratedImage, prompt: string) => Promise<void>;
   iterationRuns?: GenerationRun[];
@@ -245,7 +253,7 @@ export function GenerationResultsWorkspace({
           <button
             className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-[10px] font-black uppercase tracking-[0.06em] text-white/62 transition hover:bg-white/[0.08] hover:text-white"
             type="button"
-            disabled={isGenerating}
+            disabled={isGenerating || !canStartNew}
             onClick={onStartNewPrompt}
           >
             <Plus size={15} />
@@ -262,7 +270,7 @@ export function GenerationResultsWorkspace({
           </div>
         ) : error ? (
           <div className="grid h-full place-items-center p-8 text-center">
-            <p className="max-w-[56ch] rounded-xl border border-red-400/20 bg-red-500/10 p-4 text-[13px] font-semibold leading-5 text-red-100">{error}</p>
+            <div><p className="max-w-[56ch] rounded-xl border border-red-400/20 bg-red-500/10 p-4 text-[13px] font-semibold leading-5 text-red-100">{error}</p>{errorAction}</div>
           </div>
         ) : run?.images.length ? (
           <ResultCollage
@@ -365,13 +373,14 @@ export function GenerationResultsWorkspace({
                 </button>
               </div>
               <div className="min-h-0 flex-1">
-                <SourceContent prompt={run?.prompt ?? ""} images={run?.referenceImages ?? []} />
+                <SourceContent prompt={run?.prompt ?? sourcePrompt ?? ""} images={run?.referenceImages ?? []} />
               </div>
             </aside>
           </>
         ) : null}
       </div>
 
+      {actionsSlot}
       {run?.warnings.length ? (
         <p className="mt-3 text-left text-[11px] font-semibold leading-5 text-yellow-100/72">{run.warnings.join(" ")}</p>
       ) : null}

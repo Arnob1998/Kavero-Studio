@@ -14,7 +14,7 @@ import { createJobDirectory,availableStagingBytes,inspectStagedOutput,readLeased
 import { failureReceipt,validateLocalFailure } from '../../src/modules/model-providers/local/failure.ts';
 const script=fileURLToPath(import.meta.url);
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value);
-const summary=(ledger,root,row)=>({id:row.id,state:row.state,ledgerIdentity:ledger.identity,output:inspectStagedOutput(ledger,root,row.owner,row.id),...(row.failure_receipt?{failure:validateLocalFailure(JSON.parse(row.failure_receipt))}:{})});
+const summary=(ledger,root,row)=>({id:row.id,state:row.state,ledgerIdentity:ledger.identity,requestHash:row.hash,submissionKey:row.key,packageFingerprint:JSON.parse(row.payload).fingerprint,executionDevice:JSON.parse(row.payload).device,output:inspectStagedOutput(ledger,root,row.owner,row.id),...(row.failure_receipt?{failure:validateLocalFailure(JSON.parse(row.failure_receipt))}:{})});
 
 async function supervisor(configPath,id,token,epoch) {
   const config=JSON.parse(readFileSync(configPath,'utf8'));

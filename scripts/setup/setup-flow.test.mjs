@@ -3,7 +3,19 @@ import {
   buildSetupValues,
   promptForGatewayProviders,
   setupGatewayProviders,
+  promptForImageGeneration,
+  runSetupWizard,
+  setupImageGenerationChoices,
+  setupLocalModels,
+  setupApiModels,
+  starterModelHubUrl,
 } from "./setup-flow.mjs";
+import { localProfiles } from "../../src/modules/model-providers/local/browser-profiles";
+import { modelCatalog } from "../../src/modules/model-providers/catalog";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { parseEnvContent } from "./env-file.mjs";
 
 function localDockerSecrets() {
   return {
@@ -19,6 +31,66 @@ function localDockerSecrets() {
 }
 
 describe("setup flow values", () => {
+  it.each(["local", "providers", "later"])("uses %s as a starter choice without disabling other sources", async source => {
+    const inputs = {}, notes = [];
+    const prompts = { isCancel: () => false, note: (...args) => notes.push(args), password: async () => "test-openai-key", select: async ({message}) => ({"Choose your first image-model source":source,"Choose your starting local image model":setupLocalModels[0].value,"Choose your starting image provider":"openai","Choose your starting provider image model":"kavero-image-openai-gpt-image-2"}[message]) };
+    expect(await promptForImageGeneration({ prompts, inputs, platform: "win32", arch: "x64" })).toBe(source);
+    const values = buildSetupValues({ profileId: "local-docker", authMode: "password", storageChoiceId: "kavero-managed-local-filesystem", inputs, dockerSecrets: localDockerSecrets() });
+    expect(values.KAVERO_LOCAL_GENERATION_ENABLED).toBe(source === "local" ? "1" : undefined);
+    expect(values.KAVERO_STORAGE_PROVIDER).toBe("kavero-managed");
+    expect(Object.hasOwn(values, "OPENAI_API_KEY")).toBe(source === "providers");
+    expect(Object.hasOwn(values, "GEMINI_API_KEY")).toBe(false);
+    expect(notes.some(([text]) => text.includes("No model download or terms acceptance"))).toBe(source === "local");
+    expect(notes.some(([text]) => text.includes("not an exclusive mode"))).toBe(true);
+  });
+
+  it("keeps Local first and offers only committed runtime/catalog models", () => {
+    expect(setupImageGenerationChoices.map(choice => choice.value)).toEqual(["local", "providers", "later"]);
+    expect(setupLocalModels.map(model => model.value)).toEqual(localProfiles.map(model => model.profile));
+    for (const option of setupApiModels) expect(modelCatalog.some(model => model.modelAlias === option.value && model.displayLabel === option.label && model.capabilities.slots.includes("imageGeneration"))).toBe(true);
+  });
+
+  it.each([["linux", "x64"], ["win32", "arm64"]])("does not offer unsupported local Qwen on %s/%s", async (platform, arch) => {
+    const inputs = {}, notes = [];
+    const prompts = { isCancel: () => false, note: (...args) => notes.push(args), select: async options => { expect(options.options[0]).toMatchObject({value:"local",disabled:true});return "later"; } };
+    expect(await promptForImageGeneration({ prompts, inputs, platform, arch })).toBe("later");
+    expect(inputs.imageGeneration).toBe("later");
+  });
+
+  it.each([false, true])("local-only wizard skips API credentials and respects existing settings (allow updates: %s)", async allowUpdates => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "kavero-cli-local-test-")), notes = [];
+    try {
+      writeFileSync(path.join(cwd, ".env.docker.local"), "KAVERO_LOCAL_GENERATION_ENABLED=0\nOPENAI_API_KEY=keep-test-provider-key\n");
+      const prompts = {
+        intro() {}, outro() {}, isCancel: () => false, note: (...args) => notes.push(args),
+        spinner: () => ({ start() {}, stop() {} }),
+        select: async ({ message }) => ({ "Choose where Kavero runs": "local-docker", "Choose storage": "kavero-managed-local-filesystem", "Choose your first image-model source": "local", "Choose your starting local image model": setupLocalModels[1].value }[message]),
+        text: async ({ initialValue }) => initialValue,
+        confirm: async ({ message }) => message.startsWith("Update existing") && allowUpdates,
+        multiselect: async () => { throw Error("Local-only wizard asked for API providers"); },
+        password: async () => { throw Error("Local-only wizard asked for a provider key"); },
+      };
+      const result = await runSetupWizard({ prompts, cwd, platform: "win32", arch: "x64", runLocalDocker: async () => { throw Error("Unexpected Docker startup"); } });
+      const values = parseEnvContent(readFileSync(path.join(cwd, ".env.docker.local"), "utf8")).values;
+      expect(values.KAVERO_LOCAL_GENERATION_ENABLED).toBe(allowUpdates ? "1" : "0");
+      expect(values.OPENAI_API_KEY).toBe("keep-test-provider-key");
+      expect(values.KAVERO_AUTH_MODE).toBe("password");
+      expect(values.KAVERO_MANAGED_STORAGE_BACKEND).toBe("local-filesystem");
+      expect(result.preserved.includes("KAVERO_LOCAL_GENERATION_ENABLED")).toBe(!allowUpdates);
+      expect(notes.some(([, title]) => title === "Existing setting preserved")).toBe(!allowUpdates);
+      expect(notes.some(([text,title]) => title === "Your starting model" && text.includes("starterProfile=qwen-image-2.1-q3-evaluation"))).toBe(true);
+    } finally {
+      if (!path.resolve(cwd).startsWith(path.resolve(tmpdir()) + path.sep) || !path.basename(cwd).startsWith("kavero-cli-local-test-")) throw Error("Unsafe CLI test cleanup");
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("builds model-specific Model Hub handoffs without making them global model defaults", () => {
+    expect(starterModelHubUrl({KAVERO_APP_PORT:"3000",imageGeneration:"local",starterLocalProfile:setupLocalModels[1].value})).toBe("http://127.0.0.1:3000/settings/models?source=local&starterProfile=qwen-image-2.1-q3-evaluation");
+    expect(starterModelHubUrl({KAVERO_APP_PORT:"3001",imageGeneration:"providers",starterModelAlias:setupApiModels[3].value})).toContain("source=cloud&starterModel=kavero-image-openai-gpt-image-2");
+    expect(starterModelHubUrl({KAVERO_APP_PORT:"3000",imageGeneration:"later"})).toBe("http://127.0.0.1:3000/settings/models");
+  });
+
   it("offers only supported gateway providers", () => {
     expect(setupGatewayProviders.map((provider) => provider.value)).toEqual([
       "gemini",

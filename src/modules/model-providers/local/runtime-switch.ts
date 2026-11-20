@@ -7,7 +7,7 @@ import {z} from "zod";
 const digest=z.string().regex(/^[a-f0-9]{64}$/);
 const nativeUUID=z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
 const identity=z.object({packageFingerprint:digest,deviceId:z.string().min(1).max(256),ledgerIdentity:z.string().uuid()}).strict();
-const operation=z.object({id:z.string().uuid(),packageId:z.string(),state:z.enum(["admitted","verifying","starting","installed","cancelled","failed","interrupted"]),error:z.string().nullable()});
+const operation=z.object({id:z.string().uuid(),packageId:z.string(),state:z.enum(["admitted","verifying","starting","installed","cancelled","failed","interrupted","removed"]),error:z.string().nullable()});
 export type ManagedActivation=z.infer<typeof operation>;
 const record=z.object({id:z.string().uuid(),owner_id:z.string().uuid(),submission_key:z.string().uuid(),target_package_id:z.string(),target_fingerprint:digest,
  original_identity:identity,state:z.enum(["pending","installed","rolled-back"]),host_operation:z.string().uuid().nullable()});
@@ -30,7 +30,7 @@ async function rpc(name:string,args:Record<string,unknown>,nullable=false):Promi
 async function observed(){const ready=await getLocalReadiness();return identity.parse({packageFingerprint:ready.packageFingerprint,deviceId:ready.deviceId,ledgerIdentity:ready.ledgerIdentity});}
 async function settle(owner:string,row:SwitchRecord,op:ManagedActivation){
  if(row.owner_id!==owner||row.target_package_id!==op.packageId||row.host_operation!==op.id)throw new LocalSwitchError(503,"Local switch identity changed.");
- if(row.state!=="pending"||!["installed","cancelled","failed","interrupted"].includes(op.state))return;
+ if(row.state!=="pending"||!["installed","cancelled","failed","interrupted","removed"].includes(op.state))return;
  // A failure/timeout alone never releases the fence. The actual restored or
  // installed runtime must be ready with the expected package, device and ledger.
  const current=await observed();

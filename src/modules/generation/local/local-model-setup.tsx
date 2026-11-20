@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Download, Play, Square, FileBadge2 } from "lucide-react";
 import { z } from "zod";
 import { setupOperationSchema, setupSnapshotSchema, type SetupSnapshot } from "./setup-contract";
 import styles from "./local-generation.module.css";
@@ -30,7 +30,7 @@ async function request(view?: string, body?: unknown, profile:LocalProfile='qwen
   return data;
 }
 const switchRecord=z.object({key:z.string().uuid(),id:z.string().uuid().optional()}).strict();
-const activation=z.object({id:z.string().uuid(),packageId:z.string(),state:z.enum(['admitted','verifying','starting','installed','cancelled','failed','interrupted']),error:z.string().nullable()});
+const activation=z.object({id:z.string().uuid(),packageId:z.string(),state:z.enum(['admitted','verifying','starting','installed','cancelled','failed','interrupted','removed']),error:z.string().nullable()});
 export function LocalModelSetup({ ownerId, onAccess, onReady,profile='qwen-image-2.1-q4-evaluation',hideNotices=false }: { ownerId?: string; onAccess: (ready: boolean) => void; onReady: () => void;profile?:LocalProfile;hideNotices?:boolean }) {
   const [snapshot, setSnapshot] = useState<SetupSnapshot | null>(null), [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -54,8 +54,8 @@ export function LocalModelSetup({ ownerId, onAccess, onReady,profile='qwen-image
         if(switchAttempt.current?.id){
           const result=await call(`id=${switchAttempt.current.id}`);if(epoch.current!==current)return;
           const op=activation.parse(result.operation);if(op.id!==switchAttempt.current.id||op.packageId!==localProfile(profile)?.packageId)throw Error('Model switch identity changed.');
-          if(['installed','failed','cancelled','interrupted'].includes(op.state)){
-            setSwitching(false);if(op.state==='installed'){switchAttempt.current=null;localStorage.removeItem(switchKey!);}else setError('Model switch stopped. Retry the same switch after the runtime recovers.');
+          if(['installed','failed','cancelled','interrupted','removed'].includes(op.state)){
+            setSwitching(false);if(op.state==='installed'||op.state==='removed'){switchAttempt.current=null;localStorage.removeItem(switchKey!);}else setError('Model switch stopped. Retry the same switch after the runtime recovers.');
           }
         }
         const data = await call("model");
@@ -90,7 +90,7 @@ export function LocalModelSetup({ ownerId, onAccess, onReady,profile='qwen-image
   const install = () => act(async () => {
     if (!snapshot || !checked || !storageKey) return;
     const current = epoch.current;
-    if (!attempt.current || snapshot.operation?.state === "cancelled") attempt.current = { key: crypto.randomUUID(), manifest: snapshot.manifest, termsDigest: snapshot.termsDigest };
+    if (!attempt.current || snapshot.operation?.state === "cancelled" || snapshot.operation?.state === "removed") attempt.current = { key: crypto.randomUUID(), manifest: snapshot.manifest, termsDigest: snapshot.termsDigest };
     // Commit the retry identity before submission; refresh never starts a download.
     localStorage.setItem(storageKey, JSON.stringify(attempt.current));
     const data = await call(undefined, { action: "install", ...attempt.current, consentToken: snapshot.consentToken, purpose: "research-evaluation", accepted: true });
@@ -112,7 +112,7 @@ export function LocalModelSetup({ ownerId, onAccess, onReady,profile='qwen-image
     switchAttempt.current??={key:crypto.randomUUID()};localStorage.setItem(switchKey,JSON.stringify(switchAttempt.current));
     const data=await call(undefined,{action:'switch',key:switchAttempt.current.key,packageId:target.packageId});if(epoch.current!==current)return;
     const op=activation.parse(data.operation);if(op.packageId!==target.packageId)throw Error('Model switch identity changed.');
-    if(op.state==='installed'){switchAttempt.current=null;localStorage.removeItem(switchKey);setSwitching(false);}else{switchAttempt.current={key:switchAttempt.current.key,id:op.id};localStorage.setItem(switchKey,JSON.stringify(switchAttempt.current));setSwitching(!['failed','cancelled','interrupted'].includes(op.state));}
+    if(op.state==='installed'||op.state==='removed'){switchAttempt.current=null;localStorage.removeItem(switchKey);setSwitching(false);}else{switchAttempt.current={key:switchAttempt.current.key,id:op.id};localStorage.setItem(switchKey,JSON.stringify(switchAttempt.current));setSwitching(!['failed','cancelled','interrupted'].includes(op.state));}
     // Refresh readiness immediately; GET reconciliation continues after navigation.
     const result=await call('model');if(epoch.current===current){if(result.ownerId!==ownerId)throw Error('Your account changed. Check the connection again.');const next=setupSnapshotSchema.parse(result.setup);if(next.manifest!==target.manifest)throw Error('Model setup identity changed.');next.ready=next.ready&&!switchAttempt.current;setSnapshot(next);}
   });
@@ -125,8 +125,8 @@ export function LocalModelSetup({ ownerId, onAccess, onReady,profile='qwen-image
     {!snapshot?.ready && <>
       {!snapshot?.accepted&&<label className="mt-4 flex items-start gap-3 text-sm text-white/60"><input type="checkbox" className="mt-1 accent-blue-500" checked={checked} disabled={busy || running||switching} onChange={e => setChecked(e.target.checked)} /><span>I accept the model licenses and will use it for research/evaluation.</span></label>}
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold hover:bg-blue-500 disabled:opacity-40" disabled={!checked || !snapshot?.available || Boolean(lowDisk) || busy || running || switching} onClick={() => void (canSwitch?useModel():install())}>{busy || running || switching ? <Loader2 size={16} className="animate-spin" /> : null}{switching ? "Switching model…" : canSwitch ? "Use model" : running ? state === "cancelling" ? "Cancelling…" : state === "activating" ? "Preparing model…" : "Installing…" : state === "cancelled" ? "Start new download" : state && state !== "installed" ? "Resume setup" : snapshot?.installed ? "Accept & use" : "Accept & download"}</button>
-        {running && !["activating","cancelling"].includes(state ?? "") && <button className="min-h-11 px-3 text-sm text-white/60 disabled:opacity-40" disabled={busy} onClick={() => void cancel()}>Cancel download</button>}
+        <button className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold hover:bg-blue-500 disabled:opacity-40" disabled={!checked || !snapshot?.available || Boolean(lowDisk) || busy || running || switching} onClick={() => void (canSwitch?useModel():install())}>{busy || running || switching ? <Loader2 size={16} strokeWidth={1.75} aria-hidden className="animate-spin" /> : canSwitch || snapshot?.installed ? <Play size={16} strokeWidth={1.75} aria-hidden/> : <Download size={16} strokeWidth={1.75} aria-hidden/>}{switching ? "Switching model…" : canSwitch ? "Use model" : running ? state === "cancelling" ? "Cancelling…" : state === "activating" ? "Preparing model…" : "Installing…" : state === "cancelled" || state === "removed" ? "Start new download" : state && state !== "installed" ? "Resume setup" : snapshot?.installed ? "Accept & use" : "Accept & download"}</button>
+        {running && !["activating","cancelling"].includes(state ?? "") && <button className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-white/60 disabled:opacity-40" disabled={busy} onClick={() => void cancel()}><Square size={15} strokeWidth={1.75} aria-hidden/>Cancel download</button>}
       </div>
     </>}
     {running && snapshot && <div className="mt-3"><progress aria-label="Installation progress" max={snapshot.workBytes} value={Math.min(snapshot.operation?.processedBytes ?? 0, snapshot.workBytes)} className="h-1.5 w-full accent-blue-500" /><p className="mt-1 text-xs text-white/45">{gib(snapshot.operation?.processedBytes ?? 0)} GB processed · download and verification</p></div>}
@@ -137,6 +137,6 @@ export function LocalModelSetup({ ownerId, onAccess, onReady,profile='qwen-image
     {["failed", "activation-failed", "interrupted"].includes(state ?? "") && <p className="mt-3 text-xs text-amber-200">Setup stopped. Resume checks the same download and verified files.</p>}
     {error && <p role="alert" className="mt-3 text-xs text-amber-200">{error}</p>}
     {snapshot?.ready&&<p role="status" className="mt-3 text-sm text-white/70">Active model · ready to create</p>}
-    {!hideNotices&&<details className="mt-3 text-xs text-white/45" onToggle={e => { if (e.currentTarget.open && !terms && !locked.current) void loadTerms(); }}><summary className="cursor-pointer py-2">Model licenses & notices</summary><p className="my-2">Pinned licenses apply to the model and its components. Kavero downloads them directly from their upstream sources.</p>{terms?.map(term => <details key={term.name} className="mt-2"><summary className="cursor-pointer break-words">{term.name}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-3">{term.text}</pre></details>)}</details>}
+    {!hideNotices&&<details className="mt-3 text-xs text-white/45" onToggle={e => { if (e.currentTarget.open && !terms && !locked.current) void loadTerms(); }}><summary className="cursor-pointer py-2"><span className="inline-flex items-center gap-2"><FileBadge2 size={16} strokeWidth={1.75} aria-hidden/>Model licenses & notices</span></summary><p className="my-2">Pinned licenses apply to the model and its components. Kavero downloads them directly from their upstream sources.</p>{terms?.map(term => <details key={term.name} className="mt-2"><summary className="cursor-pointer break-words">{term.name}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-3">{term.text}</pre></details>)}</details>}
   </div>;
 }

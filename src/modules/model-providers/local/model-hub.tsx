@@ -1,14 +1,20 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, Box, Cloud, ExternalLink, HardDrive, Loader2, Plus, RefreshCw } from "lucide-react";
+import { ArrowRight, Box, Cloud, ExternalLink, HardDrive, Loader2, Monitor, X, Search, Plus, Link2 } from "lucide-react";
 import { z } from "zod";
 import { hubSource, hubModel, hubList, hubDetail, type HubSource, type HubModel, type HubSnapshot, type HubLicense } from "./model-hub-contract";
 import { ModelLicenseDialog, publisherLink } from "./model-license-dialog";
 import styles from "./model-hub.module.css";
-import {localProfiles} from './browser-profiles';
-import {LocalModelSetup} from '@/modules/generation/local/local-model-setup';
+import {localProfiles, localProfile, type LocalProfile} from './browser-profiles';
+import {modelCatalog} from '../catalog';
+import {RemoteModels} from './remote-models';
+import {Inspection,recipeStatus} from './model-inspection';
+import {ModelCompatibilityPreview} from './model-compatibility-preview';
+export {recipeStatus} from './model-inspection';
+import {LocalModelInventory} from './local-model-inventory';
+import {HuggingFaceBrowser} from './hugging-face-browser';
+import {brand} from '@/lib/brand';
 
 type Detail = z.infer<typeof hubDetail>;
 type Page = z.infer<typeof hubList>;
@@ -25,24 +31,33 @@ async function request(query = "", body?: unknown, signal?: AbortSignal) {
   return data;
 }
 
-export function ModelHub({ localEnabled, ownerId, cloudPanel, initialSource }: { localEnabled: boolean; ownerId?: string; cloudPanel: ReactNode; initialSource?: "local" | "cloud" }) {
-  const [tab, setTab] = useState(initialSource ?? (localEnabled ? "local" : "cloud"));
+export function ModelHub({ localEnabled, ownerId, cloudPanel, initialSource, connectEnabled = false,connectSetupEnabled=false }: { connectSetupEnabled?:boolean;connectEnabled?: boolean; localEnabled: boolean; ownerId?: string; cloudPanel: ReactNode; initialSource?: "local" | "remote" | "cloud" }) {
+  const [tab, setTab] = useState<string>(initialSource === 'remote' ? 'computers' : initialSource ?? (localEnabled ? "local" : connectEnabled ? "computers" : "cloud"));
+  const sources=['local','computers','cloud'];
+  const [starter, setStarter] = useState<{label: string; profile?: string} | null>(null);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const local = localProfile(query.get("starterProfile"));
+    const apiModel = modelCatalog.find(model => model.modelAlias === query.get("starterModel") && model.capabilities.slots.some(slot => slot === "imageGeneration"));
+    if (query.get("source") === "cloud") { if (apiModel) setStarter({label: apiModel.displayLabel}); }
+    else if (local) setStarter({label: local.label, profile: local.profile});
+  }, []);
   const tabs = useRef<Array<HTMLButtonElement | null>>([]);
   return <div className={styles.root}>
+    {starter && <p className={styles.notice}>Starting model: {starter.label}. Review and set it up below; this choice does not activate a model. You can add more models or change your selection later.</p>}
     <div className={styles.toolbar}>
       <div className={styles.tabs} role="tablist" aria-label="Model source">
-        {(["local", "cloud"] as const).map((value, index) => <button key={value} ref={element => { tabs.current[index] = element; }}
+        {sources.map((value, index) => <button key={value} ref={element => { tabs.current[index] = element; }}
           className={styles.tab} id={`models-${value}-tab`} role="tab" aria-controls={`models-${value}`} aria-selected={tab === value} tabIndex={tab === value ? 0 : -1}
           onClick={() => setTab(value)} onKeyDown={event => {
             if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-            event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index;
-            setTab(next === 0 ? "local" : "cloud"); tabs.current[next]?.focus();
-          }}>{value === "local" ? <HardDrive size={15} /> : <Cloud size={15} />}{value === "local" ? "Local models" : "Cloud providers"}</button>)}
+            event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? sources.length-1 : (index+(event.key==='ArrowRight'?1:-1)+sources.length)%sources.length;
+            setTab(sources[next]); tabs.current[next]?.focus();
+          }}>{value === "local" ? <HardDrive size={15} /> : value==='computers'?<Monitor size={15}/>:<Cloud size={15} />}{value === "local" ? "Local models" : value==='computers'?'Remote':"Cloud providers"}</button>)}
       </div>
-      <p className={styles.notice}>Before using a model, review its publisher’s license and usage policies.</p>
     </div>
     <section id={`models-${tab}`} role="tabpanel" aria-labelledby={`models-${tab}-tab`} tabIndex={0}>
-      {tab === "cloud" ? cloudPanel : localEnabled && ownerId ? <LocalModels key={ownerId} ownerId={ownerId} /> : <div className={`${styles.panel} ${styles.empty}`}>
+      {tab === "cloud" ? cloudPanel : tab==='computers'?<RemoteModels enabled={connectEnabled} setupEnabled={connectSetupEnabled} ownerId={ownerId}/>: localEnabled && ownerId ? <LocalModels key={ownerId} ownerId={ownerId} starterProfile={starter?.profile} /> : <div className={`${styles.panel} ${styles.empty}`}>
         <HardDrive size={22} className="mb-4" /><span className={styles.name}>Local models need a managed Kavero host.</span>
         <p className={styles.muted}>Use the local Docker setup to manage models on your computer. Cloud provider settings are available here.</p>
         <div className={styles.actions}><button className={styles.button} onClick={() => setTab("cloud")}>Open cloud providers <ArrowRight size={14} /></button></div>
@@ -51,15 +66,28 @@ export function ModelHub({ localEnabled, ownerId, cloudPanel, initialSource }: {
   </div>;
 }
 
-function LocalModels({ ownerId }: { ownerId: string }) {
+function LocalModels({ ownerId, starterProfile }: { ownerId: string; starterProfile?: string }) {
+  const [adding,setAdding]=useState(false);
+  const addDialog=useRef<HTMLDialogElement>(null);
+  useEffect(()=>{if(!adding)return;const dialog=addDialog.current;dialog?.showModal();return()=>dialog?.close();},[adding]);
+  const [managedProfile, setManagedProfile] = useState<LocalProfile | null>(null);
   const [page, setPage] = useState<Page | null>(null), [offset, setOffset] = useState(0), [refresh, setRefresh] = useState(0);
   const [selected, setSelected] = useState<string | null>(null), [detail, setDetail] = useState<Detail | null>(null);
   const [source, setSource] = useState(""), [variant, setVariant] = useState("");
   const [pending, setPending] = useState<z.infer<typeof pendingSchema> | null>(null), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null), [detailError, setDetailError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null), [detailError, setDetailError] = useState<string | null>(null),[libraryError,setLibraryError]=useState<string|null>(null);
   const [license, setLicense] = useState<{ title: string; value: HubLicense | null } | null>(null);
   const locked = useRef(false), epoch = useRef(0), controllers = useRef(new Set<AbortController>());
+  const starterHandled = useRef(false);
   const cacheKey = `kavero-model-inspection:${ownerId}`;
+  useEffect(() => {
+    if (!page || !starterProfile || starterHandled.current) return;
+    starterHandled.current = true;
+    if (pending || source.trim()) return;
+    const profile = localProfile(starterProfile);
+    const seed = page.seeds.find(entry => profile && entry.source.preferredFile === profile.file);
+    if (seed) { setSource(seed.source.source); setVariant(seed.source.preferredFile ?? ""); }
+  }, [page, starterProfile, pending, source]);
   useEffect(() => {
     const current = ++epoch.current;
     try { const cached = pendingSchema.parse(JSON.parse(localStorage.getItem(cacheKey) ?? "null")); setPending(cached); setSource(cached.model.source); setVariant(cached.model.preferredFile ?? ""); } catch { /* Cache holds retry intent, never model authority. */ }
@@ -71,9 +99,9 @@ function LocalModels({ ownerId }: { ownerId: string }) {
       try {
         const next = hubList.parse(await request(`?offset=${offset}`, undefined, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)])));
         if (epoch.current !== current || controller.signal.aborted) return;
-        setPage(next); setError(null);
+        setPage(next); setLibraryError(null);
         if (next.models.some(model => model.state === "inspecting")) timer = setTimeout(load, 3000);
-      } catch (e) { if (!controller.signal.aborted && epoch.current === current) setError(e instanceof Error ? e.message : "Models could not be loaded."); }
+      } catch (e) { if (!controller.signal.aborted && epoch.current === current) setLibraryError(e instanceof Error ? e.message : "Models could not be loaded."); }
       finally { if (!controller.signal.aborted && epoch.current === current) setLoading(false); }
     }
     setLoading(true); void load(); return () => { controller.abort(); clearTimeout(timer); };
@@ -113,70 +141,45 @@ function LocalModels({ ownerId }: { ownerId: string }) {
   }
   const statusText = (model: HubModel) => model.state === "inspecting" ? "Inspecting…" : model.state === "retry-required" ? "Inspection interrupted" : recipeStatus(model.recipeSupport);
   return <div className={styles.root}>
-    <section className={styles.panel} aria-label="Add a local model">
+    <div className={styles.libraryToolbar}><div><h2>Local image models</h2><p>Find a model. Make it yours.</p></div><button id="add-local-model" className={`${styles.button} ${styles.primary}`} onClick={()=>{setSelected(null);setAdding(true);}}><Plus size={15}/>Add from Hugging Face</button></div>
+    <LocalModelInventory compact key={ownerId} ownerId={ownerId} managedProfile={managedProfile} onManage={setManagedProfile}/>
+    <HuggingFaceBrowser disabled={busy||!!pending} onSelect={model=>{setSelected(null);setAdding(true);void inspect({id:`model-${crypto.randomUUID()}`,source:`https://huggingface.co/${model.id}`});}}/>
+    {pending&&!adding&&<p className={styles.muted}>{busy?'Checking model...':'A model check needs attention.'} <button className={styles.license} onClick={()=>setAdding(true)}>Continue adding model</button></p>}
+    {(!!page?.models.length||offset>0||page?.nextOffset!=null)&&<section className={styles.savedModels} aria-label="Saved model links"><div className={styles.resultsHeading}><span>Your model links</span><span>Saved from Hugging Face</span></div>{page?.models.map(model=><button key={model.id} className={styles.savedModelRow} onClick={()=>{setSelected(model.id);setAdding(true);}}><Box size={17}/><span><strong>{model.source.source.split('/').slice(-1)[0]}</strong><small>{model.source.preferredFile??'Choose a file'}</small></span><span className={styles.status}>{statusText(model)}</span><ArrowRight size={15}/></button>)}<div className={styles.browserPagination}><button className={styles.textButton} disabled={offset===0||loading} onClick={()=>setOffset(value=>Math.max(0,value-5))}>Previous</button><button className={styles.textButton} disabled={page?.nextOffset==null||loading} onClick={()=>setOffset(page!.nextOffset!)}>Next</button></div></section>}
+    {libraryError&&<p role="status" className={styles.muted}>{libraryError} Hugging Face browsing is available separately.</p>}
+    {projectRepositoryLink(brand.repositoryUrl)&&<a className={styles.quietLink} href={projectRepositoryLink(brand.repositoryUrl)!} target="_blank" rel="noopener noreferrer">Star on GitHub</a>}
+    {adding&&<dialog ref={addDialog} className={`${styles.dialog} ${styles.addDialog}`} aria-labelledby="add-model-title" onClose={event=>{if(event.target!==event.currentTarget)return;setAdding(false);document.getElementById('add-local-model')?.focus();}}>
+      <div className={styles.heading}><div><span className={styles.sourceLabel}><Link2 size={13}/>HUGGING FACE</span><h2 id="add-model-title">{selected?'Model details':'Add a model'}</h2><p>Check its files, compatibility and license before downloading.</p></div><button className={styles.iconButton} aria-label="Close add model" onClick={()=>setAdding(false)}><X size={18}/></button></div>
+    <section className={styles.addLink} aria-label="Add a local model">
       <div className={styles.form}>
-        <label htmlFor="model-source">Add from Hugging Face</label>
+        <label htmlFor="model-source">Hugging Face model link</label>
         <form className={styles.inputRow} onSubmit={event => { event.preventDefault(); addSource(); }}>
-          <input id="model-source" className={styles.input} type="url" required maxLength={1024} value={source} disabled={busy || !!pending} onChange={event => setSource(event.target.value)} placeholder="https://huggingface.co/owner/model" autoComplete="off" />
-          <button className={`${styles.button} ${styles.primary}`} disabled={busy || !source.trim()} type="submit">{busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}{pending ? "Retry inspection" : "Inspect model"}</button>
+          <input autoFocus id="model-source" className={styles.input} type="url" required maxLength={1024} value={source} disabled={busy || !!pending} onChange={event => setSource(event.target.value)} placeholder="https://huggingface.co/owner/model" autoComplete="off" />
+          <button className={`${styles.button} ${styles.primary}`} disabled={busy || !source.trim()} type="submit">{busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}{pending ? "Retry check" : "Check model"}</button>
         </form>
-        <p className={styles.muted}>Checks the model and its components. No weights are downloaded.</p>
-        <details className="mt-3"><summary className={styles.status}>Choose a specific file</summary><label className="mt-3" htmlFor="model-variant">Filename (optional)</label><input id="model-variant" className={styles.input} value={variant} maxLength={180} disabled={busy || !!pending} onChange={event => setVariant(event.target.value)} placeholder="model.gguf" /></details>
-        {pending && !busy && <div className={styles.actions}><p className={styles.muted}>A previous request needs acknowledgement. Retry keeps its original identity.</p><button className={styles.button} onClick={() => { localStorage.removeItem(cacheKey); setPending(null); }}>Start another inspection</button></div>}
+        <p className={styles.muted}>We check compatibility first. No model files are downloaded.</p>
+        <details className="mt-3"><summary className={styles.status}>Advanced: specific filename</summary><label className="mt-3" htmlFor="model-variant">Filename (optional)</label><input id="model-variant" className={styles.input} value={variant} maxLength={180} disabled={busy || !!pending} onChange={event => setVariant(event.target.value)} placeholder="model.gguf" /></details>
+        {pending && !busy && <div className={styles.actions}><p className={styles.muted}>Your previous check did not finish. Retry to continue.</p><button className={styles.button} onClick={() => { localStorage.removeItem(cacheKey); setPending(null); }}>Check a different model</button></div>}
       </div>
     </section>
-    {error && <p role="alert" className={styles.error}>{error}</p>}
-    <div className={styles.catalog}>
-      <section className={`${styles.panel} ${styles.list}`} aria-label="Local model library" aria-busy={loading}>
-        <div className={styles.heading}><h2>Your models</h2><button className={styles.button} aria-label="Refresh models" disabled={busy || loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={14} /></button></div>
-        {page?.models.map(model => <div key={model.id} className={styles.row} data-selected={selected === model.id}>
-          <button className={styles.rowButton} aria-pressed={selected === model.id} onClick={() => setSelected(model.id)}>
-            <span className={styles.modelIcon}><Box size={17} /></span><span className={styles.rowText}><span className={styles.name}>{model.source.source.split("/").slice(-1)[0]}</span><span className={styles.description}>{model.source.preferredFile ?? "Variant not chosen"}</span><span className={styles.description}>{statusText(model)}</span></span><ArrowRight size={14} className="shrink-0 text-white/40" />
-          </button>
-        </div>)}
-        {page && !page.models.length && <p className={styles.empty}>Inspect a model link, or start with one of the supplied entries below.</p>}
-        {loading && !page && <p className={styles.empty} role="status">Loading model library…</p>}
-        {!loading && !page && <div className={styles.empty}>The managed host could not be reached.<div className={styles.actions}><button className={styles.button} onClick={() => setRefresh(value => value + 1)}>Try again</button></div></div>}
-        {!!page?.seeds.length && <><p className={styles.sectionLabel}>Supplied entries</p>{page.seeds.map(({ source: seed }) => <div className={styles.row} key={seed.id}>
-          <span className={styles.modelIcon}><HardDrive size={16} /></span><span className={styles.rowText}><span className={styles.name}>{seed.preferredFile?.includes("Q3") ? "Qwen Image 2.1 · Q3" : seed.preferredFile?.includes("Q4") ? "Qwen Image 2.1 · Q4" : seed.id}</span><span className={styles.description}>{seed.preferredFile ?? seed.source}</span></span>
-          <button className={styles.button} disabled={busy || !!pending} onClick={() => void inspect(seed)} aria-label={`Inspect ${seed.preferredFile ?? seed.id}`}>Inspect</button>
-        </div>)}</>}
-        {(offset > 0 || page?.nextOffset !== null && page?.nextOffset !== undefined) && <div className={styles.footer}><button className={styles.button} disabled={offset === 0 || loading} onClick={() => setOffset(value => Math.max(0, value - 5))}>Previous</button><span className={styles.status}>Page {offset / 5 + 1}</span><button className={styles.button} disabled={page?.nextOffset == null || loading} onClick={() => setOffset(page!.nextOffset!)}>Next</button></div>}
-        <div className={styles.footer}><p className={styles.muted}>Repository defaults: <code>scripts/local-generation/models.json</code></p></div>
-      </section>
-      <section className={`${styles.panel} ${styles.detail}`} aria-label="Model inspection">
-        {detailError ? <p role="alert" className={styles.error}>{detailError}</p> : !selected ? <div className={styles.empty}><Box size={24} className="mb-4" /><span className={styles.name}>A closer look at your model.</span><p className={styles.muted}>Select an inspected model to see its variant, compatibility and component licenses.</p></div> : !detail ? <p className={styles.muted} role="status">Loading inspection…</p> : <>
+    {(error||libraryError) && <p role="alert" className={styles.error}>{error??libraryError}</p>}
+    <div className={selected?styles.catalog:styles.root}>
+      {selected&&<section className={`${styles.panel} ${styles.detail}`} aria-label="Model inspection">
+        {detailError ? <p role="alert" className={styles.error}>{detailError}</p> : !detail ? <p className={styles.muted} role="status">Loading inspection…</p> : <>
           <div className={styles.detailHeader}><div><h2>{detail.model.source.source.split("/").slice(-1)[0]}</h2><p className={styles.muted}>{statusText(detail.model)}</p></div>{publisherLink(detail.model.source.source) && <a className={styles.button} href={publisherLink(detail.model.source.source)!} target="_blank" rel="noopener noreferrer" aria-label="Open model source"><ExternalLink size={14} /></a>}</div>
-          {detail.snapshot ? <><Inspection snapshot={detail.snapshot} onLicense={(title, value) => setLicense({ title, value })} onVariant={file => { void inspect({ ...detail.model.source, preferredFile: file }); }} disabled={busy || !!pending} />{(()=>{
+          {detail.snapshot ? <><Inspection snapshot={detail.snapshot} onLicense={(title, value) => setLicense({ title, value })} onVariant={file => { void inspect({ ...detail.model.source, preferredFile: file }); }} disabled={busy || !!pending} /><ModelCompatibilityPreview key={detail.model.id} ownerId={ownerId} source={detail.model.source} destination={{kind:"local"}} destinationName="This computer"/>{(()=>{
             const verified=localProfiles.find(model=>detail.snapshot?.recipeSupport==='known-recipe'&&detail.snapshot.recipeId===model.recipeId&&detail.snapshot.recipeManifest===model.manifest&&detail.snapshot.selectedFile?.name===model.file);
-            return verified?<div className="mt-5 border-t border-white/10 pt-5"><h3 className="mb-3 text-sm font-medium">Set up & use</h3><LocalModelSetup key={verified.profile} profile={verified.profile} ownerId={ownerId} hideNotices onAccess={()=>{}} onReady={()=>{}} /></div>:null;
+            return verified?<div className={styles.actions}><button className={styles.button} onClick={()=>{setAdding(false);setManagedProfile(verified.profile);}}>Continue</button></div>:null;
           })()}</> : <>
             <p className={`${styles.muted} mt-5`}>{detail.model.state === "retry-required" ? "The host stopped before inspection finished. Retry the original request." : "Checking publisher metadata. You can leave this page and return later."}</p>
           </>}
           {detail.model.state === "retry-required" && <div className={styles.actions}><button className={styles.button} disabled={busy || !!pending} onClick={() => void inspect(detail.model.source, { key: detail.model.key, model: detail.model.source })}>Retry interrupted inspection</button></div>}
         </>}
-      </section>
+      </section>}
     </div>
     {license && <ModelLicenseDialog title={license.title} license={license.value} onClose={() => setLicense(null)} />}
+    </dialog>}
   </div>;
 }
 
-export function recipeStatus(value: string) {
-  return ({ "known-recipe": "Compatible recipe", "needs-variant": "Choose a variant", "needs-components": "Component check incomplete", "unsupported-runtime": "Unsupported runtime", "revision-changed": "Publisher revision changed", "access-required": "Publisher access required", "unsupported-format": "Unsupported model format" } as Record<string, string>)[value] ?? "Inspection unavailable";
-}
-const roleLabel = (role: string) => ({ "image-weights": "Image model", "text-encoder": "Text encoder", vae: "VAE", engine: "Engine" } as Record<string, string>)[role] ?? role;
-function Inspection({ snapshot, onLicense, onVariant, disabled }: { snapshot: HubSnapshot; onLicense: (title: string, value: HubLicense | null) => void; onVariant: (file: string) => void; disabled: boolean }) {
-  return <>
-    <dl className={styles.facts}>
-      <div><dt>Variant</dt><dd>{snapshot.selectedFile?.name ?? "Not selected"}</dd></div>
-      <div><dt>Model size</dt><dd>{snapshot.selectedFile?.bytes != null ? `${(snapshot.selectedFile.bytes / 1024 ** 3).toFixed(2)} GB · weights only` : "Unknown"}</dd></div>
-      <div><dt>Revision</dt><dd>{snapshot.revision?.slice(0, 12) ?? "Unverified"}</dd></div>
-      <div><dt>License</dt><dd><button className={styles.license} onClick={() => onLicense("Model license", snapshot.license)}>{snapshot.license?.identifier ?? "Unknown"} <ExternalLink size={11} /></button></dd></div>
-      <div><dt>Hardware</dt><dd>Not checked by inspection</dd></div>
-    </dl>
-    {snapshot.recipeSupport === "needs-variant" && <><label className={styles.muted} htmlFor="inspected-variant">Choose a model file to inspect</label><select id="inspected-variant" className={`${styles.input} mt-2`} value="" disabled={disabled} onChange={event => { if (event.target.value) onVariant(event.target.value); }}><option value="">Select a variant…</option>{snapshot.variants.map(file => <option key={file.name} value={file.name}>{file.name}</option>)}</select></>}
-    {snapshot.components.length > 0 && <><h3 className="text-xs font-medium">Components & licenses</h3>{snapshot.components.map(component => <div className={styles.component} key={component.role}><span>{roleLabel(component.role)}<span className={styles.description}>{component.status === "verified-metadata" ? "Metadata verified" : component.status === "pinned-recipe-only" ? "Pinned engine" : "Needs verification"}</span></span><button className={styles.license} aria-label={`View ${roleLabel(component.role)} license`} onClick={() => onLicense(`${roleLabel(component.role)} license`, component.license)}>{component.license.identifier ?? "Unknown"}</button></div>)}</>}
-    <p className={`${styles.muted} mt-5`}>{snapshot.recipeSupport === "known-recipe" ? "The source matches a verified recipe. Installation, hardware readiness and generation are checked separately." : snapshot.recipeSupport === "needs-variant" ? "This repository contains multiple weight files. Pick the version you want to inspect." : snapshot.recipeSupport === "revision-changed" ? "The publisher updated this repository. It no longer matches the pinned recipe; a newer revision has not been verified." : snapshot.recipeSupport === "needs-components" ? "One or more required components could not be verified. Inspection does not authorize installation." : snapshot.recipeSupport === "access-required" ? "This repository requires publisher access. Gated and private downloads are not supported here yet." : "This source has no complete verified recipe for Kavero’s managed runtime. It can be inspected, but cannot be installed or used."}</p>
-    <div className={styles.actions}><Link className={styles.button} href="/generate">Open Generate <ArrowRight size={13} /></Link></div>
-  </>;
-}
+export function projectRepositoryLink(value:unknown){try{if(typeof value!=='string')return null;const url=new URL(value);return url.protocol==='https:'&&url.hostname==='github.com'&&!url.username&&!url.password&&!url.search&&!url.hash&&/^\/[\w.-]+\/[\w.-]+\/?$/.test(url.pathname)?url.href:null;}catch{return null;}}

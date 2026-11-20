@@ -72,6 +72,15 @@ COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/next.config.ts ./next.config.ts
 
+# Read-only model discovery validates pinned metadata and cached license text.
+# Dynamic import.meta URLs still resolve these files against the project root.
+COPY --from=build --chown=node:node /app/scripts/local-generation/profile.json ./scripts/local-generation/profile.json
+COPY --from=build --chown=node:node /app/scripts/local-generation/models.json ./scripts/local-generation/models.json
+COPY --from=build --chown=node:node /app/scripts/local-generation/install/qwen-recipe.json ./scripts/local-generation/install/qwen-recipe.json
+COPY --from=build --chown=node:node /app/scripts/local-generation/install/qwen-q3-recipe.json ./scripts/local-generation/install/qwen-q3-recipe.json
+COPY --from=build --chown=node:node /app/scripts/local-generation/install/qwen-research-audit.json ./scripts/local-generation/install/qwen-research-audit.json
+COPY --from=build --chown=node:node /app/scripts/local-generation/notices/qwen-research-v1/ ./scripts/local-generation/notices/qwen-research-v1/
+
 RUN mkdir -p /data/kavero-storage \
   && chown -R node:node /app /data/kavero-storage
 

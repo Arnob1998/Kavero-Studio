@@ -5,6 +5,7 @@ import { mkdtempSync,rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';import path from 'node:path';
 import { SetupManager } from './setup.mjs';
+import { SetupHub } from './setup-hub.mjs';
 import { PackageInstaller } from '../install/transaction.mjs';
 import { sha } from '../install/manifest.mjs';
 const contexts=[];
@@ -18,16 +19,35 @@ it('installs alongside a different active package without bypassing fenced switc
  expect(await c.manager.snapshot(randomUUID())).toMatchObject({installed:false,ready:false,accepted:false});
 });
 afterEach(()=>{for(const ctx of contexts.splice(0)){ctx.manager.initializing=false;ctx.manager.pending=null;ctx.manager.close();ctx.db.close();rmSync(ctx.root,{recursive:true,force:true});}});
-function fixture(){
+function fixture({durable=false}={}){
   const data=Buffer.from('fixture model'),manifest={schema:1,id:'qwen-2-1-research-delivery-v1',publicApproved:false,noticesVerified:true,termsDigest:sha('terms'),artifacts:[{id:'model',role:'test-fixture',revision:'a'.repeat(40),url:'https://example.com/model',hosts:['example.com'],bytes:data.length,sha256:sha(data),destination:'weights/model.gguf'}]};
-  const root=mkdtempSync(path.join(os.tmpdir(),'kavero-setup-')),db=new DatabaseSync(':memory:');db.exec('CREATE TABLE activations(owner TEXT,submission_key TEXT,state TEXT,error TEXT)');
+  const root=mkdtempSync(path.join(os.tmpdir(),'kavero-setup-'));
   const transport=vi.fn(async()=>({status:200,headers:{etag:'"fixture"'},body:(async function*(){yield data;})(),dispose(){}}));
   const installer=new PackageInstaller({root,instanceId:randomUUID(),catalog:[manifest],purpose:'internal-evaluation',dependencies:{protect:()=>{},transport,inspectProcess:async pid=>({pid,creation:'1'})}});
+  const db=new DatabaseSync(durable?path.join(root,'setup.sqlite'):':memory:');db.exec('CREATE TABLE activations(owner TEXT,submission_key TEXT,state TEXT,error TEXT)');
   const activation={model:null,status:()=>({inferenceReady:!!activation.model}),admit:vi.fn(()=>({id:randomUUID()})),run:vi.fn(async()=>{activation.model={deliveryManifest:manager.verified.hash};})};
   const hardware=vi.fn(async()=>({freeVramMiB:7000,freeRamBytes:12*1024**3})),manager=new SetupManager({root,instanceId:installer.files.instanceId,secret:'a'.repeat(64),internalEvaluation:true},db,activation,{installer,manifest,hardware});manager.initializing=false;
   const owner=randomUUID(),body={owner,key:randomUUID(),accepted:true,purpose:'research-evaluation',manifest:manager.verified.hash,termsDigest:manifest.termsDigest,consentToken:manager.consentToken(owner)};
   const ctx={root,db,manager,activation,hardware,transport,owner,body};contexts.push(ctx);return ctx;
 }
+it('recognizes installed files and original consent after closing and reopening durable native journals without redownloading',async()=>{
+ const c=fixture({durable:true}),op=await c.manager.admit(c.body);await c.manager.run(c.owner,op.id);
+ const config=c.manager.config,manifest=c.manager.verified.manifest,instanceId=c.manager.installer.files.instanceId;
+ c.manager.close();c.db.close();c.activation.model=null;
+ c.db=new DatabaseSync(path.join(c.root,'setup.sqlite'));
+ const installer=new PackageInstaller({root:c.root,instanceId,catalog:[manifest],purpose:'internal-evaluation',dependencies:{protect:()=>{},transport:c.transport,inspectProcess:async pid=>({pid,creation:'1'})}});
+ c.manager=new SetupManager(config,c.db,c.activation,{installer,manifest,hardware:c.hardware});
+ await c.manager.recover();c.manager.initializing=false;
+ expect(await c.manager.snapshot(c.owner)).toMatchObject({installed:true,accepted:true,ready:false,active:false,operation:{id:op.id,state:'activation-needed'}});
+ expect(await c.manager.snapshot(randomUUID())).toMatchObject({accepted:false,ready:false,operation:null});
+ expect(c.transport).toHaveBeenCalledTimes(1);
+ expect(await installer.verifyVersion(`versions/${c.manager.verified.hash}`,c.manager.verified)).toBe(true);
+ expect(c.manager.operation(c.owner,op.id).id).toBe(op.id);
+ const hub=new SetupHub(config,c.db,c.activation,{factory:()=>c.manager});
+ expect(hub.receipt(c.owner,c.body.key).id).toBe(op.id);
+ expect(hub.receipt(randomUUID(),c.body.key)).toBeNull();
+ expect(hub.receipt(c.owner,randomUUID())).toBeNull();
+});
 it('rejects missing consent, changed terms, other-owner tokens and unknown wire fields before network or consent recording',async()=>{
   const c=fixture();for(const change of [{accepted:false},{purpose:'commercial'},{termsDigest:'b'.repeat(64)},{consentToken:c.manager.consentToken(randomUUID())},{url:'https://example.com'}])await expect(c.manager.admit({...c.body,...change})).rejects.toThrow();
   expect(c.transport).not.toHaveBeenCalled();expect(c.db.prepare('SELECT count(*) n FROM setup_consents').get().n).toBe(0);
@@ -44,7 +64,11 @@ it('deduplicates lost admission acknowledgements, fences shutdown and isolates s
 });
 it('requires separate second-owner consent while reusing a verified installed version without restarting inference',async()=>{
   const c=fixture(),op=await c.manager.admit(c.body);await c.manager.run(c.owner,op.id);const owner=randomUUID();
-  const second=await c.manager.admit({...c.body,owner,key:randomUUID(),consentToken:c.manager.consentToken(owner)});await c.manager.run(owner,second.id);
+  const second=await c.manager.admit({...c.body,owner,key:randomUUID(),consentToken:c.manager.consentToken(owner)});
+  expect(c.manager.access(c.owner)).toBe(true);
+  expect(c.manager.access(owner)).toBe(false);
+  expect(await c.manager.snapshot(owner)).toMatchObject({accepted:true,ready:false,operation:{state:'admitted'}});
+  await c.manager.run(owner,second.id);
   expect(c.manager.access(owner)).toBe(true);expect(c.transport).toHaveBeenCalledTimes(1);expect(c.activation.run).toHaveBeenCalledTimes(1);
 });
 it('keeps cancelled submissions as tombstones and never restarts their download',async()=>{

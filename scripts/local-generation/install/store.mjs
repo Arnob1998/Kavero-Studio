@@ -20,11 +20,14 @@ export class InstallStore {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS installs(id TEXT PRIMARY KEY,owner TEXT NOT NULL,submission_key TEXT NOT NULL,package_id TEXT NOT NULL,manifest TEXT NOT NULL,state TEXT NOT NULL,progress INTEGER NOT NULL DEFAULT 0,cancel INTEGER NOT NULL DEFAULT 0,error TEXT,created INTEGER NOT NULL,updated INTEGER NOT NULL,UNIQUE(owner,submission_key));
       CREATE TABLE IF NOT EXISTS writer(slot INTEGER PRIMARY KEY CHECK(slot=1),operation TEXT NOT NULL,token TEXT NOT NULL,pid INTEGER NOT NULL,creation TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS removals(id TEXT PRIMARY KEY,owner TEXT NOT NULL,submission_key TEXT NOT NULL,package_id TEXT NOT NULL,manifest TEXT NOT NULL,state TEXT NOT NULL,plan TEXT,completed TEXT NOT NULL DEFAULT '[]',deleted_bytes INTEGER NOT NULL DEFAULT 0,error TEXT,created INTEGER NOT NULL,updated INTEGER NOT NULL,UNIQUE(owner,submission_key));
+      CREATE TRIGGER IF NOT EXISTS frozen_removal BEFORE UPDATE ON removals WHEN OLD.id IS NOT NEW.id OR OLD.owner IS NOT NEW.owner OR OLD.submission_key IS NOT NEW.submission_key OR OLD.package_id IS NOT NEW.package_id OR OLD.manifest IS NOT NEW.manifest OR OLD.created IS NOT NEW.created OR (OLD.plan IS NOT NULL AND OLD.plan IS NOT NEW.plan) BEGIN SELECT RAISE(ABORT,'removal-identity-immutable'); END;
       CREATE TRIGGER IF NOT EXISTS frozen_install BEFORE UPDATE ON installs WHEN OLD.id IS NOT NEW.id OR OLD.owner IS NOT NEW.owner OR OLD.submission_key IS NOT NEW.submission_key OR OLD.package_id IS NOT NEW.package_id OR OLD.manifest IS NOT NEW.manifest OR OLD.created IS NOT NEW.created BEGIN SELECT RAISE(ABORT,'install-identity-immutable');END;`);
   }
   admit(owner,key,verified) {
     if(!uuid(owner)||!uuid(key))throw Error('invalid-install-owner-key');
     return this.transaction(()=>{
+      this.assertNoRemoval();
       const old=this.db.prepare('SELECT * FROM installs WHERE owner=? AND submission_key=?').get(owner,key);
       if(old){if(old.manifest!==verified.hash)throw Error('install-idempotency-conflict');return old;}
       if(this.db.prepare('SELECT count(*) n FROM installs').get().n>=256)throw Error('install-journal-full');
@@ -32,10 +35,13 @@ export class InstallStore {
     });
   }
   get(owner,id) {this.files.check();return this.db.prepare('SELECT * FROM installs WHERE owner=? AND id=?').get(owner,id)??null;}
+  assertNoRemoval() {this.files.check();if(this.db.prepare("SELECT id FROM removals WHERE state NOT IN ('removed','cancelled')").get())throw Error('install-removal-pending');}
+  removalPending(manifest) {this.files.check();return !!this.db.prepare("SELECT id FROM removals WHERE manifest=? AND state NOT IN ('removed','cancelled')").get(manifest);}
   claim(owner,id,identity) {
     if(!identity||!Number.isInteger(identity.pid)||identity.pid<1||!/^\d+$/.test(identity.creation))throw Error('install-process-inspection-unavailable');
     return this.transaction(()=>{
-      const row=this.get(owner,id);if(!row)throw Error('install-not-found');if(['installed','cancelled'].includes(row.state))return null;
+      this.assertNoRemoval();
+      const row=this.get(owner,id);if(!row)throw Error('install-not-found');if(row.state==='removed')throw Error('install-removed');if(['installed','cancelled'].includes(row.state))return null;
       if(this.db.prepare('SELECT * FROM writer WHERE slot=1').get())throw Error('install-destination-busy');
       const token=randomUUID();this.db.prepare('INSERT INTO writer VALUES(1,?,?,?,?)').run(id,token,identity.pid,identity.creation);return token;
     });
@@ -52,7 +58,7 @@ export class InstallStore {
   cancel(owner,id) {
     return this.transaction(()=>{
       const row=this.get(owner,id);if(!row)return null;
-      if(['installed','cancelled'].includes(row.state))return row;
+      if(['installed','cancelled','removed'].includes(row.state))return row;
       const writer=this.db.prepare('SELECT * FROM writer WHERE slot=1 AND operation=?').get(id);
       this.db.prepare('UPDATE installs SET cancel=1,state=?,updated=? WHERE owner=? AND id=?').run(writer?'cancelling':'cancelled',Date.now(),owner,id);return this.get(owner,id);
     });
@@ -69,7 +75,8 @@ export class InstallStore {
     const again=await inspect(before.pid);assertGone(again);
     return this.transaction(()=>{
       const current=this.db.prepare('SELECT * FROM writer WHERE slot=1').get();if(current?.token!==before.token)return false;
-      this.db.prepare("UPDATE installs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'interrupted' END,updated=? WHERE id=? AND state!='installed'").run(Date.now(),before.operation);
+      if(this.db.prepare('SELECT id FROM removals WHERE id=?').get(before.operation))this.db.prepare("UPDATE removals SET state='interrupted',updated=? WHERE id=? AND state!='removed'").run(Date.now(),before.operation);
+      else this.db.prepare("UPDATE installs SET state=CASE WHEN cancel=1 THEN 'cancelled' ELSE 'interrupted' END,updated=? WHERE id=? AND state!='installed'").run(Date.now(),before.operation);
       this.release(before.operation,before.token);return true;
     });
     function assertGone(identity) {

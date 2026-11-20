@@ -36,6 +36,8 @@ export class ActivationManager {
     if(fence&&(!this.worker||fence.from!==this.model?.profile||fence.target!==expected.profile||fence.ledgerIdentity!==this.worker.ledger.identity))throw Error('activation-app-fence-changed');
   }
   admit({owner,key,packageId,appFence=null}) {
+    if(this.removal?.blocking)throw Error('activation-busy');
+    if(this.removal?.removed(packageId))throw Error('activation-package-unavailable');
     if(!uuid(owner)||!uuid(key))throw Error('invalid-activation');
     if(!evaluationEnabled(this.config))throw Error('activation-package-unavailable');
     const expected=this.identity(packageId);
@@ -66,6 +68,7 @@ export class ActivationManager {
   workerConfig(model){return {stateRoot:this.files.directory('generation'),packageRoot:model.packageRoot,port:8791,secret:this.config.secret,...(model.profile?{profile:model.profile}:{})};}
   async launch(model){this.files.atomicJSON('generation/worker-config.json',this.workerConfig(model));const worker=await this.start(this.files.resolve('generation/worker-config.json'));this.model=model;return worker;}
   async restore(){
+    if(this.removal?.blocking){this.state='removal-recovery';return;}
     // Agent binding/ownership is established by bootstrap before restore. A
     // second live agent cannot listen; there is no time-based process takeover.
     this.db.prepare("UPDATE activations SET state='interrupted',error='activation-interrupted' WHERE state IN ('admitted','verifying','starting')").run();
@@ -84,7 +87,9 @@ export class ActivationManager {
     }catch{this.state='recovery-required';}finally{this.busy=false;}
   }
   async run(owner,id){
+    if(this.removal?.blocking)throw Error('activation-busy');
     const row=this.db.prepare('SELECT * FROM activations WHERE owner=? AND id=?').get(owner,id);if(!row)throw Error('activation-not-found');
+    if(row.state==='removed')throw Error('activation-no-longer-active');
     if(row.state==='installed'){const active=this.active();if(!active||active.package_id!==row.package_id||active.receipt!==row.receipt)throw Error('activation-no-longer-active');}
     if(row.state==='installed'&&this.worker){
       // A historical acknowledgement must never switch models or clear a newer
@@ -141,6 +146,7 @@ export class ActivationManager {
     }finally{this.busy=false;}
   }
   async shutdown(){
+    if(this.removal?.blocking)return this.removal.shutdown();
     if(this.busy)throw Error('activation-busy');this.stopping=true;
     try{if(this.worker){const owned=this.db.prepare('SELECT * FROM activation_guard WHERE slot=1').get(),paused=this.worker.ledger.maintenance();if(paused&&owned?.token!==paused.token)throw Error('worker-maintenance-conflict');const token=paused?.token??randomUUID();this.db.prepare("INSERT OR REPLACE INTO activation_guard VALUES(1,?,'shutdown',NULL,NULL)").run(token);if(!paused)this.worker.ledger.beginMaintenance(token,'shutdown');this.worker.ledger.assertQuiescent(token);await this.worker.close({token});this.worker=null;}this.state='stopping';}
     catch(error){this.stopping=false;throw error;}

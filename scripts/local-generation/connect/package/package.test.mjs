@@ -1,0 +1,39 @@
+// @vitest-environment node
+import {describe,it,expect,afterEach} from 'vitest';
+import {generateKeyPairSync,randomUUID} from 'node:crypto';
+import {mkdtempSync,rmSync,writeFileSync,mkdirSync,linkSync,unlinkSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {HOST_RUNTIME} from '../../host/runtime.mjs';
+import {canonical} from '../../install/manifest.mjs';
+import {validateRelease,signRelease,verifyEnvelope,releaseKeyId,safeFile,verifyPackage} from './manifest.mjs';
+import {installedPaths,openInstalledState,installationConfiguration} from './installation.mjs';
+import {COMPANION_SOURCES} from './build.mjs';
+const signing=generateKeyPairSync('rsa',{modulusLength:3072}),other=generateKeyPairSync('rsa',{modulusLength:3072});
+const pub=signing.publicKey.export({type:'spki',format:'pem'}),trust=[{id:releaseKeyId(signing.privateKey),channel:'developer',publicKey:pub}];
+const payload=()=>({schema:1,product:'kavero-connect',version:'0.1.0-dev.1',protocol:1,minimumLauncher:1,platform:'win32',arch:'x64',channel:'developer',origin:'http://127.0.0.1:3051',files:[
+ ...HOST_RUNTIME.artifacts.map(f=>({path:f.destination,bytes:f.bytes,sha256:f.sha256})),{path:'LICENSE',bytes:10,sha256:'a'.repeat(64)},{path:'scripts/local-generation/connect/package/diagnose.mjs',bytes:10,sha256:'b'.repeat(64)},
+].sort((a,b)=>a.path.toLowerCase()<b.path.toLowerCase()?-1:1)});
+const config=()=>({schema:1,installationId:randomUUID(),protocol:1,channel:'developer',origin:payload().origin});
+const roots=[];function temp(){const root=mkdtempSync(path.join(tmpdir(),'kc5a-unit-'));roots.push(root);return root;}
+afterEach(()=>{for(const root of roots.splice(0)){if(!path.resolve(root).startsWith(path.resolve(tmpdir())+path.sep)||!path.basename(root).startsWith('kc5a-unit-'))throw Error('unsafe-test-cleanup');rmSync(root,{recursive:true,force:true});}});
+describe('Companion publisher/package trust',()=>{
+ it('signs deterministic metadata with a separate externally trusted publisher key',()=>{const p=payload(),signed=signRelease(p,signing.privateKey);expect(verifyEnvelope(signed,trust,{channel:'developer'})).toEqual(p);expect(canonical(signRelease(p,signing.privateKey).payload)).toBe(canonical(signed.payload));});
+ it('does not trust a key carried alongside or inside the artifact',()=>{const signed=signRelease(payload(),other.privateKey);expect(()=>verifyEnvelope(signed,trust,{channel:'developer'})).toThrow('untrusted');expect(()=>verifyEnvelope({...signed,publicKey:pub},trust,{channel:'developer'})).toThrow();});
+ it('rejects changed payload bytes and signature',()=>{const signed=signRelease(payload(),signing.privateKey),changed={...payload(),version:'0.2.0'};expect(()=>verifyEnvelope({...signed,payload:Buffer.from(canonical(changed)).toString('base64url')},trust,{channel:'developer'})).toThrow('signature');expect(()=>verifyEnvelope({...signed,signature:'a'.repeat(512)},trust,{channel:'developer'})).toThrow();});
+ it('separates developer/release and exact origin',()=>{const signed=signRelease(payload(),signing.privateKey);expect(()=>verifyEnvelope(signed,trust)).toThrow('untrusted');expect(()=>verifyEnvelope(signed,trust,{channel:'developer',origin:'https://elsewhere.test'})).toThrow();expect(()=>validateRelease({...payload(),channel:'release'})).toThrow();});
+ it.each([{protocol:2},{minimumLauncher:2},{platform:'linux'},{arch:'arm64'},{version:'../bad'}])('rejects unsupported metadata %j',change=>expect(()=>validateRelease({...payload(),...change})).toThrow());
+ it('requires exact pinned executable and full runtime license',()=>{for(const name of ['runtime/node.exe','notices/Node-LICENSE.txt']){const p=payload();p.files.find(f=>f.path===name).sha256='0'.repeat(64);expect(()=>validateRelease(p)).toThrow();}});
+ it.each(['.env.local','models/model.gguf','data/a.sqlite','identity.dpapi','scripts/local-generation/connect/cleanup-results.mjs','node_modules/secret.js'])('rejects private or server-only content %s',name=>{const p=payload();p.files.push({path:name,bytes:1,sha256:'1'.repeat(64)});p.files.sort((a,b)=>a.path.toLowerCase()<b.path.toLowerCase()?-1:1);expect(()=>validateRelease(p)).toThrow();});
+ it('rejects duplicate case-insensitive destinations and noncanonical manifest metadata',()=>{const p=payload();p.files.push({...p.files[0],path:p.files[0].path.toUpperCase()});expect(()=>validateRelease(p)).toThrow();const s=signRelease(payload(),signing.privateKey);expect(()=>verifyEnvelope({...s,payload:Buffer.from(JSON.stringify(payload(),null,2)).toString('base64url')},trust,{channel:'developer'})).toThrow();});
+ it('rejects extra or missing package files before importing/launching',async()=>{const root=temp();writeFileSync(path.join(root,'release.json'),canonical(signRelease(payload(),signing.privateKey)));writeFileSync(path.join(root,'extra.exe'),'x');await expect(verifyPackage(root,trust,{channel:'developer'})).rejects.toThrow('extra-file');});
+ it('does not resolve traversal and hardlinked data as package inputs',()=>{const root=temp();writeFileSync(path.join(root,'file'),'x');expect(()=>safeFile(root,'../file')).toThrow();expect(safeFile(root,'file')).toBe(path.join(root,'file'));linkSync(path.join(root,'file'),path.join(root,'linked'));expect(()=>safeFile(root,'linked')).toThrow('link');expect(()=>safeFile(root,'file')).toThrow('link');});
+ it('includes runtime-facing closure but excludes builder and server administration',()=>{expect(COMPANION_SOURCES).toContain('scripts/local-generation/connect/native.mjs');expect(COMPANION_SOURCES).toContain('scripts/local-generation/host/install-runtime.mjs');expect(COMPANION_SOURCES).not.toContain('scripts/local-generation/connect/cleanup-results.mjs');expect(COMPANION_SOURCES.some(f=>f.includes('.test.')||f.endsWith('/package/build.mjs'))).toBe(false);});
+});
+describe('Version-independent installed identity',()=>{
+ it('keeps the same ledger/credentials layout across version/CWD changes',()=>{const local=temp(),c=config(),a=installedPaths(local,c),b=installedPaths(local,{...c});expect(b).toEqual(a);expect(a.hostRoot).not.toContain('0.1.0');expect(a.credentials).toContain('identity.dpapi');});
+ it('separates independent installations, origins and developer channel',()=>{const local=temp(),c=config(),a=installedPaths(local,c);expect(installedPaths(local,{...c,installationId:randomUUID()}).hostRoot).not.toBe(a.hostRoot);expect(installedPaths(local,{...c,origin:'https://other.test'}).credentials).not.toBe(a.credentials);expect(installedPaths(local,{...c,channel:'release'}).hostRoot).not.toBe(a.hostRoot);});
+ it('binds installed state immutably and rejects origin/config drift',()=>{const local=temp(),c=config(),a=openInstalledState(local,c,payload(),{protect:()=>{}});expect(openInstalledState(local,c,payload(),{protect:()=>{}}).layout).toEqual(a.layout);expect(()=>openInstalledState(local,{...c,origin:'https://other.test'},{...payload(),origin:'https://other.test'},{protect:()=>{}})).toThrow('identity-changed');});
+ it('does not recreate missing configuration over an existing installed identity',()=>{const local=temp(),c=config(),a=openInstalledState(local,c,payload(),{protect:()=>{}});unlinkSync(path.join(a.layout.root,'installation.json'));expect(()=>openInstalledState(local,c,payload(),{protect:()=>{}})).toThrow('config-missing');});
+ it('does not adopt an occupied unowned root or arbitrary paths/config',()=>{const local=temp(),c=config(),layout=installedPaths(local,c);mkdirSync(layout.root,{recursive:true});writeFileSync(path.join(layout.root,'existing-ledger'),'keep');expect(()=>openInstalledState(local,c,payload(),{protect:()=>{}})).toThrow('not-owned');expect(()=>installedPaths('relative',c)).toThrow();expect(()=>installationConfiguration({...c,secret:'no'},payload())).toThrow();expect(()=>installationConfiguration({...c,origin:'https://wrong.test'},payload())).toThrow();});
+});

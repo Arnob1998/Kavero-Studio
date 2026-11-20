@@ -14,6 +14,7 @@
     "gateway:down": "docker compose --env-file .env.local -f compose.yml -f compose.dev.yml stop litellm",
     "test:litellm-routing": "node scripts/litellm-routing-security-gate.mjs",
     "dev:ui": "next dev",
+    "dev:local": "node scripts/setup/dev-local.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

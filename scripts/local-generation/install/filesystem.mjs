@@ -1,4 +1,4 @@
-import { mkdirSync,existsSync,readdirSync,lstatSync,realpathSync,openSync,closeSync,readFileSync,writeFileSync,fsyncSync,fstatSync,constants,renameSync,unlinkSync,statfsSync } from 'node:fs';
+import { mkdirSync,existsSync,readdirSync,lstatSync,realpathSync,openSync,closeSync,readFileSync,writeFileSync,fsyncSync,fstatSync,constants,renameSync,unlinkSync,rmdirSync,statfsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { createHash,randomUUID } from 'node:crypto';
@@ -55,6 +55,23 @@ export class InstallFiles {
   }
   rename(from,to) {const source=this.resolve(from),target=this.resolve(to);renameSync(source,target);this.resolve(to);}
   remove(relative) {const filename=this.resolve(relative);if(existsSync(filename)){if(!lstatSync(filename).isFile())throw Error('unsafe-install-delete');unlinkSync(filename);}}
+  describe(relative) {
+    const filename=this.resolve(relative);if(!existsSync(filename))return null;
+    const info=lstatSync(filename);if(!info.isFile())throw Error('unsafe-install-delete');
+    return {device:info.dev,inode:info.ino,bytes:info.size,modified:info.mtimeMs};
+  }
+  removeChecked(relative,expected) {
+    const actual=this.describe(relative);if(!actual)return false;
+    if(Object.keys(actual).some(key=>actual[key]!==expected[key]))throw Error('removal-file-changed');
+    // No await between the final guarded identity check and unlink. The root
+    // ACL and single writer remain required; arbitrary user paths are excluded.
+    unlinkSync(this.resolve(relative));this.syncParent(relative);return true;
+  }
+  removeEmptyDirectory(relative) {
+    const filename=this.resolve(relative,{directory:true});if(!existsSync(filename))return true;
+    if(readdirSync(filename).length)return false;
+    rmdirSync(filename);this.syncParent(relative);return true;
+  }
   exists(relative) {return existsSync(this.resolve(relative));}
   listTree(relative,max=2048) {
     const result=[];let count=0;

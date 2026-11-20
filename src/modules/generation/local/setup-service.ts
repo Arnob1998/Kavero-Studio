@@ -6,7 +6,7 @@ import { setupOperationSchema,setupSnapshotSchema } from "./setup-contract";
 import {LocalSwitchError,switchManagedLocalPackage,reconcileLocalSwitch} from "@/modules/model-providers/local/runtime-switch";
 const packageIds=z.enum(['qwen-2-1-internal-evaluation','qwen-2-1-q3-internal-evaluation']);
 const profiles=z.enum(['qwen-image-2.1-q4-evaluation','qwen-image-2.1-q3-evaluation']);
-const operation = z.object({ id: z.string().uuid(), packageId: packageIds, state: z.enum(["admitted", "verifying", "starting", "installed", "cancelled", "failed", "interrupted"]), error: z.string().nullable() });
+const operation = z.object({ id: z.string().uuid(), packageId: packageIds, state: z.enum(["admitted", "verifying", "starting", "installed", "cancelled", "failed", "interrupted", "removed"]), error: z.string().nullable() });
 const mutation = z.discriminatedUnion("action", [
   z.object({action:z.literal("switch"),key:z.string().uuid().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i),packageId:packageIds}).strict(),
   z.object({ action: z.literal("activate"), key: z.string().uuid(), packageId: z.literal("qwen-2-1-internal-evaluation") }).strict(),

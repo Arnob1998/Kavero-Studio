@@ -20,15 +20,19 @@ export class SetupHub {
  terms(profile){return this.manager(profile).terms();}
  access(owner,profile){return this.manager(profile).access(owner);}
  permission(owner,packageId){const manager=[...this.managers.values()].find(m=>m.packageId===packageId);if(!manager)return false;
+  if(manager.installer.store.removalPending(manager.verified.hash))return false;
   const row=this.db.prepare('SELECT operation FROM setup_consents WHERE owner=? AND manifest=? AND terms=? AND purpose=? ORDER BY accepted_at DESC LIMIT 1').get(owner,manager.verified.hash,manager.verified.manifest.termsDigest,'research-evaluation');
   return !!row?.operation&&manager.installer.status(owner,row.operation)?.state==='installed';}
  async admit(body){
+  if(this.removal?.blocking)throw Error('setup-busy');
   const manager=[...this.managers.values()].find(m=>m.verified.hash===body.manifest);if(!manager)throw Error('setup-terms-changed');
   if(this.admission||[...this.managers.values()].some(m=>m!==manager&&(m.busy||m.admitting||m.pending)))throw Error('setup-busy');
   this.admission=true;try{return await manager.admit(body);}finally{this.admission=false;}
  }
  operation(owner,id){return this.forOperation(owner,id)?.operation(owner,id)??null;}
+ receipt(owner,key){const row=this.db.prepare('SELECT operation FROM setup_consents WHERE owner=? AND submission_key=?').get(owner,key);return row?.operation?this.operation(owner,row.operation):null;}
  async run(owner,id){const manager=this.forOperation(owner,id);if(!manager)throw Error('invalid-setup');
+  if(this.removal?.blocking)throw Error('setup-busy');
   if(this.admission||[...this.managers.values()].some(m=>m!==manager&&(m.busy||m.admitting||m.pending)))throw Error('setup-busy');return manager.run(owner,id);}
  cancel(owner,id){return this.forOperation(owner,id)?.cancel(owner,id)??null;}
  close(){if(this.busy||this.initializing||this.admitting||this.pending)throw Error('setup-busy');for(const manager of this.managers.values())manager.close();}

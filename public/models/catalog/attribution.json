@@ -1,0 +1,65 @@
+{
+  "description": "Publisher-provided Hugging Face account avatars. These identify publishers; they do not certify community model repositories.",
+  "assets": [
+    {
+      "publisher": "Qwen",
+      "source": "https://huggingface.co/api/avatars/Qwen",
+      "resolvedSource": "https://cdn-avatars.huggingface.co/v1/production/uploads/6215ca5692c0ecfba9186921/hrRM50-6XcdWgg2AKpENG.jpeg",
+      "path": "/models/catalog/qwen.webp",
+      "bytes": 2832,
+      "sha256": "0c74f4f564ec24d5fd552b63efd43a9a85214ab4f6c7951e53c0d4328e5967d0",
+      "retrievedAt": "2026-11-14",
+      "kind": "official-publisher-avatar"
+    },
+    {
+      "publisher": "black-forest-labs",
+      "source": "https://huggingface.co/api/avatars/black-forest-labs",
+      "resolvedSource": "https://cdn-avatars.huggingface.co/v1/production/uploads/633f7a8f4be90e06da248e0f/m5YoF33abJ09vcwFxt1Mj.png",
+      "path": "/models/catalog/black-forest-labs.webp",
+      "bytes": 2280,
+      "sha256": "e801e13ded60e19fcebb71e9017d9c87e6217135be8e45b76c301909f51dcab2",
+      "retrievedAt": "2026-11-14",
+      "kind": "official-publisher-avatar"
+    },
+    {
+      "publisher": "stabilityai",
+      "source": "https://huggingface.co/api/avatars/stabilityai",
+      "resolvedSource": "https://cdn-avatars.huggingface.co/v1/production/uploads/66798ee6b2baacfd9fc927b6/pGTbOSAjnsqwwn24PiX60.png",
+      "path": "/models/catalog/stability-ai.webp",
+      "bytes": 6320,
+      "sha256": "afc1eb6f9c7fd7c6a03461f5d08cc86291ed35347b13a5d778f8221a5ef70cc4",
+      "retrievedAt": "2026-11-14",
+      "kind": "official-publisher-avatar"
+    },
+    {
+      "publisher": "Tongyi-MAI",
+      "source": "https://huggingface.co/api/avatars/Tongyi-MAI",
+      "resolvedSource": "https://cdn-avatars.huggingface.co/v1/production/uploads/64379d79fac5ea753f1c10f3/fxHO6QoYjdv9_LTyiUD3g.jpeg",
+      "path": "/models/catalog/tongyi-mai.webp",
+      "bytes": 6150,
+      "sha256": "b33921fceef45fab79daa26a1e970bffc6a8df2d4e25bcc92212c88fca318437",
+      "retrievedAt": "2026-11-14",
+      "kind": "official-publisher-avatar"
+    },
+    {
+      "publisher": "MiniMaxAI",
+      "source": "https://huggingface.co/api/avatars/MiniMaxAI",
+      "resolvedSource": "https://cdn-avatars.huggingface.co/v1/production/uploads/676e38ad04af5bec20bc9faf/dUd-LsZEX0H_d4qefO_g6.jpeg",
+      "path": "/models/catalog/minimax.webp",
+      "bytes": 4194,
+      "sha256": "4620fb75bcb082cf052911e3e89cb956178a9ad05509539adb8e3b46d3cf0a96",
+      "retrievedAt": "2026-11-14",
+      "kind": "official-publisher-avatar"
+    },
+    {
+      "publisher": "tencent",
+      "source": "https://huggingface.co/api/avatars/tencent",
+      "resolvedSource": "https://cdn-avatars.huggingface.co/v1/production/uploads/5dd96eb166059660ed1ee413/Lp3m-XLpjQGwBItlvn69q.png",
+      "path": "/models/catalog/tencent.webp",
+      "bytes": 3098,
+      "sha256": "496ceb5200e49bc342db1dbd537d7f607c8e9b23ed2ecf45c9a8104d7fb2ae5b",
+      "retrievedAt": "2026-11-14",
+      "kind": "official-publisher-avatar"
+    }
+  ]
+}

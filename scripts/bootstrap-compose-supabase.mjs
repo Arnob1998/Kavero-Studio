@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -15,6 +14,11 @@ const requiredBuckets = [
 ];
 
 const requiredFunctions = [
+  "public.begin_local_model_removal(uuid,uuid,uuid,text,text)",
+  "public.settle_local_model_removal(uuid,uuid,uuid,boolean)",
+  "public.settle_local_model_account_removal(uuid,uuid,uuid,boolean)",
+  "public.read_local_model_removal(uuid,uuid,uuid,text)",
+  "public.refuse_local_model_removal(uuid,uuid)",
   "public.local_q3_recipe_snapshot()",
   "public.local_recipe_snapshot_supported(jsonb)",
   "public.read_local_runtime_switch(uuid,uuid,uuid)",
@@ -113,6 +117,19 @@ function isTruthySqlValue(value) {
   return value === "t" || value === "true" || value === "1";
 }
 
+export function applyConnectSetupFoundation({ query = queryScalar, apply = applySql } = {}) {
+  // Do not create/enable Connect as a side effect of normal Local bootstrap.
+  if (!isTruthySqlValue(query("select to_regclass('public.connect_devices') is not null;"))) return false;
+  if (!isTruthySqlValue(query("select to_regclass('public.connect_nonces') is not null and to_regprocedure('public.connect_rate(text,integer,integer)') is not null;"))) throw new Error('Connect identity prerequisites are incomplete.');
+  apply('Remote setup protocol', path.join(repoRoot, 'supabase', 'migrations', '202611150001_connect_setup_protocol.sql'));
+  apply('Remote setup recovery', path.join(repoRoot, 'supabase', 'migrations', '202611150002_connect_setup_recovery.sql'));
+  apply('Remote setup browser recovery', path.join(repoRoot, 'supabase', 'migrations', '202611160001_connect_setup_browser.sql'));
+  for (const signature of ['public.connect_setup_owner(uuid,text,text,jsonb)', 'public.connect_setup_device(uuid,text,text,uuid,text,jsonb)']) {
+    if (!isTruthySqlValue(query(`select to_regprocedure('${signature}') is not null and has_function_privilege('service_role','${signature}','execute') and not has_function_privilege('anon','${signature}','execute') and not has_function_privilege('authenticated','${signature}','execute');`))) throw new Error(`Remote setup function/grants are not ready: ${signature}`);
+  }
+  return true;
+}
+
 export async function fetchOk(url, init) {
   const response = await fetch(url, init);
   // These probes only need headers. Release unread bodies so the one-shot
@@ -168,6 +185,9 @@ async function main() {
   applySql("local generation recipe snapshots", path.join(repoRoot, "supabase", "migrations", "202611010001_local_generation_recipe_snapshots.sql"));
   applySql("local generation switch fencing", path.join(repoRoot, "supabase", "migrations", "202611010002_local_generation_switch_fencing.sql"));
   applySql("local generation Q3 recipe", path.join(repoRoot, "supabase", "migrations", "202611010003_local_generation_q3_recipe.sql"));
+  applySql("local model removal", path.join(repoRoot, "supabase", "migrations", "202611070001_local_model_removal.sql"));
+  applySql("account-scoped local model removal", path.join(repoRoot, "supabase", "migrations", "202611110001_local_model_account_removal.sql"));
+  applyConnectSetupFoundation();
 
   console.log("Verifying required extensions...");
   const extensions = queryScalar(

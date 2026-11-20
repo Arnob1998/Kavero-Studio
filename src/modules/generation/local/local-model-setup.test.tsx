@@ -6,6 +6,19 @@ const owner="110fce0e-22ba-4a44-a68a-6619b477ca1b",id="44697489-d22b-432b-818b-1
 const snapshot={packageId:"qwen-2-1-research-delivery-v1",manifest:localProfiles[0].manifest,termsDigest:"b".repeat(64),consentToken:"1760000000000."+"c".repeat(64),purpose:"research-evaluation",accepted:false,available:true,supported:true,ready:false,installed:false,freeBytes:100*1024**3,downloadBytes:10*1024**3,workBytes:20*1024**3,requiredFreeBytes:21*1024**3,operation:null};
 const response=(body:unknown)=>Promise.resolve(Response.json(body));
 beforeEach(()=>localStorage.clear());afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+it('starts a fresh install key after removal and clears a historical removed switch on refresh',async()=>{
+ const storage=`kavero-local-setup:${owner}`,posts:Record<string,unknown>[]=[];
+ localStorage.setItem(storage,JSON.stringify({key:id,manifest:snapshot.manifest,termsDigest:snapshot.termsDigest}));
+ localStorage.setItem(storage+':switch',JSON.stringify({key:id,id}));
+ vi.stubGlobal('fetch',vi.fn((url:string,options:RequestInit)=>{
+  if(options.method==='POST'){const body=JSON.parse(options.body as string);posts.push(body);return response({operation:{id,packageId:snapshot.packageId,state:'admitted',processedBytes:0,error:null}});}
+  if(url.includes('?id='))return response({operation:{id,packageId:localProfiles[0].packageId,state:'removed',error:null}});
+  return response({ownerId:owner,setup:{...snapshot,accepted:true,operation:{id,packageId:snapshot.packageId,state:'removed',processedBytes:0,error:null}}});
+ }));
+ render(<LocalModelSetup ownerId={owner} onAccess={vi.fn()} onReady={vi.fn()}/>);
+ fireEvent.click(await screen.findByRole('button',{name:'Start new download'}));await waitFor(()=>expect(posts).toHaveLength(1));
+ expect(posts[0].key).not.toBe(id);expect(posts[0].action).toBe('install');expect(localStorage.getItem(storage+':switch')).toBeNull();
+});
 it("does not download on mount or refresh and persists a stable key before consent submission",async()=>{
   const posts:string[]=[];vi.stubGlobal("fetch",vi.fn((url:string,options:RequestInit)=>{
     if(options.method==="POST"){expect(localStorage.getItem(`kavero-local-setup:${owner}`)).toBeTruthy();posts.push(options.body as string);return Promise.reject(Error("Lost acknowledgement"));}

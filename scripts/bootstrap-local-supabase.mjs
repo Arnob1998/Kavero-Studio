@@ -119,6 +119,9 @@ try {
   applySql({ label: "local generation jobs", filePath: path.join(repoRoot, "supabase", "migrations", "202610020001_local_generation_jobs.sql"), options });
   applySql({ label: "local generation outputs", filePath: path.join(repoRoot, "supabase", "migrations", "202610020002_local_generation_outputs.sql"), options });
   applySql({ label: "local generation saves", filePath: path.join(repoRoot, "supabase", "migrations", "202610030001_local_generation_saves.sql"), options });
+  for (const filename of ['202611010001_local_generation_recipe_snapshots.sql','202611010002_local_generation_switch_fencing.sql','202611010003_local_generation_q3_recipe.sql','202611070001_local_model_removal.sql','202611110001_local_model_account_removal.sql']) {
+    applySql({ label: filename, filePath: path.join(repoRoot, 'supabase', 'migrations', filename), options });
+  }
 
   console.log("Local Supabase foundation bootstrap completed.");
 } catch (error) {

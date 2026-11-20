@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-11-14",
+  "families": [
+    {
+      "id": "qwen-image", "name": "Qwen Image", "publisher": "Qwen", "logo": "/models/catalog/qwen.webp",
+      "description": "Image generation and editing from the Qwen family.",
+      "repositories": [
+        { "id": "Qwen/Qwen-Image-2.1", "label": "Qwen Image 2.1", "kind": "official" },
+        { "id": "Abiray/Qwen-Image-2.1-GGUF", "label": "Qwen Image 2.1 · GGUF", "kind": "community" }
+      ]
+    },
+    {
+      "id": "flux", "name": "FLUX", "publisher": "black-forest-labs", "logo": "/models/catalog/black-forest-labs.webp",
+      "description": "Image creation and editing models from Black Forest Labs.",
+      "repositories": [
+        { "id": "black-forest-labs/FLUX.2-klein-4B", "label": "FLUX.2 klein · 4B", "kind": "official" },
+        { "id": "black-forest-labs/FLUX.1-schnell", "label": "FLUX.1 schnell", "kind": "official" }
+      ]
+    },
+    {
+      "id": "stable-diffusion", "name": "Stable Diffusion", "publisher": "stabilityai", "logo": "/models/catalog/stability-ai.webp",
+      "description": "The SDXL and Stable Diffusion 3.5 image model family.",
+      "repositories": [
+        { "id": "stabilityai/stable-diffusion-xl-base-1.0", "label": "Stable Diffusion XL", "kind": "official" },
+        { "id": "stabilityai/stable-diffusion-3.5-large", "label": "Stable Diffusion 3.5 Large", "kind": "official" }
+      ]
+    },
+    {
+      "id": "z-image", "name": "Z-Image", "publisher": "Tongyi-MAI", "logo": "/models/catalog/tongyi-mai.webp",
+      "description": "The Z-Image text-to-image family from Tongyi-MAI.",
+      "repositories": [{ "id": "Tongyi-MAI/Z-Image-Turbo", "label": "Z-Image Turbo", "kind": "official" }]
+    },
+    {
+      "id": "minimax-image", "name": "MiniMax Image", "publisher": "MiniMaxAI", "logo": "/models/catalog/minimax.webp",
+      "description": "Image generation from the MiniMax H3 family.",
+      "repositories": [{ "id": "MiniMaxAI/MiniMax-H3-Image", "label": "MiniMax H3 Image", "kind": "official" }]
+    },
+    {
+      "id": "hunyuan-image", "name": "Hunyuan Image", "publisher": "tencent", "logo": "/models/catalog/tencent.webp",
+      "description": "The Hunyuan image generation family from Tencent.",
+      "repositories": [{ "id": "tencent/HunyuanImage-3.0", "label": "HunyuanImage 3.0", "kind": "official" }]
+    }
+  ]
+}

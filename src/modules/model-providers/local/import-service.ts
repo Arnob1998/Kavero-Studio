@@ -3,6 +3,9 @@ import {createClient} from "@/lib/supabase/server";
 import {localGenerationUIEnabled} from "./enabled";
 import {localHostRequest} from "./host-bridge";
 import {hubSource as source,hubModel as model,hubLicense as license,hubSnapshot as snapshot,hubList} from "./model-hub-contract";
+import {searchHuggingFace,HuggingFaceSearchError} from './hugging-face-search';
+import { remotePreviewOwner } from './connect/preview-context';
+import { RequestError } from './connect/service';
 const submission=z.object({key:z.string().uuid(),model:source.strict()}).strict();
 const reply=(body:unknown,status=200)=>Response.json(body,{status,headers:{"Cache-Control":"private, no-store"}});
 async function ownerContext(){
@@ -33,8 +36,18 @@ export async function modelImportsPOST(request:Request){
  return forward('/host/models/import',{...input,owner:ctx.owner});
 }
 export async function modelImportsGET(request:Request){
+ const remoteQuery=new URL(request.url).searchParams;
+ if(remoteQuery.has('scope')){
+  if(remoteQuery.getAll('scope').length!==1||remoteQuery.get('scope')!=='remote'||remoteQuery.get('discover')!=='1')return reply({error:'Invalid model query.'},400);
+  try{await remotePreviewOwner(request);remoteQuery.delete('scope');return reply(await searchHuggingFace(remoteQuery));}
+  catch(error){return reply({error:error instanceof RequestError||error instanceof HuggingFaceSearchError?error.message:'Remote model discovery is unavailable.'},error instanceof RequestError||error instanceof HuggingFaceSearchError?error.status:503);}
+ }
  const ctx=await ownerContext();if(ctx.response)return ctx.response;
  const query=new URL(request.url).searchParams;
+ if(query.has('discover')){
+  try{return reply(await searchHuggingFace(query));}
+  catch(error){return reply({error:error instanceof HuggingFaceSearchError?error.message:'Hugging Face is unavailable. Try again shortly.'},error instanceof HuggingFaceSearchError?error.status:503);}
+ }
  if([...query.keys()].some(k=>!['id','component','offset'].includes(k))||[...query.keys()].some(k=>query.getAll(k).length!==1))return reply({error:"Invalid model query."},400);
  const id=query.get('id'),component=query.get('component');
  if(id!==null){

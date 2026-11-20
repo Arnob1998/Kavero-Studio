@@ -44,7 +44,13 @@ pnpm install
 pnpm run setup
 ```
 
-Choose **Local Docker** in the setup wizard. If you let the wizard start Kavero, leave that terminal open. Otherwise, start it with:
+Choose **Local Docker** in the setup wizard. The CLI asks for your first image-model source: **Local models** first, **API provider**, or **Set up models later**. Local requires Windows x64; unavailable choices are shown as disabled. Next, select a supported starting local model, or choose an image provider, enter its credentials and select a starting image model. Local and setup-later paths do not require provider keys.
+
+This chooses a starting model, not an exclusive mode: choosing an API provider or setup later does not disable Local or clear existing providers. The CLI prints a model-specific **Model Hub** link. After launch, sign in and follow that link to review and set up your selection; local hardware checks, terms acceptance and downloads happen there. The current runnable local choices are Qwen Q4/Q3, while other imports are not automatically runnable. You can add models from either source, change the active model and remove configurations where supported in Model Hub. Chat models are configured independently; removing a configuration is separate from deleting downloaded files.
+
+Selecting Local requests Local enablement. To enable Local later on supported Windows, rerun setup and choose Local. If an existing disabled setting is preserved, the CLI tells you; allow updates to non-secret values when you want to change it. Starter links guide model review without automatically activating a model or overriding an existing recovery request.
+
+If you let the wizard start Kavero, leave that terminal open. Otherwise, start it with:
 
 ```bash
 pnpm setup:run
@@ -60,9 +66,13 @@ The public homepage is at `/`; the app launcher is at `/dashboard`. Local and ho
 
 On supported Windows x64 machines, **Generate → Local** offers the user-selected Qwen image research profile. Kavero checks the GPU/RAM, shows the pinned model terms, and downloads and installs the engine, model, encoder and VAE after you accept. No separate ComfyUI installation, planning model or paid provider key is needed. Initial support is one NVIDIA RTX 30/40 GPU with at least 8 GB VRAM and 16 GB RAM; other eligible GPUs have no measured timing yet. Operators can disable Local by setting `KAVERO_LOCAL_GENERATION_ENABLED=0` in `.env.docker.local` before starting the stack.
 
+For the separate Windows companion that connects a PC to a Kavero website, see [Kavero Connect](#kavero-connect-private-windows-preview).
+
 Local generation saves to the configured destination; inference on your GPU does not change that destination. The default Docker setup uses local managed storage and does not need Google sign-in. Deployments configured for Drive use a separate **Settings → Storage → Connect Drive** connection; live acceptance of local-generation Drive saves is still pending.
 
-Model Hub development now includes metadata-only imports. Operators can edit `scripts/local-generation/models.json` for supplied source entries; signed-in users can inspect public Hugging Face links through `/api/local-generation/models` on a configured local host. Imports remain private to the signed-in user and cannot overwrite supplied entries. A valid import does not enable installation or generation; the Model Hub screen and additional runnable profiles are still under development. After changing bundled host code or supplied entries, finish local jobs/inspections, stop the original launcher, then run `pnpm setup:run` again. Kavero refuses to replace a running host with different code and retains installed models and history.
+Model Hub starts with an editable popular-family collection including Qwen, FLUX, Stable Diffusion, Z-Image, MiniMax and Hunyuan. The catalog is `src/modules/model-providers/local/popular-image-models.json`; verified publisher logos are bundled under `public/models/catalog` with source/hash attribution. These are curated starting picks, not an automatic live top-six ranking. Open a family to select an official repository or a clearly labeled community package; file choices and licenses are inspected from Hugging Face on selection. **Browse Hugging Face** retains live search, task/format filters and paging, and **Add from Hugging Face** accepts custom links. Catalog inclusion does not grant compatibility: installation still requires a verified recipe, currently Qwen Q4/Q3. Local/remote GPU destination assessment is deferred. Use `pnpm.cmd dev:local` for hot reload; bundled helper code changes still require an orderly `setup:run` restart.
+
+Model Hub navigation is **Local models | Remote | Cloud providers**. Remote reuses Kavero Connect pairing/status and now has its own popular/live catalog plus **Check a model link**. Select a model destination, open a source, and explicitly check compatibility to see runtime, hardware, storage, permission and availability evidence. Remote metadata does not require the local helper; existing private Connect/origin/account gates still apply. Missing measurements remain Not verified; reported GPU totals alone do not establish candidate compatibility. A fresh matching active binding can identify an existing verified workload. This preview does not install models, grant permission, or select a generation destination. Local model details have the same check section while keeping their existing terms/setup flow. Direct entry is `/settings/models?source=remote`; `source=computers` remains an alias. Generic remote installation and missing companion measurements remain future work.
 
 ## Choose Your Setup
 
@@ -122,6 +132,30 @@ The LiteLLM service is not published to the host by default. Kavero receives onl
 `pnpm run setup` generates the local LiteLLM secrets and can collect optional server-side Gemini, OpenAI, Groq, and Ollama values for the gateway. Normal setup does not require editing `docker/litellm/config.yaml`.
 
 ### Host Development
+
+#### Windows local models with hot reload
+
+For an existing Windows Local Docker installation, keep this running in terminal 1:
+
+```bat
+pnpm.cmd setup:run
+```
+
+Stop any earlier bare `pnpm dev` process with Ctrl+C. In terminal 2, from the same project folder, run:
+
+```bat
+pnpm.cmd dev:local
+```
+
+Open **http://127.0.0.1:3001** and sign in with your existing local account. UI/API source changes reload automatically. The Docker app remains at port 3000.
+
+`dev:local` loads `.env.docker.local`, maps server connections to loopback, and authenticates the already-running private helper before starting Next.js. It needs no copied `.env.local`, PowerShell assignments, `node -e`, or `--env-file` Node flags. Helper credentials stay in the child server environment; they are not printed, put in browser variables, or written to env files. The command attaches only: stopping it leaves the original helper running. Keep terminal 1 open; bundled native/helper code changes still require an orderly launcher restart.
+
+Development uploads/saves use `.kavero/dev-storage`, separate from the Docker storage volume. Auth, model records and history metadata use the same database; existing Docker-volume image files are not accessible from this host dev process. This is not an isolated database sandbox. Use port 3000 for verifying existing stored images.
+
+Local image models do not require LiteLLM. For cloud-provider calls from the host dev server, additionally publish the gateway with `docker compose --env-file .env.docker.local -f compose.yml -f compose.dev.yml up -d litellm`; its host URL is `http://127.0.0.1:4000`.
+
+#### Host development with separately configured services
 
 Use this path when you want to run the Next.js dev server on your host machine while keeping LiteLLM in Docker as a local dependency.
 
@@ -222,12 +256,57 @@ Azure OpenAI orchestration and image generation use independent logical configur
 
 OpenAI orchestration offers stable Kavero aliases for `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
 
+## Kavero Connect (private Windows preview)
+
+Kavero Connect runs image generation on your Windows PC for a paired Kavero account. The website handles requests, downloads and Gallery saving. The companion and the website are separate applications: installing or opening Connect does not start a Kavero website or its database.
+
+Connect is currently a **private Windows x64 preview**, requiring .NET Framework 4.8 or later. macOS/Linux companions and a public installer download are not available. Fresh Windows installation, safe upgrades and public HTTPS delivery still need acceptance. The developer installer is not Windows publisher-signed; its private package signature is a separate integrity check.
+
+### Install and open
+
+Obtain `KaveroConnect-Setup.exe` from the operator of your private test deployment. When a local installer has been prepared, it is in `dist/KaveroConnect-Setup.exe`; `dist/` is generated output and is not included in a source checkout.
+
+1. Double-click **KaveroConnect-Setup.exe** in File Explorer.
+2. Click **Install on this PC** and wait for installation verification.
+3. Click **Open companion**.
+
+To open it again after closing it or restarting Windows, double-click the same installer and choose **Open companion**. The preview does not yet add a Start menu shortcut or start automatically at login. Keep the installer somewhere you can find it.
+
+The installer bundles the companion's Node.js runtime. Launching the app does not require PowerShell, pnpm or manual engine configuration. Installation does not pair an account, accept model terms or download model files.
+
+### Connect your account and prepare a model
+
+Your operator must keep a Connect-enabled Kavero website running at the address shown in the companion. Use that website to sign in; the installer is bound to its configured address.
+
+1. Open **Settings → Models (Model Hub)** on the website. Under connected computers, click **Connect computer**, enter a name and click **Get connection code**.
+2. Enter the code in the companion and click **Pair**. If the code expires, request a fresh code on the website.
+3. Compare the fingerprints shown on the website and companion. If they match, check the confirmation box on the website and click **Confirm computer**.
+4. In the companion, click **Confirm account**. Review the website, account and fingerprint before approving that account's access.
+5. Select a supported image model and click **Review & set up**. Review hardware compatibility, required disk space and all component terms. Setup begins only after you accept the displayed research/evaluation terms and click **Accept & set up**. Existing verified components are reused within the same installation.
+6. Wait for **Model ready on this PC**, then click **Resume**. The website should show the computer as **Ready**.
+
+The current Qwen research profiles target the supported Windows/NVIDIA hardware described under [Get Started](#get-started). The companion shows the selected model's actual compatibility and disk requirements. Pairing permission and model permission are separate; a paired computer is not necessarily ready to generate.
+
+### Generate, save and close
+
+On the website, open **Generate → My computer**, select your ready PC, enter a prompt and click **Create image**. The current Connect flow produces one 512 × 512 image with a prompt of up to 1,000 characters. When the result is available, use **Download PNG** or **Save to Gallery**. A paid provider key is not required for the supported local Qwen profile.
+
+Keep the website and companion online for request delivery and result transfer. **Pause** prevents new jobs while allowing accepted work and result recovery to continue. **Quit** or the window's **X** closes the companion, including when the website is unavailable, and keeps pairing, model setup and unfinished jobs for reopening. Accepted native work may continue after the window closes; Quit is not cancellation. To cancel an image, use **Cancel original job** on the website.
+
+Reopening starts paused. Keep using the same installation and browser account to recover an unfinished request, then Resume when ready. **Disconnect** is separate from Quit: it requires the website to confirm that accepted work has drained before removing the connection. **Remove app** in the installer removes companion code and retains model, result and connection data.
+
+If the website cannot be reached, restore it at the address shown in Connect. Closing a local website's terminal can stop that website; reopening the companion alone will not restart it. If setup reports another local host using the engine, finish its jobs and stop it through its original launcher before retrying. Avoid running independent Local and Connect hosts against the same GPU ports.
+
+For operators: Connect remains disabled by default in `.env.example`. Website delivery, native execution and results require their corresponding Connect gates and an origin matching the installer. Connect Gallery saving currently requires `kavero-managed` with `supabase-storage`; the default Local Docker filesystem destination does not establish Connect readiness. The current private developer artifact targets `http://127.0.0.1:3061`, while normal Local Docker runs at port `3000`. It needs a separately configured, opt-in development website at port `3061`; the installer does not redirect itself to port `3000`. HTTP loopback opt-in is development-only. This preview is not a public hosted release.
+
+The separate `KAVERO_CONNECT_SETUP_ENABLED=0` flag keeps Remote model setup disabled. The private companion and gated website controls implement native checks, destination-bound review, Download, progress, Cancel and recovery using the original request key. The companion is not updated automatically. Installed consent/download/recovery and the full private website-to-companion journey still need user-run acceptance; keep this flag off for the current preview. Existing Local model setup and Generate behavior are unchanged.
+
 ## First Run
 
 1. Open `http://127.0.0.1:3000`.
 2. Create an account.
-3. Go to Settings -> API keys.
-4. Add your AI provider key.
+3. If using a hosted AI provider, go to Settings -> API keys.
+4. Add that provider's key, or follow the Local/Connect model setup instructions for supported local generation.
 5. Open `/generate` or `/canvas`.
 
 From there, generate assets, keep them in Gallery, place them into the canvas, edit the design, and export when ready.
